@@ -767,10 +767,10 @@ mod tests {
     use crate::{
         config::RuntimePaths,
         state::{CliStatus, PersistedState},
-        test_util::env_lock,
+        test_util::{env_lock, EnvRestoreGuard},
     };
     use chrono::Utc;
-    use std::{ffi::OsString, fs, os::unix::fs::PermissionsExt, path::Path};
+    use std::{fs, os::unix::fs::PermissionsExt, path::Path};
     use tempfile::tempdir;
 
     fn write_executable_script(path: &Path, contents: &str) -> Result<()> {
@@ -789,33 +789,6 @@ mod tests {
             cache_dir: root.join("cache"),
             state_dir: root.join("state"),
             config_dir: root.join("config"),
-        }
-    }
-
-    struct EnvRestoreGuard {
-        saved: Vec<(&'static str, Option<OsString>)>,
-    }
-
-    impl EnvRestoreGuard {
-        fn capture(keys: &[&'static str]) -> Self {
-            Self {
-                saved: keys
-                    .iter()
-                    .map(|key| (*key, std::env::var_os(key)))
-                    .collect(),
-            }
-        }
-    }
-
-    impl Drop for EnvRestoreGuard {
-        fn drop(&mut self) {
-            for (key, value) in &self.saved {
-                if let Some(value) = value {
-                    std::env::set_var(key, value);
-                } else {
-                    std::env::remove_var(key);
-                }
-            }
         }
     }
 
