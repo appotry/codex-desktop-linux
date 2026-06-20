@@ -51,6 +51,7 @@ jobs:
     timeout-minutes: 10
     outputs:
       version: ${{ steps.version.outputs.version }}
+      cache_key: ${{ steps.version.outputs.cache_key }}
       should_build: ${{ steps.version.outputs.should_build }}
     steps:
       - uses: actions/checkout@v5
@@ -73,47 +74,46 @@ jobs:
         run: |
           set -euo pipefail
 
-          # 尝试从上次 Release 获取版本号
-          LAST_VER=""
-          if gh release view latest --json tagName --jq '.tagName' 2>/dev/null; then
-            LAST_VER=$(gh release view latest --json tagName --jq '.tagName' 2>/dev/null || echo "")
-          fi
+          # 版本号格式：v<日期>.<运行号>（方便识别）
+          DATE_TAG=$(date -u '+%Y%m%d')
+          RUN_NUM=${{ github.run_number }}
+          VER="${DATE_TAG}.${RUN_NUM}"
 
-          # 用 upstream metadata 作为版本标识
-          TAG="${{ steps.upstream.outputs.etag }}"
-          if [ -z "$TAG" ] || [ "$TAG" = "no-etag" ]; then
-            TAG="${{ steps.upstream.outputs.last_modified }}"
-          fi
-          # 清理特殊字符
-          VER=$(echo "$TAG" | tr -c 'a-zA-Z0-9_-' '_' | head -c 40)
+          # 用 ETag 作缓存 key（不用于版本号）
+          ETAG="${{ steps.upstream.outputs.etag }}"
+          [ -z "$ETAG" ] || [ "$ETAG" = "no-etag" ] && ETAG="${{ steps.upstream.outputs.last_modified }}"
+          CACHE_KEY=$(echo "$ETAG" | sha256sum | cut -c1-16)
 
           echo "version=$VER" >> "$GITHUB_OUTPUT"
-          echo "etag_for_cache=${{ steps.upstream.outputs.etag }}" >> "$GITHUB_OUTPUT"
+          echo "cache_key=$CACHE_KEY" >> "$GITHUB_OUTPUT"
+
+          # 判断是否需要构建
+          LAST_VER=""
+          gh release view latest --json tagName --jq '.tagName' 2>/dev/null && \
+            LAST_VER=$(gh release view latest --json tagName --jq '.tagName' 2>/dev/null || echo "")
 
           if [ "${{ github.event.inputs.force }}" = "true" ]; then
-            echo "should_build=true" >> "$GITHUB_OUTPUT"
+            echo "should_build=true"
           elif [ "${{ github.event_name }}" = "push" ]; then
-            # main 分支推送时始终构建
-            echo "should_build=true" >> "$GITHUB_OUTPUT"
+            echo "should_build=true"
           elif [ -z "$LAST_VER" ]; then
-            echo "should_build=true" >> "$GITHUB_OUTPUT"
+            echo "should_build=true"
           elif [ "$LAST_VER" != "$VER" ]; then
-            echo "should_build=true" >> "$GITHUB_OUTPUT"
+            echo "should_build=true"
           else
-            echo "should_build=false" >> "$GITHUB_OUTPUT"
-          fi
+            echo "should_build=false"
+          fi >> "$GITHUB_OUTPUT"
 
   # ============================================================
-  # 构建应用（仅 detect 判断需要构建时执行）
+  # 构建应用
   # ============================================================
   build:
     name: Build app
     needs: detect
-    if: needs.detect.outputs.should_build == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     outputs:
-      version: ${{ needs.detect.outputs.version }}
+      version: ${{ steps.build-app.outputs.version }}
 
     steps:
       - uses: actions/checkout@v5
@@ -130,7 +130,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: /tmp/codex-upstream-ci/Codex.dmg
-          key: upstream-dmg-${{ env.DMG_CACHE_SCHEMA_VERSION }}-${{ needs.detect.outputs.version }}
+          key: upstream-dmg-${{ env.DMG_CACHE_SCHEMA_VERSION }}-${{ needs.detect.outputs.cache_key }}
 
       - name: Download Codex.dmg
         if: steps.dmg-cache.outputs.cache-hit != 'true'
@@ -139,7 +139,11 @@ jobs:
           curl -fL --retry 3 -o "$UPSTREAM_DMG_PATH" "$UPSTREAM_DMG_URL"
 
       - name: Build app
-        run: make build-app DMG=/tmp/codex-upstream-ci/Codex.dmg
+        id: build-app
+        run: |
+          make build-app DMG=/tmp/codex-upstream-ci/Codex.dmg
+          # 传递版本号给下游 job
+          echo "version=${{ needs.detect.outputs.version }}" >> "$GITHUB_OUTPUT"
 
       - name: Upload app artifact
         uses: actions/upload-artifact@v4
