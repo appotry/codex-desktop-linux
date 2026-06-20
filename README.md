@@ -7,8 +7,6 @@ Electron app.
 
 🇬🇧 [English](./README.md) · 🇨🇳 [简体中文](./docs/README.zh.md)
 
-> 中文构建指南（含国内镜像加速）：[docs/LOCAL-BUILD.zh.md](./docs/LOCAL-BUILD.zh.md)
-
 The project builds native `.deb`, `.rpm`, and `.pkg.tar.zst` packages, supports
 local AppImage self-builds and Nix, and can install a local update manager that
 rebuilds future Linux packages from newer upstream DMGs.
