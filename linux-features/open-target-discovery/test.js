@@ -35,6 +35,8 @@ const collidingPathAliasBundle =
   ideOpenTargetsBundle;
 const iconResolverBundle =
   "async function c_(e,t,a){return e===`win32`?Promise.all(t.map(async e=>{let t=a?.get(e.id)??null,r=e.iconPath?e.iconPath(t):t;return{id:e.id,label:e.label,icon:await d_(r,e.icon),kind:e.kind,hidden:e.hidden,supportsSsh:e.supportsSsh}})):l_(t)}function l_(e){return e.map(({id:e,label:t,icon:n,kind:r,hidden:i,supportsSsh:a})=>({id:e,label:t,icon:n,kind:r,hidden:i,supportsSsh:a}))}async function d_(e,t){if(!e)return t;try{let r=e.toLowerCase().endsWith(`.lnk`)?await f_(e):await n.app.getFileIcon(e,{size:`normal`});return!r||r.isEmpty()?t:r.toDataURL()}catch(e){return t}}async function f_(e){return n.nativeImage.createFromPath(e)}";
+const currentIconResolverBundle =
+  "async function VN(e,t,n){return e===`win32`?Promise.all(t.map(async e=>{let t=n?.get(e.id)??null,r=e.iconPath?e.iconPath(t):t;return{id:e.id,label:e.label,icon:await WN(r,e.icon),kind:e.kind,hidden:e.hidden,supportsSsh:e.supportsSsh}})):HN(t)}function HN(e){return e.map(({id:e,label:t,icon:n,kind:r,hidden:i,supportsSsh:a})=>({id:e,label:t,icon:n,kind:r,hidden:i,supportsSsh:a}))}async function WN(e,t){if(!e)return t;try{let r=e.toLowerCase().endsWith(`.lnk`)?await UN(e):await n.app.getFileIcon(e,{size:`normal`});return!r||r.isEmpty()?t:r.toDataURL()}catch(e){return t}}async function UN(e){return n.nativeImage.createFromPath(e)}";
 
 function applyPatchTwice(patchFn, source, ...args) {
   const patched = patchFn(source, ...args);
@@ -244,6 +246,45 @@ test("open-target discovery finds IDEs from desktop entries", () => {
     assert.ok(fleet);
     assert.equal(fleet.command, editorCommand);
     assert.deepEqual(fleet.args(projectFile), ["--goto", projectFile]);
+  });
+});
+
+test("open-target discovery finds Linuxbrew VS Code outside GUI PATH", () => {
+  withTempDir((tmp) => {
+    const dataHome = path.join(tmp, "share");
+    const appsDir = path.join(dataHome, "applications");
+    const emptyBin = path.join(tmp, "empty-bin");
+    const linuxbrewPrefix = path.join(tmp, "linuxbrew", ".linuxbrew");
+    const code = makeExecutable(path.join(linuxbrewPrefix, "bin"), "code");
+    fs.mkdirSync(appsDir, { recursive: true });
+    fs.mkdirSync(emptyBin, { recursive: true });
+    fs.writeFileSync(
+      path.join(appsDir, "code.desktop"),
+      [
+        "[Desktop Entry]",
+        "Type=Application",
+        "Name=Visual Studio Code",
+        "Exec=code --reuse-window %U",
+        "Categories=Development;IDE;",
+      ].join("\n"),
+    );
+
+    const targets = evaluatePatched(
+      openTargetsBundle,
+      {
+        HOME: tmp,
+        PATH: emptyBin,
+        HOMEBREW_PREFIX: linuxbrewPrefix,
+        XDG_DATA_HOME: dataHome,
+        XDG_DATA_DIRS: path.join(tmp, "empty"),
+      },
+      "Xg.flatMap((target)=>{let platform=target.platforms.linux;return platform?[{id:target.id,label:platform.label,command:platform.detect?.()}]:[]})",
+    );
+
+    const vscode = targets.find((target) => target.id === "vscode");
+    assert.ok(vscode);
+    assert.equal(vscode.command, code);
+    assert.equal(targets.some((target) => target.id === "linux-desktop-code"), false);
   });
 });
 
@@ -711,6 +752,47 @@ test("open-target discovery resolves iconPath on Linux", async () => {
   );
 
   assert.equal(result[0].icon, "data:image/png;base64,codex");
+});
+
+test("open-target discovery resolves iconPath on current upstream bundle shape", async () => {
+  const patched = applyPatchTwice(applyMainBundlePatch, `${mainBundlePrefix}${currentIconResolverBundle}`);
+  const iconPath = "/tmp/codex-current-icon.svg";
+  const image = {
+    isEmpty: () => false,
+    toDataURL: () => "data:image/svg+xml;base64,codex",
+  };
+  const electron = {
+    app: {
+      getFileIcon: async () => {
+        throw new Error("should prefer nativeImage for image files");
+      },
+    },
+    nativeImage: {
+      createFromPath: (target) => {
+        assert.equal(target, iconPath);
+        return image;
+      },
+    },
+  };
+  const targets = [
+    {
+      id: "linux-desktop-agent",
+      label: "Agent",
+      icon: "apps/terminal.png",
+      kind: "editor",
+      iconPath: () => iconPath,
+    },
+  ];
+
+  assert.match(patched, /return\(e===`win32`\|\|e===`linux`\)\?Promise\.all/);
+  assert.match(patched, /function codexLinuxOpenTargetIconImage/);
+  const result = await new Function("require", "process", `${patched};return VN('linux', arguments[2], new Map());`)(
+    (name) => (name === "electron" ? electron : require(name)),
+    { platform: "linux", env: {} },
+    targets,
+  );
+
+  assert.equal(result[0].icon, "data:image/svg+xml;base64,codex");
 });
 
 test("open-target discovery respects hidden desktop entry overrides", () => {

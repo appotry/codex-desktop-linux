@@ -132,7 +132,8 @@ function insertOpenTargetHelpers(currentSource, insertionIndex, { fsVar, pathVar
   const helpers =
     `function codexLinuxNodeFs(){return require(\`node:fs\`)}` +
     `function codexLinuxNodePath(){return require(\`node:path\`)}` +
-    `function codexLinuxFindExecutable(e){if(process.platform!==\`linux\`||!e)return null;let t=process.env.PATH||\`\`;for(let n of t.split(\`:\`)){if(!n||!${pathVar}.isAbsolute(n))continue;let r=(0,${pathVar}.join)(n,e);try{if((0,${fsVar}.existsSync)(r)){let e=(0,${fsVar}.statSync)(r);if(e.isFile())try{(0,${fsVar}.accessSync)(r,${fsVar}.constants.X_OK);return r}catch{}}}catch{}}return null}` +
+    `function codexLinuxExecutableSearchDirs(){if(process.platform!==\`linux\`)return[];let e=process.env.HOME||\`/nonexistent\`,t=[];for(let e of [process.env.HOMEBREW_PREFIX,process.env.LINUXBREW_PREFIX])e&&${pathVar}.isAbsolute(e)&&t.push((0,${pathVar}.join)(e,\`bin\`));let n=process.env.PATH||\`\`;for(let e of n.split(\`:\`))e&&${pathVar}.isAbsolute(e)&&t.push(e);t.push((0,${pathVar}.join)(e,\`.local/bin\`),(0,${pathVar}.join)(e,\`bin\`),(0,${pathVar}.join)(e,\`.linuxbrew/bin\`),(0,${pathVar}.join)(e,\`.local/share/JetBrains/Toolbox/scripts\`),(0,${pathVar}.join)(e,\`.local/share/flatpak/exports/bin\`),\`/home/linuxbrew/.linuxbrew/bin\`,\`/var/home/linuxbrew/.linuxbrew/bin\`);let r=new Set;return t.filter(e=>e&&${pathVar}.isAbsolute(e)&&!r.has(e)&&(r.add(e),!0))}` +
+    `function codexLinuxFindExecutable(e){if(process.platform!==\`linux\`||!e)return null;for(let t of codexLinuxExecutableSearchDirs()){let n=(0,${pathVar}.join)(t,e);try{if((0,${fsVar}.existsSync)(n)){let e=(0,${fsVar}.statSync)(n);if(e.isFile())try{(0,${fsVar}.accessSync)(n,${fsVar}.constants.X_OK);return n}catch{}}}catch{}}return null}` +
     `function codexLinuxResolveExistingTarget(e){if(typeof e!==\`string\`||e.length===0)return null;let t=e;for(;;){try{if((0,${fsVar}.existsSync)(t))return t}catch{}let n=(0,${pathVar}.dirname)(t);if(n===t)return null;t=n}}` +
     `function codexLinuxShouldDropXdgConfigHome(e){let t=e.XDG_CONFIG_HOME,n=e.CODEX_ELECTRON_USER_DATA_DIR;if(typeof t!==\`string\`)return!1;if(typeof n===\`string\`&&t===(0,${pathVar}.join)((0,${pathVar}.dirname)(n),\`xdg-config\`))return!0;let r=e.CODEX_LINUX_APP_ID;return!!(r&&t.endsWith(\`/\${r}/xdg-config\`))}` +
     `function codexLinuxOpenTargetEnv(){let e={...process.env};codexLinuxShouldDropXdgConfigHome(e)&&delete e.XDG_CONFIG_HOME;for(let t of [\`NODE_OPTIONS\`,\`NODE_PATH\`,\`NODE_REPL_EXTERNAL_MODULE\`,\`ELECTRON_RUN_AS_NODE\`,\`ELECTRON_NO_ASAR\`,\`ELECTRON_ENABLE_LOGGING\`,\`VSCODE_NODE_OPTIONS\`,\`VSCODE_NODE_REPL_EXTERNAL_MODULE\`,\`npm_config_node_options\`,\`NPM_CONFIG_NODE_OPTIONS\`,\`CHROME_DESKTOP\`,\`ELECTRON_RENDERER_URL\`,\`CODEX_ELECTRON_RESOURCES_PATH\`,\`CODEX_ELECTRON_USER_DATA_DIR\`,\`CODEX_LINUX_APP_ID\`,\`CODEX_LINUX_APP_DISPLAY_NAME\`,\`CODEX_LINUX_WEBVIEW_PORT\`])delete e[t];return e}` +
@@ -410,18 +411,17 @@ function applyIdeDiscoveryPatch(currentSource, deps) {
 }
 
 function applyLinuxIconPathResolutionPatch(currentSource) {
-  if (!currentSource.includes("iconPath?") || !currentSource.includes("async function d_(")) {
+  if (!currentSource.includes("iconPath?")) {
     return currentSource;
   }
 
   let patchedSource = currentSource;
-  const linuxIconPlatformNeedle = "return(e===`win32`||e===`linux`)?Promise.all";
-  if (!patchedSource.includes(linuxIconPlatformNeedle)) {
-    const win32IconPlatformNeedle = "return e===`win32`?Promise.all";
-    if (patchedSource.includes(win32IconPlatformNeedle)) {
+  if (!/return\([A-Za-z_$][\w$]*===`win32`\|\|[A-Za-z_$][\w$]*===`linux`\)\?Promise\.all/u.test(patchedSource)) {
+    const gateMatch = patchedSource.match(/return ([A-Za-z_$][\w$]*)===`win32`\?Promise\.all/u);
+    if (gateMatch != null) {
       patchedSource = patchedSource.replace(
-        win32IconPlatformNeedle,
-        linuxIconPlatformNeedle,
+        gateMatch[0],
+        `return(${gateMatch[1]}===\`win32\`||${gateMatch[1]}===\`linux\`)?Promise.all`,
       );
     } else {
       warn("Could not find open target icon platform gate");
@@ -429,19 +429,23 @@ function applyLinuxIconPathResolutionPatch(currentSource) {
   }
 
   if (!patchedSource.includes("codexLinuxOpenTargetIconImage(")) {
-    const iconResolverNeedle =
-      "let r=e.toLowerCase().endsWith(`.lnk`)?await f_(e):await n.app.getFileIcon(e,{size:`normal`});return!r||r.isEmpty()?t:r.toDataURL()";
-    if (patchedSource.includes(iconResolverNeedle)) {
+    const resolverMatch = patchedSource.match(
+      /let ([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\.toLowerCase\(\)\.endsWith\(`\.lnk`\)\?await ([A-Za-z_$][\w$]*)\(\2\):await ([A-Za-z_$][\w$]*)\.app\.getFileIcon\(\2,\{size:`normal`\}\);return!\1\|\|\1\.isEmpty\(\)\?([A-Za-z_$][\w$]*):\1\.toDataURL\(\)/u,
+    );
+    if (resolverMatch != null) {
+      const [resolverNeedle, imageVar, pathArg, lnkResolver, electronVar, fallbackVar] = resolverMatch;
       patchedSource = patchedSource.replace(
-        iconResolverNeedle,
-        "let r=codexLinuxOpenTargetIconImage(e)??(e.toLowerCase().endsWith(`.lnk`)?await f_(e):await n.app.getFileIcon(e,{size:`normal`}));return!r||r.isEmpty()?t:r.toDataURL()",
+        resolverNeedle,
+        `let ${imageVar}=codexLinuxOpenTargetIconImage(${pathArg})??(${pathArg}.toLowerCase().endsWith(\`.lnk\`)?await ${lnkResolver}(${pathArg}):await ${electronVar}.app.getFileIcon(${pathArg},{size:\`normal\`}));return!${imageVar}||${imageVar}.isEmpty()?${fallbackVar}:${imageVar}.toDataURL()`,
       );
-      const resolverIndex = patchedSource.indexOf("async function d_(");
+      const resolverIndex = patchedSource.lastIndexOf("async function ", resolverMatch.index);
       if (resolverIndex >= 0) {
         patchedSource =
           patchedSource.slice(0, resolverIndex) +
-          "function codexLinuxOpenTargetIconImage(e){if(process.platform!==`linux`||typeof e!==`string`||!/\\.(png|svg|jpe?g|bmp|ico)$/iu.test(e))return null;try{let t=n.nativeImage.createFromPath(e);return t.isEmpty()?null:t}catch{return null}}" +
+          `function codexLinuxOpenTargetIconImage(e){if(process.platform!==\`linux\`||typeof e!==\`string\`||!/\\.(png|svg|jpe?g|bmp|ico)$/iu.test(e))return null;try{let t=${electronVar}.nativeImage.createFromPath(e);return t.isEmpty()?null:t}catch{return null}}` +
           patchedSource.slice(resolverIndex);
+      } else {
+        warn("Could not find open target icon resolver declaration");
       }
     } else {
       warn("Could not find open target icon resolver");
