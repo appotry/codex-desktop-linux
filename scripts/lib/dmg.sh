@@ -177,6 +177,14 @@ get_dmg() {
 
     # Reuse existing DMG only when it still matches upstream metadata.
     if [ -s "$dmg_dest" ]; then
+        # CODEX_DMG_FORCE_CACHE=1 skips remote freshness check entirely.
+        # Useful for air-gapped builds or when upstream CDN is unreachable.
+        if [ "${CODEX_DMG_FORCE_CACHE:-0}" = "1" ]; then
+            info "Using cached DMG (forced): $dmg_dest ($(du -h "$dmg_dest" | cut -f1))"
+            echo "$dmg_dest"
+            return
+        fi
+
         DMG_REMOTE_FINGERPRINT=""
         if cached_dmg_is_fresh "$dmg_dest" "$metadata_path" "$DMG_URL"; then
             info "Using cached DMG: $dmg_dest ($(du -h "$dmg_dest" | cut -f1))"
