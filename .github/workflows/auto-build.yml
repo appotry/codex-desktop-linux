@@ -1,0 +1,229 @@
+# codex-desktop-linux 自动构建
+#
+# 功能：
+#   1. 每日检测上游 Codex.dmg 是否有新版本
+#   2. 只有版本变化时才重新构建（避免无效构建）
+#   3. 版本号沿用 Codex 官方版本
+#   4. 自动发布 .deb 到 GitHub Releases
+#
+# 上游项目：https://github.com/ilysenko/codex-desktop-linux
+# Fork 维护：https://github.com/appotry/codex-desktop-linux
+
+name: Auto Build & Release
+
+on:
+  schedule:
+    - cron: '0 6 * * *'     # 每天 6:00 UTC 检查
+  workflow_dispatch:          # 手动触发
+    inputs:
+      force:
+        description: '强制构建（忽略版本检测）'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  UPSTREAM_DMG_URL: https://persistent.oaistatic.com/codex-app-prod/Codex.dmg
+  UPSTREAM_DMG_PATH: /tmp/codex-upstream-ci/Codex.dmg
+  DMG_CACHE_SCHEMA_VERSION: v2
+  CACHE_DIR: /tmp/codex-desktop-cache
+
+jobs:
+  check-and-build:
+    name: Build Codex Desktop
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    outputs:
+      version: ${{ steps.detect-version.outputs.version }}
+      should_build: ${{ steps.detect-version.outputs.should_build }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Install build dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libssl-dev
+          bash scripts/install-deps.sh
+
+      # ============================================================
+      # 步骤 1：检测上游版本
+      # ============================================================
+      - name: Capture upstream DMG metadata
+        id: upstream-metadata
+        run: |
+          set -euo pipefail
+          headers_file="$(mktemp)"
+          trap 'rm -f "$headers_file"' EXIT
+          curl -fsSLI "$UPSTREAM_DMG_URL" > "$headers_file"
+
+          last_modified="$(awk 'tolower($0) ~ /^last-modified:/ {sub(/\r$/,""); sub(/^[^:]+: /,""); print; exit}' "$headers_file")"
+          etag="$(awk 'tolower($0) ~ /^etag:/ {sub(/\r$/,""); sub(/^[^:]+: /,""); gsub(/"/,""); print; exit}' "$headers_file")"
+          content_length="$(awk 'tolower($0) ~ /^content-length:/ {sub(/\r$/,""); sub(/^[^:]+: /,""); print; exit}' "$headers_file")"
+
+          [ -n "$last_modified" ] || last_modified="unknown"
+          [ -n "$etag" ] || etag="no-etag"
+          [ -n "$content_length" ] || content_length="unknown"
+          cache_segment="$(printf '%s|%s|%s\n' "$last_modified" "$etag" "$content_length" | sha256sum | cut -d' ' -f1)"
+
+          {
+            echo "last_modified=$last_modified"
+            echo "etag=$etag"
+            echo "content_length=$content_length"
+            echo "cache_segment=$cache_segment"
+          } >> "$GITHUB_OUTPUT"
+
+      # ============================================================
+      # 步骤 2：缓存 DMG（按版本 hash）
+      # ============================================================
+      - name: Restore cached upstream DMG
+        id: dmg-cache
+        uses: actions/cache@v4
+        with:
+          path: /tmp/codex-upstream-ci/Codex.dmg
+          key: upstream-dmg-${{ env.DMG_CACHE_SCHEMA_VERSION }}-${{ steps.upstream-metadata.outputs.cache_segment }}
+
+      - name: Download upstream DMG
+        if: steps.dmg-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p "$(dirname "$UPSTREAM_DMG_PATH")"
+          curl -fL --retry 3 -o "$UPSTREAM_DMG_PATH" "$UPSTREAM_DMG_URL"
+
+      # ============================================================
+      # 步骤 3：检测 Codex 版本号
+      # ============================================================
+      - name: Extract Codex version from DMG
+        id: detect-version
+        run: |
+          set -euo pipefail
+
+          # 从 DMG 中提取 Electron 版本 → 作为 Codex Desktop 版本标识
+          EXTRACT_DIR="/tmp/codex-extract"
+          mkdir -p "$EXTRACT_DIR"
+          7z x -y "$UPSTREAM_DMG_PATH" -o"$EXTRACT_DIR" > /dev/null 2>&1 || true
+
+          # 找到 Codex.app 中的 package.json
+          PKG_JSON=$(find "$EXTRACT_DIR" -path "*/Codex.app/Contents/Resources/app.asar" -o -path "*/Codex.app/Contents/Resources/app" 2>/dev/null | head -1)
+          # 尝试从 electron package.json 获取版本
+          ELECTRON_PKG=$(find "$EXTRACT_DIR" -path "*/electron/dist/electron" -o -path "*/Electron.app" 2>/dev/null | head -1)
+
+          # 从 asar 中提取版本信息
+          if command -v node &>/dev/null && [ -f "$EXTRACT_DIR/Codex.app/Contents/Resources/app.asar" ]; then
+            # 用 node 解包 asar 读版本
+            npm install -g @electron/asar > /dev/null 2>&1 || true
+            ASAR_EXTRACT="/tmp/asar-extract"
+            mkdir -p "$ASAR_EXTRACT"
+            asar extract "$EXTRACT_DIR/Codex.app/Contents/Resources/app.asar" "$ASAR_EXTRACT" 2>/dev/null || true
+            if [ -f "$ASAR_EXTRACT/package.json" ]; then
+              CODEX_VERSION=$(node -e "console.log(JSON.parse(require('fs').readFileSync('$ASAR_EXTRACT/package.json','utf8')).version || '0.0.0')" 2>/dev/null || echo "0.0.0")
+            fi
+          fi
+
+          # 如果版本为空，用 DMG hash 前 8 位
+          if [ -z "${CODEX_VERSION:-}" ] || [ "$CODEX_VERSION" = "0.0.0" ]; then
+            CODEX_VERSION="$(sha256sum "$UPSTREAM_DMG_PATH" | cut -c1-8)"
+          fi
+
+          # 生成 cache key 用于后续缓存
+          CACHE_KEY="$CODEX_VERSION"
+
+          # 获取上次构建的版本
+          LAST_VERSION=""
+          if gh release view latest --json tagName --jq '.tagName' 2>/dev/null; then
+            LAST_VERSION=$(gh release view latest --json tagName --jq '.tagName' 2>/dev/null || echo "")
+          fi
+
+          echo "version=$CODEX_VERSION" >> "$GITHUB_OUTPUT"
+          echo "codex_version=$CODEX_VERSION" >> "$GITHUB_OUTPUT"
+
+          # 判断是否需要构建
+          if [ "${{ github.event.inputs.force }}" = "true" ]; then
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
+            echo "reason=手动触发"
+          elif [ -z "$LAST_VERSION" ]; then
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
+            echo "reason=首次构建"
+          elif [ "$LAST_VERSION" != "$CODEX_VERSION" ]; then
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
+            echo "reason=版本变化: $LAST_VERSION → $CODEX_VERSION"
+          else
+            echo "should_build=false" >> "$GITHUB_OUTPUT"
+            echo "reason=版本无变化 ($CODEX_VERSION)"
+          fi
+
+          echo "CODEX_VERSION=$CODEX_VERSION" >> "$GITHUB_ENV"
+
+      - name: Skip if version unchanged
+        if: steps.detect-version.outputs.should_build == 'false'
+        run: |
+          echo "## ✅ 跳过构建" >> "$GITHUB_STEP_SUMMARY"
+          echo "Codex 版本无变化 ($${{ steps.detect-version.outputs.version }})，跳过构建。" >> "$GITHUB_STEP_SUMMARY"
+
+      # ============================================================
+      # 步骤 4：构建
+      # ============================================================
+      - name: Build app
+        if: steps.detect-version.outputs.should_build == 'true'
+        run: |
+          make build-app DMG=/tmp/codex-upstream-ci/Codex.dmg
+        env:
+          CODEX_MANAGED_NODE_SOURCE: ""
+          CODEX_ELECTRON_ZIP_SOURCE: ""
+
+      - name: Package .deb
+        if: steps.detect-version.outputs.should_build == 'true'
+        run: |
+          PACKAGE_VERSION="${{ steps.detect-version.outputs.version }}"
+          make deb PACKAGE_VERSION="$PACKAGE_VERSION"
+
+      - name: Upload .deb as artifact
+        if: steps.detect-version.outputs.should_build == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: codex-desktop-${{ steps.detect-version.outputs.version }}
+          path: dist/*.deb
+          retention-days: 7
+
+      # ============================================================
+      # 步骤 5：发布 Release
+      # ============================================================
+      - name: Create Release
+        if: steps.detect-version.outputs.should_build == 'true'
+        id: create-release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.detect-version.outputs.version }}
+          name: "Codex Desktop Linux ${{ steps.detect-version.outputs.version }}"
+          body: |
+            ## Codex Desktop Linux ${{ steps.detect-version.outputs.version }}
+
+            - 上游 Codex 版本: `${{ steps.detect-version.outputs.version }}`
+            - DMG 最后更新: `${{ steps.upstream-metadata.outputs.last_modified }}`
+            - 构建时间: $(date -u '+%Y-%m-%d %H:%M UTC')
+            - 架构: x86_64
+
+            ### 安装
+
+            ```bash
+            sudo dpkg -i codex-desktop_*.deb
+            # 或直接运行
+            /opt/codex-desktop/start.sh
+            ```
+
+            > 首次启动需安装 Codex CLI：`npm install -g @openai/codex`
+            > 详细说明见 [README](https://github.com/appotry/codex-desktop-linux#readme)
+          files: dist/*.deb
+          draft: false
+          prerelease: false
+          make_latest: true
