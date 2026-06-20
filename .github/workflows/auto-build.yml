@@ -231,12 +231,10 @@ jobs:
       - name: Build app
         run: make build-app DMG=/tmp/codex-upstream-ci/Codex.dmg
 
-      - name: Install appimagetool
+      - name: Download appimagetool
         run: |
-          wget -q "https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-$(uname -m).AppImage" -O /tmp/appimagetool
-          chmod +x /tmp/appimagetool
-          /tmp/appimagetool --appimage-extract > /dev/null 2>&1
-          sudo mv squashfs-root/AppRun /usr/local/bin/appimagetool
+          wget -q "https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-$(uname -m).AppImage" -O /tmp/appimagetool.AppImage
+          chmod +x /tmp/appimagetool.AppImage
 
       - name: Get version
         id: ver
@@ -245,6 +243,8 @@ jobs:
 
       - name: Build AppImage
         run: |
+          APPIMAGETOOL=/tmp/appimagetool.AppImage \
+          APPIMAGE_EXTRACT_AND_RUN=1 \
           PACKAGE_VERSION="${{ steps.ver.outputs.version }}" \
             ./scripts/build-appimage.sh
 
