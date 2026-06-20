@@ -125,14 +125,6 @@ jobs:
       - name: Build app
         run: make build-app DMG=/tmp/codex-upstream-ci/Codex.dmg
 
-      - name: Upload built app for downstream packaging
-        if: matrix.package == 'deb'
-        uses: actions/upload-artifact@v4
-        with:
-          name: codex-app
-          path: codex-app
-          retention-days: 1
-
       # ---- 打包 ----
       - name: Build ${{ matrix.package }} package
         run: |
@@ -147,22 +139,15 @@ jobs:
           retention-days: 90
 
   # ============================================================
-  # Pacman 包（Docker Arch Linux，不阻塞 release）
+  # Pacman 包（Docker Arch Linux，自包含构建）
   # ============================================================
   package-pacman:
     name: Build Pacman Package
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     continue-on-error: true
-    needs: [build-and-package]
     steps:
       - uses: actions/checkout@v5
-
-      - name: Download built app
-        uses: actions/download-artifact@v4
-        with:
-          name: codex-app
-          path: .
 
       - name: Get version
         id: ver
@@ -173,16 +158,26 @@ jobs:
         run: |
           docker run --rm \
             -e PACKAGE_VERSION="${{ steps.ver.outputs.version }}" \
+            -e UPSTREAM_DMG_URL="${{ env.UPSTREAM_DMG_URL }}" \
             -v "$PWD:/work" -w /work \
             archlinux:base-devel \
             bash -lc '
+              set -euo pipefail
               pacman -Syu --noconfirm --needed rust nodejs npm zstd sudo p7zip curl unzip
               useradd -m builder
               chown -R builder:builder /work
               runuser -u builder -- bash -lc "
                 set -euo pipefail
+                cd /work
+                # Download upstream DMG
+                mkdir -p /tmp/codex-upstream-ci
+                curl -fL --retry 3 -o /tmp/codex-upstream-ci/Codex.dmg \"\$UPSTREAM_DMG_URL\"
+                # Build app
+                make build-app DMG=/tmp/codex-upstream-ci/Codex.dmg
+                # Build updater
                 cargo build --release -p codex-update-manager
-                PACKAGE_VERSION=\"$PACKAGE_VERSION\" ./scripts/build-pacman.sh
+                # Build pacman package
+                ./scripts/build-pacman.sh
               "
             '
 
@@ -194,22 +189,47 @@ jobs:
           retention-days: 90
 
   # ============================================================
-  # AppImage 包（不阻塞 release）
+  # AppImage 包（从 DMG 缓存构建）
   # ============================================================
   package-appimage:
     name: Build AppImage
     runs-on: ubuntu-latest
     timeout-minutes: 60
     continue-on-error: true
-    needs: [build-and-package]
     steps:
       - uses: actions/checkout@v5
 
-      - name: Download built app
-        uses: actions/download-artifact@v4
+      - name: Install build dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libssl-dev
+          bash scripts/install-deps.sh
+
+      - name: Detect upstream DMG cache key
+        id: dmg-key
+        run: |
+          hf="$(mktemp)"; trap 'rm -f "$hf"' EXIT
+          curl -fsSLI "$UPSTREAM_DMG_URL" > "$hf"
+          et="$(awk 'tolower($0)~/^etag:/{sub(/\r$/,"");sub(/^[^:]+: /,"");gsub(/"/,"");print;exit}' "$hf")"
+          lm="$(awk 'tolower($0)~/^last-modified:/{sub(/\r$/,"");sub(/^[^:]+: /,"");print;exit}' "$hf")"
+          echo "cache_key=$(echo "${et:-$lm}" | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Codex.dmg
+        id: dmg-cache
+        uses: actions/cache@v4
         with:
-          name: codex-app
-          path: .
+          path: /tmp/codex-upstream-ci/Codex.dmg
+          key: upstream-dmg-${{ env.DMG_CACHE_SCHEMA_VERSION }}-${{ steps.dmg-key.outputs.cache_key }}
+
+      - name: Download Codex.dmg
+        if: steps.dmg-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p "$(dirname "$UPSTREAM_DMG_PATH")"
+          curl -fL --retry 3 -o "$UPSTREAM_DMG_PATH" "$UPSTREAM_DMG_URL"
+
+      - name: Build app
+        run: make build-app DMG=/tmp/codex-upstream-ci/Codex.dmg
 
       - name: Install appimagetool
         run: |
