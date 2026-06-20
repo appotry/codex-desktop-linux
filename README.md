@@ -5,6 +5,10 @@ The official Codex app is available for macOS and Windows; this repository
 covers Linux by converting the upstream macOS `Codex.dmg` into a runnable Linux
 Electron app.
 
+🇬🇧 [English](./README.md) · 🇨🇳 [简体中文](./docs/README.zh.md)
+
+> 中文构建指南（含国内镜像加速）：[docs/LOCAL-BUILD.zh.md](./docs/LOCAL-BUILD.zh.md)
+
 The project builds native `.deb`, `.rpm`, and `.pkg.tar.zst` packages, supports
 local AppImage self-builds and Nix, and can install a local update manager that
 rebuilds future Linux packages from newer upstream DMGs.
@@ -233,17 +237,6 @@ Full list: [Troubleshooting](docs/troubleshooting.md).
 - [GitHub CLI auth in app-launched shells](docs/github-cli-auth.md)
 - [Linux Features architecture](docs/linux-features-architecture.md)
 - [Webview server evaluation](docs/webview-server-evaluation.md)
-
----
-
-## 🌐 多语言 / Multi-Language
-
-[![zh](https://img.shields.io/badge/文档-中文-blue)](docs/README.zh.md)
-[![en](https://img.shields.io/badge/docs-English-green)](README.md)
-
-- **English**: [README.md](README.md) — Project description and build guide
-- **中文**: [docs/README.zh.md](docs/README.zh.md) — 项目说明（完整翻译版）
-- **中文构建指南**: [docs/LOCAL-BUILD.zh.md](docs/LOCAL-BUILD.zh.md) — 国内网络环境构建步骤
 
 ## Disclaimer
 
