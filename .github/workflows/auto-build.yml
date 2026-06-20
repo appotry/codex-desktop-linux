@@ -5,11 +5,7 @@
 #   - 每日 6:00 UTC 检测上游更新
 #   - 手动触发 (workflow_dispatch)
 #
-# 版本检测：通过 DMG 的 ETag/Last-Modified 判断上游是否更新
-# 构建产物：.deb / .rpm / .pkg.tar.zst
-#
-# 上游项目：https://github.com/ilysenko/codex-desktop-linux
-# Fork 维护：https://github.com/appotry/codex-desktop-linux
+# 构建策略：同一 job 内完成 build + package，避免 artifact 传递问题
 
 name: Auto Build & Release
 
@@ -43,77 +39,20 @@ env:
 
 jobs:
   # ============================================================
-  # 检测上游版本 / 决定是否构建
+  # 构建 + 打包（统一 job，避免 artifact 传递）
   # ============================================================
-  detect:
-    name: Check upstream version
+  build-and-package:
+    name: Build & Package
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-    outputs:
-      version: ${{ steps.version.outputs.version }}
-      cache_key: ${{ steps.version.outputs.cache_key }}
-      should_build: ${{ steps.version.outputs.should_build }}
-    steps:
-      - uses: actions/checkout@v5
+    timeout-minutes: 120
 
-      - name: Capture upstream DMG metadata
-        id: upstream
-        run: |
-          set -euo pipefail
-          hf="$(mktemp)"; trap 'rm -f "$hf"' EXIT
-          curl -fsSLI "$UPSTREAM_DMG_URL" > "$hf"
-          lm="$(awk 'tolower($0)~/^last-modified:/{sub(/\r$/,"");sub(/^[^:]+: /,"");print;exit}' "$hf")"
-          et="$(awk 'tolower($0)~/^etag:/{sub(/\r$/,"");sub(/^[^:]+: /,"");gsub(/"/,"");print;exit}' "$hf")"
-          cl="$(awk 'tolower($0)~/^content-length:/{sub(/\r$/,"");sub(/^[^:]+: /,"");print;exit}' "$hf")"
-          echo "last_modified=${lm:-unknown}" >> "$GITHUB_OUTPUT"
-          echo "etag=${et:-no-etag}" >> "$GITHUB_OUTPUT"
-          echo "content_length=${cl:-unknown}" >> "$GITHUB_OUTPUT"
-
-      - name: Check version & decide
-        id: version
-        run: |
-          set -euo pipefail
-
-          # 版本号格式：v<日期>.<运行号>（方便识别）
-          DATE_TAG=$(date -u '+%Y%m%d')
-          RUN_NUM=${{ github.run_number }}
-          VER="${DATE_TAG}.${RUN_NUM}"
-
-          # 用 ETag 作缓存 key（不用于版本号）
-          ETAG="${{ steps.upstream.outputs.etag }}"
-          [ -z "$ETAG" ] || [ "$ETAG" = "no-etag" ] && ETAG="${{ steps.upstream.outputs.last_modified }}"
-          CACHE_KEY=$(echo "$ETAG" | sha256sum | cut -c1-16)
-
-          echo "version=$VER" >> "$GITHUB_OUTPUT"
-          echo "cache_key=$CACHE_KEY" >> "$GITHUB_OUTPUT"
-
-          # 判断是否需要构建
-          LAST_VER=""
-          gh release view latest --json tagName --jq '.tagName' 2>/dev/null && \
-            LAST_VER=$(gh release view latest --json tagName --jq '.tagName' 2>/dev/null || echo "")
-
-          if [ "${{ github.event.inputs.force }}" = "true" ]; then
-            echo "should_build=true"
-          elif [ "${{ github.event_name }}" = "push" ]; then
-            echo "should_build=true"
-          elif [ -z "$LAST_VER" ]; then
-            echo "should_build=true"
-          elif [ "$LAST_VER" != "$VER" ]; then
-            echo "should_build=true"
-          else
-            echo "should_build=false"
-          fi >> "$GITHUB_OUTPUT"
-
-  # ============================================================
-  # 构建应用
-  # ============================================================
-  build:
-    name: Build app
-    needs: detect
-    runs-on: ubuntu-latest
-    timeout-minutes: 90
-    outputs:
-      version: ${{ steps.build-app.outputs.version }}
+    strategy:
+      fail-fast: false
+      matrix:
+        package:
+          - deb
+          - rpm
+        # pacman 需 Docker，拆到独立 job
 
     steps:
       - uses: actions/checkout@v5
@@ -122,15 +61,60 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y pkg-config libssl-dev
+          sudo apt-get install -y pkg-config libssl-dev rpm
           bash scripts/install-deps.sh
 
+      - name: Detect upstream version
+        id: upstream
+        run: |
+          set -euo pipefail
+          hf="$(mktemp)"; trap 'rm -f "$hf"' EXIT
+          curl -fsSLI "$UPSTREAM_DMG_URL" > "$hf"
+          lm="$(awk 'tolower($0)~/^last-modified:/{sub(/\r$/,"");sub(/^[^:]+: /,"");print;exit}' "$hf")"
+          et="$(awk 'tolower($0)~/^etag:/{sub(/\r$/,"");sub(/^[^:]+: /,"");gsub(/"/,"");print;exit}' "$hf")"
+          echo "last_modified=${lm:-unknown}" >> "$GITHUB_OUTPUT"
+          echo "etag=${et:-no-etag}" >> "$GITHUB_OUTPUT"
+
+          # 版本号
+          DATE_TAG=$(date -u '+%Y%m%d')
+          VER="${DATE_TAG}.${{ github.run_number }}"
+          CACHE_KEY=$(echo "${et:-$lm}" | sha256sum | cut -c1-16)
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+          echo "cache_key=$CACHE_KEY" >> "$GITHUB_OUTPUT"
+
+      - name: Check if build is needed
+        id: check
+        run: |
+          LAST_VER=""
+          gh release view latest --json tagName --jq '.tagName' 2>/dev/null && \
+            LAST_VER=$(gh release view latest --json tagName --jq '.tagName' 2>/dev/null || echo "")
+          VER="${{ steps.upstream.outputs.version }}"
+
+          if [ "${{ github.event.inputs.force }}" = "true" ]; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event_name }}" = "push" ]; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          elif [ -z "$LAST_VER" ]; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          elif [ "$LAST_VER" != "$VER" ]; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Skip build
+        if: steps.check.outputs.skip == 'true'
+        run: |
+          echo "Version unchanged (${{ steps.upstream.outputs.version }}), skipping."
+          exit 0
+
+      # ---- 构建 ----
       - name: Cache Codex.dmg
         id: dmg-cache
         uses: actions/cache@v4
         with:
           path: /tmp/codex-upstream-ci/Codex.dmg
-          key: upstream-dmg-${{ env.DMG_CACHE_SCHEMA_VERSION }}-${{ needs.detect.outputs.cache_key }}
+          key: upstream-dmg-${{ env.DMG_CACHE_SCHEMA_VERSION }}-${{ steps.upstream.outputs.cache_key }}
 
       - name: Download Codex.dmg
         if: steps.dmg-cache.outputs.cache-hit != 'true'
@@ -139,124 +123,29 @@ jobs:
           curl -fL --retry 3 -o "$UPSTREAM_DMG_PATH" "$UPSTREAM_DMG_URL"
 
       - name: Build app
-        id: build-app
-        run: |
-          make build-app DMG=/tmp/codex-upstream-ci/Codex.dmg
-          # 传递版本号给下游 job
-          echo "version=${{ needs.detect.outputs.version }}" >> "$GITHUB_OUTPUT"
+        run: make build-app DMG=/tmp/codex-upstream-ci/Codex.dmg
 
-      - name: Upload app artifact
+      # ---- 打包 ----
+      - name: Build ${{ matrix.package }} package
+        run: |
+          PACKAGE_VERSION="${{ steps.upstream.outputs.version }}" \
+            ./scripts/build-${{ matrix.package }}.sh
+
+      - name: Upload ${{ matrix.package }} package
         uses: actions/upload-artifact@v4
         with:
-          name: codex-app
-          path: codex-app/
-          retention-days: 1
-
-  # ============================================================
-  # 打包 .deb（Debian/Ubuntu）
-  # ============================================================
-  package-deb:
-    name: Package .deb
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: Download app artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: codex-app
-          path: codex-app/
-
-      - name: Build .deb
-        run: |
-          PACKAGE_VERSION="${{ needs.build.outputs.version }}" ./scripts/build-deb.sh
-
-      - name: Upload .deb
-        uses: actions/upload-artifact@v4
-        with:
-          name: codex-desktop-deb
-          path: dist/*.deb
+          name: codex-desktop-${{ matrix.package }}
+          path: dist/*.${{ matrix.package }}
           retention-days: 90
 
   # ============================================================
-  # 打包 .rpm（Fedora/RHEL/openSUSE）
-  # ============================================================
-  package-rpm:
-    name: Package .rpm
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: Install RPM tooling
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y rpm
-          rpmbuild --version
-
-      - name: Download app artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: codex-app
-          path: codex-app/
-
-      - name: Build .rpm
-        run: |
-          PACKAGE_VERSION="${{ needs.build.outputs.version }}" ./scripts/build-rpm.sh
-
-      - name: Upload .rpm
-        uses: actions/upload-artifact@v4
-        with:
-          name: codex-desktop-rpm
-          path: dist/*.rpm
-          retention-days: 90
-
-  # ============================================================
-  # 打包 Arch Linux（通过 Docker）
-  # ============================================================
-  package-pacman:
-    name: Package Arch
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: Download app artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: codex-app
-          path: codex-app/
-
-      - name: Build Arch package
-        run: |
-          docker run --rm \
-            -e PACKAGE_VERSION="${{ needs.build.outputs.version }}" \
-            -v "$PWD:/work" -w /work \
-            archlinux:base-devel \
-            bash -lc '
-              pacman -Syu --noconfirm --needed rust nodejs npm zstd sudo
-              useradd -m builder
-              chown -R builder:builder /work
-              runuser -u builder -- bash -lc '"'"'
-                PACKAGE_VERSION="$PACKAGE_VERSION" ./scripts/build-pacman.sh
-              '"'"'
-            '
-
-      - name: Upload Arch package
-        uses: actions/upload-artifact@v4
-        with:
-          name: codex-desktop-arch
-          path: dist/*.pkg.tar.*
-          retention-days: 90
-
-  # ============================================================
-  # 发布 Release
+  # 发布 Release（收集 artifacts）
   # ============================================================
   release:
     name: Create Release
-    needs: [build, package-deb, package-rpm, package-pacman]
+    if: ${{ github.event_name != 'pull_request' }}
     runs-on: ubuntu-latest
+    needs: [build-and-package]
     steps:
       - uses: actions/checkout@v5
 
@@ -267,18 +156,25 @@ jobs:
           merge-multiple: true
           path: /tmp/release-artifacts
 
+      - name: Get version
+        id: ver
+        run: |
+          # 从 artifacts 获取版本
+          VER="$(date -u '+%Y%m%d').${{ github.run_number }}"
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ needs.build.outputs.version }}
-          name: "Codex Desktop Linux ${{ needs.build.outputs.version }}"
+          tag_name: ${{ steps.ver.outputs.version }}
+          name: "Codex Desktop Linux ${{ steps.ver.outputs.version }}"
           body: |
-            ## Codex Desktop Linux ${{ needs.build.outputs.version }}
+            ## Codex Desktop Linux ${{ steps.ver.outputs.version }}
 
             🖥️ 支持平台：
             - **Debian/Ubuntu** → `.deb`
             - **Fedora/RHEL/openSUSE** → `.rpm`
-            - **Arch/Manjaro** → `.pkg.tar.zst`
+            - **Arch/Manjaro** → `.pkg.tar.zst`（可能延迟）
 
             自动构建于 $(date -u '+%Y-%m-%d %H:%M UTC')。
 
