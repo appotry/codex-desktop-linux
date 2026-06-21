@@ -11,7 +11,6 @@ use crate::{
 };
 use anyhow::{Context, Result};
 use chrono::{Duration as ChronoDuration, Utc};
-use fs4::fs_std::FileExt;
 use reqwest::Client;
 use serde::Deserialize;
 use std::{
@@ -265,13 +264,13 @@ fn try_acquire_check_lock(paths: &RuntimePaths) -> Result<Option<CheckLock>> {
         .open(&lock_path)
         .with_context(|| format!("Failed to open {}", lock_path.display()))?;
 
-    match file.try_lock_exclusive() {
-        Ok(true) => {}
-        Ok(false) => {
+    match file.try_lock() {
+        Ok(()) => {}
+        Err(fs::TryLockError::WouldBlock) => {
             info!("skipping upstream check because another check is already active");
             return Ok(None);
         }
-        Err(error) => {
+        Err(fs::TryLockError::Error(error)) => {
             return Err(error).with_context(|| format!("Failed to lock {}", lock_path.display()));
         }
     }
@@ -2203,6 +2202,34 @@ mod tests {
         }
 
         assert!(reacquired_lock.is_some());
+        Ok(())
+    }
+
+    #[test]
+    fn std_file_try_lock_reports_would_block_for_second_holder() -> Result<()> {
+        let temp = tempfile::tempdir()?;
+        let lock_path = temp.path().join("check.lock");
+        let first_file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&lock_path)?;
+        let second_file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&lock_path)?;
+
+        first_file.try_lock()?;
+        let second_attempt = second_file.try_lock();
+
+        assert!(matches!(
+            second_attempt,
+            Err(std::fs::TryLockError::WouldBlock)
+        ));
+        first_file.unlock()?;
         Ok(())
     }
 

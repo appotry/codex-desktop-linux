@@ -5,6 +5,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+## [0.8.4] - 2026-06-20
+
 ### Added
 
 - The `make setup-native` Linux feature picker can now present a GUI checklist
@@ -68,6 +70,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- `codex-update-manager` no longer depends on the `fs4` crate for updater check
+  serialization. The updater now uses `std::fs::File::try_lock`, preserves the
+  existing non-blocking `check.lock` behavior when another check is active, and
+  adds regression coverage for `WouldBlock` lock contention semantics.
 - The avatar overlay is focusable on Linux so inline pet reply inputs can accept
   keyboard input after being clicked, while still staying above the main Codex
   window as an overlay.
