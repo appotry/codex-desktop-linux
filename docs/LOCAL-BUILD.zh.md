@@ -189,7 +189,7 @@ motrix-next download-add url="https://npmmirror.com/mirrors/electron/v<版本>/e
 **解决方案一（推荐）：符号链接到 resources 目录**
 ```bash
 sudo mkdir -p /opt/codex-desktop/resources/bin
-sudo ln -sf /home/andy/.local/share/mise/installs/npm-openai-codex/latest/bin/codex /opt/codex-desktop/resources/bin/codex
+sudo ln -sf $HOME/.local/share/mise/installs/npm-openai-codex/latest/bin/codex /opt/codex-desktop/resources/bin/codex
 ```
 
 **解决方案二：环境变量（无需 sudo）**
