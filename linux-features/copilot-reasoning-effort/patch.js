@@ -33,10 +33,30 @@ function applyCopilotReasoningEffortSettingsPatch(currentSource) {
   }
 
   const copilotSavePatchMarker = "copilot-default-reasoning-effort`,";
+  const copilotAsyncSaveRegex =
+    /if\(await ([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*),([A-Za-z_$][\w$]*)\)\)return;if\(([A-Za-z_$][\w$]*)\)\{await ([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*),`copilot-default-model`,\2,\{throwOnFailure:!0\}\);return\}if\(([A-Za-z_$][\w$]*)\.info\(`Setting default model and reasoning effort`,\{safe:\{newModel:\2,newEffort:\3,profile:([A-Za-z_$][\w$]*)\.profile\}\}\),!([A-Za-z_$][\w$]*)\)(throw Error\(`Model settings host is unavailable`\);|return;)/;
   const copilotSaveRegex =
     /if\(await ([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*),([A-Za-z_$][\w$]*)\)\)return;if\(([A-Za-z_$][\w$]*)\)\{([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*),`copilot-default-model`,\2\);return\}if\(([A-Za-z_$][\w$]*)\.info\(`Setting default model and reasoning effort`,\{safe:\{newModel:\2,newEffort:\3,profile:([A-Za-z_$][\w$]*)\.profile\}\}\),!([A-Za-z_$][\w$]*)\)return;/;
   if (patchedSource.includes(copilotSavePatchMarker)) {
     // Already patched.
+  } else if (copilotAsyncSaveRegex.test(patchedSource)) {
+    patchedSource = patchedSource.replace(
+      copilotAsyncSaveRegex,
+      (
+        _match,
+        updateConversationVar,
+        modelArgVar,
+        effortArgVar,
+        isCopilotVar,
+        persistStateVar,
+        stateScopeVar,
+        loggerVar,
+        configVar,
+        hostReadyVar,
+        unavailableTail,
+      ) =>
+        `if(await ${updateConversationVar}(${modelArgVar},${effortArgVar}))return;if(${isCopilotVar}){await ${persistStateVar}(${stateScopeVar},\`copilot-default-model\`,${modelArgVar},{throwOnFailure:!0});await ${persistStateVar}(${stateScopeVar},\`copilot-default-reasoning-effort\`,${effortArgVar},{throwOnFailure:!0});return}if(${loggerVar}.info(\`Setting default model and reasoning effort\`,{safe:{newModel:${modelArgVar},newEffort:${effortArgVar},profile:${configVar}.profile}}),!${hostReadyVar})${unavailableTail}`,
+    );
   } else if (copilotSaveRegex.test(patchedSource)) {
     patchedSource = patchedSource.replace(
       copilotSaveRegex,

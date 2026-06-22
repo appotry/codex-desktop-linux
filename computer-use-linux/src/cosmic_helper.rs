@@ -23,9 +23,8 @@ pub struct CosmicHelperActivation {
 }
 
 pub fn resolve_helper_binary() -> Result<PathBuf> {
-    if let Some(path) = env::var("CODEX_COMPUTER_USE_COSMIC_HELPER")
-        .ok()
-        .filter(|value| !value.trim().is_empty())
+    if let Some(path) = env_var("CODEX_COMPUTER_USE_COSMIC_HELPER")
+        .or_else(|| env_var("COMPUTER_USE_LINUX_COSMIC_HELPER"))
     {
         let path = PathBuf::from(path);
         if path.exists() {
@@ -45,6 +44,10 @@ pub fn resolve_helper_binary() -> Result<PathBuf> {
     }
 
     bail!("COSMIC helper binary {COSMIC_HELPER_BINARY} not found")
+}
+
+fn env_var(key: &str) -> Option<String> {
+    env::var(key).ok().filter(|value| !value.trim().is_empty())
 }
 
 pub fn probe() -> Result<CosmicHelperProbe> {

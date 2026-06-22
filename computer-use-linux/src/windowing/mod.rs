@@ -294,13 +294,13 @@ mod tests {
         let windows = vec![
             window(
                 first_window_id,
-                "First — Kate",
+                "First - Kate",
                 "org.kde.kate",
                 "org.kde.kate",
             ),
             window(
                 second_window_id,
-                "Second — Kate",
+                "Second - Kate",
                 "org.kde.kate",
                 "org.kde.kate",
             ),

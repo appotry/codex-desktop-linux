@@ -1,3 +1,10 @@
+#[cfg(target_os = "linux")]
+use mimalloc::MiMalloc;
+
+#[cfg(target_os = "linux")]
+#[global_allocator]
+static GLOBAL: MiMalloc = MiMalloc;
+
 mod abs_pointer;
 mod atspi_tree;
 mod cosmic_helper;

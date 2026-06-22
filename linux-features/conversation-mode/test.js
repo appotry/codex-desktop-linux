@@ -89,10 +89,20 @@ const composerControlSource =
   "function mz(e){let {voiceControls:z}=e;let Be=ze,Ve=F===`empty-message`&&!A&&(ue.isAvailable&&ue.phase!==`active`||J),He=si(fc,`composer.startVoiceMode`),Ue;Ue=()=>{if(ue.phase===`starting`||ue.phase===`active`){ue.stopRealtime();return}if(ue.isAvailable){ue.phase===`inactive`&&ue.startRealtime(`composer_button_existing_thread`);return}ce()};let e=G.formatMessage({id:`composer.realtime.start.aria`,defaultMessage:`Start realtime voice`,description:`Aria label for the button that starts realtime voice mode in the composer`});let n=G.formatMessage({id:`composer.realtime.start.tooltip`,defaultMessage:`Start realtime voice`,description:`Tooltip for the button that starts realtime voice mode in the composer`});}";
 
 const currentComposerControlSource =
-  "function hz(e){let{conversationId:v,isResponseInProgress:A,onStop:P,submitBlockReason:F,voiceControls:z}=e,{canRetryDictation:K,dictationShortcutLabel:q,isDictating:J,isDictationSupported:ee,isNewRealtimeConversationAvailable:te,isRealtimeSubmitStarting:ne,isTranscribing:re,startDictation:se,startNewRealtimeConversation:ce,stopDictation:le,threadRealtime:ue}=z;let Be=ze,Ve=F===`empty-message`&&!A&&(ue.isAvailable&&ue.phase!==`active`||te),He=oi(fc,`composer.startVoiceMode`),Ue;Ue=()=>{if(ue.phase===`starting`||ue.phase===`active`){ue.stopRealtime();return}if(ue.isAvailable){ue.phase===`inactive`&&ue.startRealtime(`composer_button_existing_thread`);return}ce()};}";
+  "function hz(e){let{conversationId:v,isResponseInProgress:A,onStop:P,submitBlockReason:F,voiceControls:z}=e,I=h===void 0?!1:h,L=mu(),R=fu(L,tg),x=fu(L,eg),{enterBehavior:B}=Ul(),V=Wt(),{canRetryDictation:K,dictationShortcutLabel:q,isDictating:J,isDictationSupported:ee,isNewRealtimeConversationAvailable:te,isRealtimeSubmitStarting:ne,isTranscribing:re,startDictation:se,startNewRealtimeConversation:ce,stopDictation:le,threadRealtime:ue}=z;let Be=ze,Ve=F===`empty-message`&&!A&&(ue.isAvailable&&ue.phase!==`active`||te),He=oi(fc,`composer.startVoiceMode`),Ue;Ue=()=>{if(ue.phase===`starting`||ue.phase===`active`){ue.stopRealtime();return}if(ue.isAvailable){ue.phase===`inactive`&&ue.startRealtime(`composer_button_existing_thread`);return}ce()};}";
+
+const currentComposerControlSourceWithDecoyProps =
+  "function decoy(e){let{conversationId:badId,isResponseInProgress:badProgress,onStop:badStop,submitBlockReason:badReason,voiceControls:badVoiceControls}=e;return badId||badProgress||badStop||badReason||badVoiceControls}" +
+  currentComposerControlSource;
 
 const halfPatchedCurrentComposerControlSource =
-  "function hz(e){let{conversationId:v,isResponseInProgress:A,onStop:P,submitBlockReason:F,voiceControls:z}=e,{canRetryDictation:K,dictationShortcutLabel:q,isDictating:J,isDictationSupported:ee,isNewRealtimeConversationAvailable:te,isRealtimeSubmitStarting:ne,isTranscribing:re,startDictation:se,startNewRealtimeConversation:ce,stopDictation:le,threadRealtime:ue}=z;let Be=ze,Ve=F===`empty-message`&&!A&&(ue.isAvailable&&ue.phase!==`active`||te),He=oi(fc,`composer.startVoiceMode`),Ue;Ue=()=>{if(globalThis.codexLinuxConversationToggle?.({conversationId:v,startDictation:se,stopDictation:le,onStop:P,isDictating:te,isTranscribing:re,isResponseInProgress:A,isDictationSupported:q}))return;if(ue.phase===`starting`||ue.phase===`active`){ue.stopRealtime();return}if(ue.isAvailable){ue.phase===`inactive`&&ue.startRealtime(`composer_button_existing_thread`);return}ce()};}";
+  "function hz(e){let{conversationId:v,isResponseInProgress:A,onStop:P,submitBlockReason:F,voiceControls:z}=e,I=h===void 0?!1:h,L=mu(),R=fu(L,tg),x=fu(L,eg),{enterBehavior:B}=Ul(),V=Wt(),{canRetryDictation:K,dictationShortcutLabel:q,isDictating:J,isDictationSupported:ee,isNewRealtimeConversationAvailable:te,isRealtimeSubmitStarting:ne,isTranscribing:re,startDictation:se,startNewRealtimeConversation:ce,stopDictation:le,threadRealtime:ue}=z;let Be=ze,Ve=F===`empty-message`&&!A&&(ue.isAvailable&&ue.phase!==`active`||te),He=oi(fc,`composer.startVoiceMode`),Ue;Ue=()=>{if(globalThis.codexLinuxConversationToggle?.({conversationId:v,startDictation:se,stopDictation:le,onStop:P,isDictating:te,isTranscribing:re,isResponseInProgress:A,isDictationSupported:q}))return;if(ue.phase===`starting`||ue.phase===`active`){ue.stopRealtime();return}if(ue.isAvailable){ue.phase===`inactive`&&ue.startRealtime(`composer_button_existing_thread`);return}ce()};}";
+
+const halfPatchedCurrentComposerControlSourceWithFallbackAliases =
+  "function hz(e){let{conversationId:l,isResponseInProgress:T,onStop:k,submitBlockReason:A,voiceControls:F}=e,I=h===void 0?!1:h,L=mu(),R=fu(L,tg),z=fu(L,eg),{enterBehavior:B}=Ul(),V=Wt(),{canRetryDictation:ee,dictationShortcutLabel:te,isDictating:ne,isDictationSupported:re,isNewRealtimeConversationAvailable:ae,isRealtimeSubmitStarting:U,isTranscribing:W,startDictation:oe,startRealtimeConversation:se,stopDictation:ce,threadRealtime:J}=F;let Fe=Pe,Ie=A===`empty-message`&&!T&&(J.isAvailable&&J.phase!==`active`||ae),Le=a(Po,`composer.startVoiceMode`),Re;Re=()=>{if(globalThis.codexLinuxConversationToggle?.({conversationId:v,startDictation:oe,stopDictation:ce,onStop:P,isDictating:ne,isTranscribing:W,isResponseInProgress:A,isDictationSupported:re}))return;if(J.phase===`starting`||J.phase===`active`){J.stopRealtime();return}if(J.isAvailable){J.phase===`inactive`&&se();return}se()};}";
+
+const driftedCurrentComposerControlSource =
+  "function hz(e){let{conversationId:l,isResponseInProgress:T,onStop:k,submitBlockReason:A,voiceControls:F}=e,I=h===void 0?!1:h,L=mu(),R=fu(L,tg),z=fu(L,eg),{enterBehavior:B}=Ul(),V=Wt(),{canRetryDictation:ee,dictationShortcutLabel:te,isDictating:ne,isDictationSupported:re,isNewRealtimeConversationAvailable:ae,isRealtimeSubmitStarting:U,isTranscribing:W,startDictation:oe,startRealtimeConversation:se,stopDictation:ce,threadRealtime:J}=M;let Fe=Pe,Ie=A===`empty-message`&&!T&&(J.isAvailable&&J.phase!==`active`||ae),Le=a(Po,`composer.startVoiceMode`),Re;Re=()=>{if(J.phase===`starting`||J.phase===`active`){J.stopRealtime();return}if(J.isAvailable){J.phase===`inactive`&&se();return}se()};}";
 
 const assistantRenderSource =
   "return (0,$.jsx)(Ov,{item:n,alwaysShowActions:M,assistantCopyText:p,turnId:m,after:g,conversationId:o,cwd:u,renderCodeBlocksAsWritingBlocks:V})";
@@ -1741,12 +1751,57 @@ test("composer control patch follows the current composer voiceControls shape", 
   assert.doesNotMatch(patched, /isDictationSupported:q/);
 });
 
+test("composer control patch scopes current composer props to the composer binding", () => {
+  const patched = twice(applyComposerControlPatch, currentComposerControlSourceWithDecoyProps);
+  assert.match(
+    patched,
+    /codexLinuxConversationSync\?\.\(v,\{isResponseInProgress:A,isDictating:J,isTranscribing:re,startDictation:se,stopDictation:le,onStop:P\}\)/,
+  );
+  assert.match(
+    patched,
+    /codexLinuxConversationToggle\?\.\(\{conversationId:v,startDictation:se,stopDictation:le,onStop:P,isDictating:J,isTranscribing:re,isResponseInProgress:A,isDictationSupported:ee\}\)/,
+  );
+  assert.doesNotMatch(patched, /codexLinuxConversationSync\?\.\(badId/);
+  assert.doesNotMatch(patched, /codexLinuxConversationToggle\?\.\(\{conversationId:badId/);
+  assert.doesNotMatch(patched, /codexLinuxConversationSync\?\.\([^)]*\{[^}]*isResponseInProgress:badProgress/);
+  assert.doesNotMatch(patched, /codexLinuxConversationToggle\?\.\([^)]*onStop:badStop/);
+});
+
 test("composer control patch repairs bundles where only the click handler was patched", () => {
   const patched = twice(applyComposerControlPatch, halfPatchedCurrentComposerControlSource);
   assert.match(patched, /codexLinuxConversationSync\?\.\(v,\{isResponseInProgress:A,isDictating:J/);
   assert.match(patched, /isDictationSupported:ee/);
   assert.doesNotMatch(patched, /isDictating:te/);
   assert.doesNotMatch(patched, /isDictationSupported:q/);
+});
+
+test("composer control patch repairs stale fallback aliases in existing toggle payloads", () => {
+  const patched = twice(applyComposerControlPatch, halfPatchedCurrentComposerControlSourceWithFallbackAliases);
+  assert.match(
+    patched,
+    /codexLinuxConversationSync\?\.\(l,\{isResponseInProgress:T,isDictating:ne,isTranscribing:W,startDictation:oe,stopDictation:ce,onStop:k\}\)/,
+  );
+  assert.match(
+    patched,
+    /codexLinuxConversationToggle\?\.\(\{conversationId:l,startDictation:oe,stopDictation:ce,onStop:k,isDictating:ne,isTranscribing:W,isResponseInProgress:T,isDictationSupported:re\}\)/,
+  );
+  assert.match(patched, /codexLinuxConversationActive=globalThis\.codexLinuxConversationIsActive/);
+  assert.doesNotMatch(patched, /conversationId:v,startDictation:oe/);
+  assert.doesNotMatch(patched, /onStop:P/);
+  assert.doesNotMatch(patched, /isResponseInProgress:A,isDictationSupported:re/);
+});
+
+test("composer control patch skips current payloads when scoped aliases drift", () => {
+  const { value: patched, warnings } = captureWarns(() =>
+    twice(applyComposerControlPatch, driftedCurrentComposerControlSource),
+  );
+  assert.equal(patched, driftedCurrentComposerControlSource);
+  assert.match(warnings.join("\n"), /Could not resolve composer prop aliases/);
+  assert.match(warnings.join("\n"), /Could not find composer voice button click handler/);
+  assert.doesNotMatch(patched, /codexLinuxConversationSync/);
+  assert.doesNotMatch(patched, /codexLinuxConversationToggle/);
+  assert.doesNotMatch(patched, /conversationId:v/);
+  assert.doesNotMatch(patched, /onStop:P/);
 });
 
 test("composer patch ignores adjacent composer chunks", () => {

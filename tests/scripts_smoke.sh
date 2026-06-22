@@ -1376,6 +1376,140 @@ EOF
     assert_contains "$invalid_url/output.log" "Upstream DMG URL must be an HTTPS URL"
 }
 
+test_extract_dmg_repairs_safe_7z_link_warnings() {
+    info "Checking DMG extraction repairs safe 7z package symlink warnings"
+    local workspace="$TMP_DIR/dmg-dangerous-link-paths"
+    local bin_dir="$workspace/bin"
+    local work_dir="$workspace/work"
+    local output_log="$workspace/output.log"
+    local app_dir="$work_dir/dmg-extract/Codex Installer/Codex.app"
+    local node_modules="$app_dir/Contents/Resources/cua_node/lib/node_modules"
+    local actual
+
+    mkdir -p "$bin_dir" "$work_dir"
+    printf '%s' "fake dmg payload" >"$workspace/Codex.dmg"
+
+    cat >"$bin_dir/7z" <<'SCRIPT'
+#!/usr/bin/env bash
+set -eu
+
+out=""
+for arg in "$@"; do
+    case "$arg" in
+        -o*)
+            out="${arg#-o}"
+            ;;
+    esac
+done
+[ -n "$out" ] || exit 2
+
+app="$out/Codex Installer/Codex.app"
+node_modules="$app/Contents/Resources/cua_node/lib/node_modules"
+mkdir -p \
+    "$node_modules/.bin" \
+    "$node_modules/@oai/sky/bin/linux" \
+    "$node_modules/opencollective-postinstall" \
+    "$node_modules/pixelmatch/bin" \
+    "$node_modules/playwright" \
+    "$node_modules/playwright-core" \
+    "$node_modules/semver/bin" \
+    "$node_modules/sharp/node_modules/.bin" \
+    "$node_modules/tesseract.js/node_modules/.bin"
+
+printf '%s\n' "target" >"$node_modules/opencollective-postinstall/index.js"
+printf '%s\n' "target" >"$node_modules/pixelmatch/bin/pixelmatch"
+printf '%s\n' "target" >"$node_modules/playwright/cli.js"
+printf '%s\n' "target" >"$node_modules/playwright-core/cli.js"
+printf '%s\n' "target" >"$node_modules/semver/bin/semver.js"
+printf '%s\n' "target" >"$node_modules/@oai/sky/bin/linux/sky_linux_arm64"
+printf '%s\n' "target" >"$node_modules/@oai/sky/bin/linux/sky_linux_x64"
+
+: >"$node_modules/.bin/opencollective-postinstall"
+: >"$node_modules/.bin/pixelmatch"
+: >"$node_modules/.bin/playwright"
+: >"$node_modules/.bin/playwright-core"
+: >"$node_modules/.bin/semver"
+: >"$node_modules/.bin/sky_linux_arm64"
+: >"$node_modules/.bin/sky_linux_x64"
+: >"$node_modules/tesseract.js/node_modules/.bin/opencollective-postinstall"
+: >"$node_modules/sharp/node_modules/.bin/semver"
+
+cat <<'LOG'
+ERROR: Dangerous link path was ignored : Codex Installer/Codex.app/Contents/Resources/cua_node/lib/node_modules/.bin/opencollective-postinstall : ../opencollective-postinstall/index.js
+ERROR: Dangerous link path was ignored : Codex Installer/Codex.app/Contents/Resources/cua_node/lib/node_modules/.bin/pixelmatch : ../pixelmatch/bin/pixelmatch
+ERROR: Dangerous link path was ignored : Codex Installer/Codex.app/Contents/Resources/cua_node/lib/node_modules/.bin/playwright : ../playwright/cli.js
+ERROR: Dangerous link path was ignored : Codex Installer/Codex.app/Contents/Resources/cua_node/lib/node_modules/.bin/playwright-core : ../playwright-core/cli.js
+ERROR: Dangerous link path was ignored : Codex Installer/Codex.app/Contents/Resources/cua_node/lib/node_modules/.bin/semver : ../semver/bin/semver.js
+ERROR: Dangerous link path was ignored : Codex Installer/Codex.app/Contents/Resources/cua_node/lib/node_modules/.bin/sky_linux_arm64 : ../@oai/sky/bin/linux/sky_linux_arm64
+ERROR: Dangerous link path was ignored : Codex Installer/Codex.app/Contents/Resources/cua_node/lib/node_modules/.bin/sky_linux_x64 : ../@oai/sky/bin/linux/sky_linux_x64
+ERROR: Dangerous link path was ignored : Codex Installer/Codex.app/Contents/Resources/cua_node/lib/node_modules/tesseract.js/node_modules/.bin/opencollective-postinstall : ../../../opencollective-postinstall/index.js
+ERROR: Dangerous link path was ignored : Codex Installer/Codex.app/Contents/Resources/cua_node/lib/node_modules/sharp/node_modules/.bin/semver : ../../../semver/bin/semver.js
+
+Sub items Errors: 9
+
+Archives with Errors: 1
+
+Sub items Errors: 9
+LOG
+exit 2
+SCRIPT
+    chmod +x "$bin_dir/7z"
+
+    REPO_DIR="$REPO_DIR" \
+    WORK_DIR="$work_dir" \
+    SEVEN_ZIP_CMD="$bin_dir/7z" \
+    TEST_DMG_PATH="$workspace/Codex.dmg" \
+        bash <<'SCRIPT' >"$output_log" 2>&1
+set -Eeuo pipefail
+
+info() { echo "[INFO] $*" >&2; }
+warn() { echo "[WARN] $*" >&2; }
+error() { echo "[ERROR] $*" >&2; exit 1; }
+
+# shellcheck disable=SC1091
+source "$REPO_DIR/scripts/lib/dmg.sh"
+
+app_dir="$(extract_dmg "$TEST_DMG_PATH")"
+[ "$(basename "$app_dir")" = "Codex.app" ]
+SCRIPT
+
+    assert_contains "$output_log" "7z reported 9 safe package symlink warnings; repaired and continuing"
+    assert_not_contains "$output_log" "7z exited with code"
+    assert_not_contains "$output_log" "Sub items Errors"
+
+    [ -L "$node_modules/.bin/opencollective-postinstall" ] || fail "Expected repaired opencollective-postinstall symlink"
+    [ "$(readlink "$node_modules/.bin/opencollective-postinstall")" = "../opencollective-postinstall/index.js" ] \
+        || fail "Unexpected opencollective-postinstall symlink target"
+    [ -L "$node_modules/.bin/pixelmatch" ] || fail "Expected repaired pixelmatch symlink"
+    [ "$(readlink "$node_modules/.bin/pixelmatch")" = "../pixelmatch/bin/pixelmatch" ] \
+        || fail "Unexpected pixelmatch symlink target"
+    [ -L "$node_modules/.bin/playwright" ] || fail "Expected repaired playwright symlink"
+    [ "$(readlink "$node_modules/.bin/playwright")" = "../playwright/cli.js" ] \
+        || fail "Unexpected playwright symlink target"
+    [ -L "$node_modules/.bin/playwright-core" ] || fail "Expected repaired playwright-core symlink"
+    [ "$(readlink "$node_modules/.bin/playwright-core")" = "../playwright-core/cli.js" ] \
+        || fail "Unexpected playwright-core symlink target"
+    [ -L "$node_modules/.bin/semver" ] || fail "Expected repaired semver symlink"
+    [ "$(readlink "$node_modules/.bin/semver")" = "../semver/bin/semver.js" ] \
+        || fail "Unexpected semver symlink target"
+    [ -L "$node_modules/.bin/sky_linux_arm64" ] || fail "Expected repaired sky_linux_arm64 symlink"
+    [ "$(readlink "$node_modules/.bin/sky_linux_arm64")" = "../@oai/sky/bin/linux/sky_linux_arm64" ] \
+        || fail "Unexpected sky_linux_arm64 symlink target"
+    [ -L "$node_modules/.bin/sky_linux_x64" ] || fail "Expected repaired sky_linux_x64 symlink"
+    [ "$(readlink "$node_modules/.bin/sky_linux_x64")" = "../@oai/sky/bin/linux/sky_linux_x64" ] \
+        || fail "Unexpected sky_linux_x64 symlink target"
+    [ -L "$node_modules/tesseract.js/node_modules/.bin/opencollective-postinstall" ] \
+        || fail "Expected repaired nested opencollective-postinstall symlink"
+    [ "$(readlink "$node_modules/tesseract.js/node_modules/.bin/opencollective-postinstall")" = "../../../opencollective-postinstall/index.js" ] \
+        || fail "Unexpected nested opencollective-postinstall symlink target"
+    [ -L "$node_modules/sharp/node_modules/.bin/semver" ] || fail "Expected repaired nested semver symlink"
+    [ "$(readlink "$node_modules/sharp/node_modules/.bin/semver")" = "../../../semver/bin/semver.js" ] \
+        || fail "Unexpected nested semver symlink target"
+
+    actual="$(find "$node_modules" -path '*/.bin/*' -type l | wc -l | tr -d ' ')"
+    [ "$actual" = "9" ] || fail "Expected 9 repaired symlinks, found $actual"
+}
+
 test_fresh_install_removes_cached_dmg_metadata() {
     info "Checking --fresh removes cached DMG metadata"
     local workspace="$TMP_DIR/fresh-dmg-metadata"
@@ -6056,6 +6190,7 @@ main() {
     test_make_build_app_uses_installer_download_flow_by_default
     test_make_build_app_fresh_uses_installer_fresh_flow
     test_installer_refreshes_stale_cached_dmg_metadata
+    test_extract_dmg_repairs_safe_7z_link_warnings
     test_fresh_install_removes_cached_dmg_metadata
     test_rebuild_candidate_uses_validated_default_dmg
     test_native_shortcut_targets_compose_existing_flows

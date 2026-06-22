@@ -251,6 +251,15 @@ function syntheticChromeBrowserClientBundle() {
   ].join("");
 }
 
+function syntheticCurrentChromeBrowserClientBundle() {
+  return [
+    "var CN=[\"chrome\",\"iab\",\"cdp\"];function m_(e){return CN.some(t=>t===e)}",
+    "var y_=\"BROWSER_USE_AVAILABLE_BACKENDS\";",
+    "function nl(e){return globalThis[e]??null}function F_(e){return Array.isArray(e)?e:String(e).split(\",\")}",
+    "function N_(){let e=nl(y_);return e==null?null:F_(e).filter(m_)}",
+  ].join("");
+}
+
 function syntheticAppServerManagerSignalsBundle() {
   return [
     "function Of({conversationId:e,conversations:t,getWorkspaceBrowserRoot:n,getWorkspaceKind:r,hostId:i,setConversation:a,thread:o,threadsById:s,updateConversationState:c}){let h=o.status??null;if(t.has(e)){c(e,e=>{e.resumeState===`needs_resume`&&(e.threadRuntimeStatus=h)});return}}",
@@ -1385,6 +1394,24 @@ test("Linux remote mobile Chrome bridge patch preserves Chrome when backends con
     process: { platform: "linux" },
   };
   vm.runInNewContext(`${patched};module.exports=_y;`, context);
+  assert.deepEqual([...context.module.exports()], ["chrome", "iab"]);
+});
+
+test("Linux remote mobile Chrome bridge patch handles current browser-client backend allowlist shape", () => {
+  const source = syntheticCurrentChromeBrowserClientBundle();
+  const patched = applyLinuxRemoteMobileChromeBridgePatch(source);
+
+  assert.notEqual(patched, source);
+  assert.match(patched, /codexLinuxRemoteMobileBrowserBackends/);
+  assert.match(patched, /function N_\(\)\{let e=nl\(y_\);return codexLinuxRemoteMobileBrowserBackends/);
+  assert.equal(applyLinuxRemoteMobileChromeBridgePatch(patched), patched);
+
+  const context = {
+    BROWSER_USE_AVAILABLE_BACKENDS: ["iab"],
+    module: { exports: {} },
+    process: { platform: "linux" },
+  };
+  vm.runInNewContext(`${patched};module.exports=N_;`, context);
   assert.deepEqual([...context.module.exports()], ["chrome", "iab"]);
 });
 

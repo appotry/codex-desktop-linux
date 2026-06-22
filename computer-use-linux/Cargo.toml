@@ -1,6 +1,6 @@
 [package]
 name = "codex-computer-use-linux"
-version = "0.2.6-linux-alpha1"
+version = "0.2.9-linux-alpha1"
 edition = "2021"
 
 [[bin]]
@@ -11,12 +11,17 @@ path = "src/main.rs"
 name = "codex-chrome-extension-host"
 path = "src/bin/codex-chrome-extension-host.rs"
 
+[[bin]]
+name = "codex-computer-use-cosmic"
+path = "src/bin/codex-computer-use-cosmic.rs"
+
 [dependencies]
+mimalloc = { version = "0.1", default-features = false }
 anyhow = "1.0.102"
 atspi = { version = "0.29.0", features = ["tokio"] }
 base64 = "0.22.1"
-cosmic-protocols = { git = "https://github.com/pop-os/cosmic-protocols", rev = "160b086", default-features = false, features = ["client"] }
 evdev = "0.13.2"
+cosmic-protocols = { version = "0.2.0", default-features = false, features = ["client"] }
 futures-util = "0.3.32"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 libc = "0.2"
