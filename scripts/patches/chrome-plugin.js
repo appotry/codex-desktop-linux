@@ -124,79 +124,91 @@ function applyLinuxChromeNativeHostRuntimePatch(currentSource) {
 
   const helper =
     `function codexLinuxChromeNativeHostRuntimeFile(e,t){if(process.platform!==\`linux\`||e==null)return null;for(let n of t){let t=(0,${pathVar}.join)(e,...n);try{if((0,${fsVar}.statSync)(t).isFile())return t}catch{}}return null}function codexLinuxChromeNativeHostRuntimeEnv(e){if(process.platform!==\`linux\`)return null;let t=process.env[e];if(t==null||t.length===0)return null;try{return(0,${fsVar}.statSync)(t).isFile()?t:null}catch{return null}}function codexLinuxChromeNativeHostRuntimePath(e){if(process.platform!==\`linux\`)return null;for(let t of(process.env.PATH??\`\`).split(\`:\`)){if(t.length===0)continue;let n=(0,${pathVar}.join)(t,e);try{if((0,${fsVar}.statSync)(n).isFile())return n}catch{}}return null}function codexLinuxChromeNativeHostRuntimeEntry(e,t){return e==null?null:{path:e,source:t}}`;
-  const modernRuntimeResolverPatch = applyModernChromeNativeHostRuntimePatch(
-    currentSource,
-    helper,
+  let source = currentSource;
+  let needsHelper = false;
+
+  // --- Apply all matching patterns in sequence ---
+
+  // 1. Modern CODEX_BROWSER_USE_NODE_PATH-based resolver
+  const modernPatch = applyModernChromeNativeHostRuntimePatch(source, helper);
+  if (modernPatch != null) {
+    source = modernPatch;
+    needsHelper = true;
+  }
+
+  // 2. App server runtime patch (old XB-style async function)
+  const appPatch = applyChromePluginAppServerRuntimePatch(source, helper);
+  if (appPatch != null) {
+    source = appPatch;
+    needsHelper = true;
+  }
+
+  // 3. New xB-style async function that only resolves codex via ZB-like
+  //    function without Linux fallbacks. Pattern:
+  //      async function [name]([p]){let [v]=FN([p]);if([v]==null)throw Error(`Missing bundled Electron Codex runtime...
+  //    We inject CODEX_CLI_PATH env var and PATH fallbacks before the error.
+  if (!source.includes("codexLinuxChromeNativeHostRuntimeFile")) {
+    const xbRegex =
+      /async function ([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*)\)\{let ([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\(\2\);if\(\3==null\)throw Error\(`Missing bundled Electron Codex runtime/;
+    const xbMatch = source.match(xbRegex);
+    if (xbMatch != null) {
+      const [, resolverName, configVar, codexVar, fnName] = xbMatch;
+      const original = xbMatch[0];
+      const patched =
+        `async function ${resolverName}(${configVar}){let ${codexVar}=${fnName}(${configVar})??codexLinuxChromeNativeHostRuntimeEnv(\`CODEX_CLI_PATH\`)??codexLinuxChromeNativeHostRuntimePath(\`codex\`)??${fnName}(${configVar});if(${codexVar}==null)throw Error(\`Missing bundled Electron Codex runtime`;
+      source = source.replace(original, patched);
+      needsHelper = true;
+    }
+  }
+
+  // 4. Old-style patterns using "Missing bundled Electron runtime required to sync Chrome native host resources"
+  const hasOldError = source.includes(
+    "Missing bundled Electron runtime required to sync Chrome native host resources",
   );
-  if (modernRuntimeResolverPatch != null) {
-    return modernRuntimeResolverPatch;
+  if (hasOldError) {
+    // 4a. Three-variable resolver: let [codex]=FN([p].resourcesPath)??FN([p].devRuntimeRepoRoot,[ext,bin,codex]),[node]=...
+    const runtimeResolverRegex =
+      /function ([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*)\)\{let ([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\(\2\.resourcesPath\)\?\?([A-Za-z_$][\w$]*)\(\2\.devRuntimeRepoRoot,\[`extension`,`bin`,process\.platform===`win32`\?`codex\.exe`:`codex`\]\),([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\(\2\.resourcesPath\)\?\?\5\(\2\.devRuntimeRepoRoot,\[`electron`,`bin`,process\.platform===`win32`\?`node\.exe`:`node`\]\),([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\(\2\.resourcesPath\)\?\?\5\(\2\.devRuntimeRepoRoot,\[`electron`,`bin`,process\.platform===`win32`\?`node_repl\.exe`:`node_repl`\]\),/;
+    const oldMatch = source.match(runtimeResolverRegex);
+    if (oldMatch != null) {
+      const [orig, resolverName, configVar, codexVar, codexResourceFn, devRuntimeFn, nodeVar, nodeResourceFn, nodeReplVar, nodeReplResourceFn] = oldMatch;
+      const patched =
+        `${helper}function ${resolverName}(${configVar}){let ${codexVar}=${codexResourceFn}(${configVar}.resourcesPath)??codexLinuxChromeNativeHostRuntimeEnv(\`CODEX_CLI_PATH\`)??codexLinuxChromeNativeHostRuntimePath(\`codex\`)??${devRuntimeFn}(${configVar}.devRuntimeRepoRoot,[\`extension\`,\`bin\`,process.platform===\`win32\`?\`codex.exe\`:\`codex\`]),${nodeVar}=${nodeResourceFn}(${configVar}.resourcesPath)??codexLinuxChromeNativeHostRuntimeEnv(\`CODEX_BROWSER_USE_NODE_PATH\`)??codexLinuxChromeNativeHostRuntimeEnv(\`NODE_REPL_NODE_PATH\`)??codexLinuxChromeNativeHostRuntimeFile(${configVar}.resourcesPath,[[\`node-runtime\`,\`bin\`,process.platform===\`win32\`?\`node.exe\`:\`node\`]])??${devRuntimeFn}(${configVar}.devRuntimeRepoRoot,[\`electron\`,\`bin\`,process.platform===\`win32\`?\`node.exe\`:\`node\`]),${nodeReplVar}=${nodeReplResourceFn}(${configVar}.resourcesPath)??codexLinuxChromeNativeHostRuntimeEnv(\`CODEX_NODE_REPL_PATH\`)??codexLinuxChromeNativeHostRuntimeFile(${configVar}.resourcesPath,[[process.platform===\`win32\`?\`node_repl.exe\`:\`node_repl\`]])??${devRuntimeFn}(${configVar}.devRuntimeRepoRoot,[\`electron\`,\`bin\`,process.platform===\`win32\`?\`node_repl.exe\`:\`node_repl\`]),`;
+      source = source.replace(orig, patched);
+      needsHelper = true;
+    }
+
+    // 4b. Current two-variable/one-variable resolver: let [codex]=FN([p].resourcesPath)??FN([p].devRuntimeRepoRoot,...),[node]=FN([p].resourcesPath),[node_repl]=FN([p].resourcesPath),
+    const currentRuntimeResolverRegex =
+      /function ([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*)\)\{let ([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\(\2\.resourcesPath\)\?\?([A-Za-z_$][\w$]*)\(\2\.devRuntimeRepoRoot,\[`extension`,`bin`,process\.platform===`win32`\?`codex\.exe`:`codex`\]\),([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\(\2\.resourcesPath\),([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\(\2\.resourcesPath\),/;
+    const currentMatch = source.match(currentRuntimeResolverRegex);
+    if (currentMatch != null) {
+      const [orig, resolverName, configVar, codexVar, codexResourceFn, devRuntimeFn, nodeVar, nodeResourceFn, nodeReplVar, nodeReplResourceFn] = currentMatch;
+      const patched =
+        `${helper}function ${resolverName}(${configVar}){let ${codexVar}=${codexResourceFn}(${configVar}.resourcesPath)??codexLinuxChromeNativeHostRuntimeEnv(\`CODEX_CLI_PATH\`)??codexLinuxChromeNativeHostRuntimePath(\`codex\`)??${devRuntimeFn}(${configVar}.devRuntimeRepoRoot,[\`extension\`,\`bin\`,process.platform===\`win32\`?\`codex.exe\`:\`codex\`]),${nodeVar}=${nodeResourceFn}(${configVar}.resourcesPath)??codexLinuxChromeNativeHostRuntimeEnv(\`CODEX_BROWSER_USE_NODE_PATH\`)??codexLinuxChromeNativeHostRuntimeEnv(\`NODE_REPL_NODE_PATH\`)??codexLinuxChromeNativeHostRuntimeFile(${configVar}.resourcesPath,[[\`node-runtime\`,\`bin\`,process.platform===\`win32\`?\`node.exe\`:\`node\`]])??${devRuntimeFn}(${configVar}.devRuntimeRepoRoot,[\`electron\`,\`bin\`,process.platform===\`win32\`?\`node.exe\`:\`node\`]),${nodeReplVar}=${nodeReplResourceFn}(${configVar}.resourcesPath)??codexLinuxChromeNativeHostRuntimeEnv(\`CODEX_NODE_REPL_PATH\`)??codexLinuxChromeNativeHostRuntimeFile(${configVar}.resourcesPath,[[process.platform===\`win32\`?\`node_repl.exe\`:\`node_repl\`]])??${devRuntimeFn}(${configVar}.devRuntimeRepoRoot,[\`electron\`,\`bin\`,process.platform===\`win32\`?\`node_repl.exe\`:\`node_repl\`]),`;
+      source = source.replace(orig, patched);
+      needsHelper = true;
+    }
+
+    if (!needsHelper) {
+      console.warn(
+        "WARN: Could not identify Chrome native host runtime resolver shape — skipping Linux runtime path patch",
+      );
+      return source;
+    }
   }
 
-  const missingRuntimeMessage =
-    "Missing bundled Electron runtime required to sync Chrome native host resources";
-  if (!currentSource.includes(missingRuntimeMessage)) {
-    console.warn(
-      "WARN: Could not find Chrome native host runtime resolver — skipping Linux runtime path patch",
-    );
-    return currentSource;
+  if (!needsHelper) {
+    return source;
   }
 
-  const appServerRuntimePatch = applyChromePluginAppServerRuntimePatch(
-    currentSource,
-    helper,
-  );
-  if (appServerRuntimePatch != null) {
-    return appServerRuntimePatch;
+  // If the helper was injected as part of a replacement (patterns 4a/4b), it is
+  // already in the source. For patterns 1-3, prepend it once.
+  if (!source.includes("codexLinuxChromeNativeHostRuntimeFile")) {
+    source = helper + source;
   }
 
-  const runtimeResolverRegex =
-    /function ([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*)\)\{let ([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\(\2\.resourcesPath\)\?\?([A-Za-z_$][\w$]*)\(\2\.devRuntimeRepoRoot,\[`extension`,`bin`,process\.platform===`win32`\?`codex\.exe`:`codex`\]\),([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\(\2\.resourcesPath\)\?\?\5\(\2\.devRuntimeRepoRoot,\[`electron`,`bin`,process\.platform===`win32`\?`node\.exe`:`node`\]\),([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\(\2\.resourcesPath\)\?\?\5\(\2\.devRuntimeRepoRoot,\[`electron`,`bin`,process\.platform===`win32`\?`node_repl\.exe`:`node_repl`\]\),/;
-  const match = currentSource.match(runtimeResolverRegex);
-  if (match != null) {
-    const [
-      originalPrefix,
-      resolverName,
-      configVar,
-      codexVar,
-      codexResourceFn,
-      devRuntimeFn,
-      nodeVar,
-      nodeResourceFn,
-      nodeReplVar,
-      nodeReplResourceFn,
-    ] = match;
-    const replacement =
-      `${helper}function ${resolverName}(${configVar}){let ${codexVar}=${codexResourceFn}(${configVar}.resourcesPath)??codexLinuxChromeNativeHostRuntimeEnv(\`CODEX_CLI_PATH\`)??codexLinuxChromeNativeHostRuntimePath(\`codex\`)??${devRuntimeFn}(${configVar}.devRuntimeRepoRoot,[\`extension\`,\`bin\`,process.platform===\`win32\`?\`codex.exe\`:\`codex\`]),${nodeVar}=${nodeResourceFn}(${configVar}.resourcesPath)??codexLinuxChromeNativeHostRuntimeEnv(\`CODEX_BROWSER_USE_NODE_PATH\`)??codexLinuxChromeNativeHostRuntimeEnv(\`NODE_REPL_NODE_PATH\`)??codexLinuxChromeNativeHostRuntimeFile(${configVar}.resourcesPath,[[\`node-runtime\`,\`bin\`,process.platform===\`win32\`?\`node.exe\`:\`node\`]])??${devRuntimeFn}(${configVar}.devRuntimeRepoRoot,[\`electron\`,\`bin\`,process.platform===\`win32\`?\`node.exe\`:\`node\`]),${nodeReplVar}=${nodeReplResourceFn}(${configVar}.resourcesPath)??codexLinuxChromeNativeHostRuntimeEnv(\`CODEX_NODE_REPL_PATH\`)??codexLinuxChromeNativeHostRuntimeFile(${configVar}.resourcesPath,[[process.platform===\`win32\`?\`node_repl.exe\`:\`node_repl\`]])??${devRuntimeFn}(${configVar}.devRuntimeRepoRoot,[\`electron\`,\`bin\`,process.platform===\`win32\`?\`node_repl.exe\`:\`node_repl\`]),`;
-
-    return currentSource.replace(originalPrefix, replacement);
-  }
-
-  const currentRuntimeResolverRegex =
-    /function ([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*)\)\{let ([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\(\2\.resourcesPath\)\?\?([A-Za-z_$][\w$]*)\(\2\.devRuntimeRepoRoot,\[`extension`,`bin`,process\.platform===`win32`\?`codex\.exe`:`codex`\]\),([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\(\2\.resourcesPath\),([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\(\2\.resourcesPath\),/;
-  const currentMatch = currentSource.match(currentRuntimeResolverRegex);
-  if (currentMatch == null) {
-    console.warn(
-      "WARN: Could not identify Chrome native host runtime resolver shape — skipping Linux runtime path patch",
-    );
-    return currentSource;
-  }
-
-  const [
-    originalPrefix,
-    resolverName,
-    configVar,
-    codexVar,
-    codexResourceFn,
-    devRuntimeFn,
-    nodeVar,
-    nodeResourceFn,
-    nodeReplVar,
-    nodeReplResourceFn,
-  ] = currentMatch;
-  const replacement =
-    `${helper}function ${resolverName}(${configVar}){let ${codexVar}=${codexResourceFn}(${configVar}.resourcesPath)??codexLinuxChromeNativeHostRuntimeEnv(\`CODEX_CLI_PATH\`)??codexLinuxChromeNativeHostRuntimePath(\`codex\`)??${devRuntimeFn}(${configVar}.devRuntimeRepoRoot,[\`extension\`,\`bin\`,process.platform===\`win32\`?\`codex.exe\`:\`codex\`]),${nodeVar}=${nodeResourceFn}(${configVar}.resourcesPath)??codexLinuxChromeNativeHostRuntimeEnv(\`CODEX_BROWSER_USE_NODE_PATH\`)??codexLinuxChromeNativeHostRuntimeEnv(\`NODE_REPL_NODE_PATH\`)??codexLinuxChromeNativeHostRuntimeFile(${configVar}.resourcesPath,[[\`node-runtime\`,\`bin\`,process.platform===\`win32\`?\`node.exe\`:\`node\`]])??${devRuntimeFn}(${configVar}.devRuntimeRepoRoot,[\`electron\`,\`bin\`,process.platform===\`win32\`?\`node.exe\`:\`node\`]),${nodeReplVar}=${nodeReplResourceFn}(${configVar}.resourcesPath)??codexLinuxChromeNativeHostRuntimeEnv(\`CODEX_NODE_REPL_PATH\`)??codexLinuxChromeNativeHostRuntimeFile(${configVar}.resourcesPath,[[process.platform===\`win32\`?\`node_repl.exe\`:\`node_repl\`]])??${devRuntimeFn}(${configVar}.devRuntimeRepoRoot,[\`electron\`,\`bin\`,process.platform===\`win32\`?\`node_repl.exe\`:\`node_repl\`]),`;
-
-  return currentSource.replace(originalPrefix, replacement);
+  return source;
 }
 
 function applyChromePluginAppServerRuntimePatch(currentSource, helper) {

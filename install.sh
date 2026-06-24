@@ -110,6 +110,10 @@ main() {
     download_electron
     extract_webview "$app_dir"
     install_app
+    # Ensure resources/codex symlink exists for upstream's direct lookup
+    # (the new xB function looks for codex at resourcesPath root, not in bin/)
+    mkdir -p "$INSTALL_DIR/resources/bin"
+    [ -L "$INSTALL_DIR/resources/codex" ] || ln -sfn bin/codex "$INSTALL_DIR/resources/codex"
     install_bundled_plugin_resources "$app_dir"
     run_linux_feature_stage_hooks "$app_dir"
     create_start_script
