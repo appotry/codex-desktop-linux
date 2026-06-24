@@ -326,6 +326,23 @@ fn update_install_is_pending(status: &UpdateStatus) -> bool {
     )
 }
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum PendingInstallRecovery {
+    NoChange,
+    CandidateInstalled,
+    SupersededByInstalledVersion,
+}
+
+impl PendingInstallRecovery {
+    fn completed(self) -> bool {
+        !matches!(self, Self::NoChange)
+    }
+
+    fn should_notify_installed(self) -> bool {
+        matches!(self, Self::CandidateInstalled)
+    }
+}
+
 async fn run_daemon(
     config: &RuntimeConfig,
     state: &mut PersistedState,
@@ -338,7 +355,6 @@ async fn run_daemon(
     normalize_workspace_dir_and_persist(state, paths)?;
     maybe_prune_workspace_cache(&config.workspace_root, state);
     maybe_notify_cli_missing(state, paths, config.notifications)?;
-    maybe_notify_installed(state, paths, config.notifications)?;
     if packaged_runtime_removed(config) {
         info!("packaged app files are gone; stopping updater daemon");
         return Ok(());
@@ -399,7 +415,6 @@ async fn run_check_now(
     normalize_workspace_dir_and_persist(state, paths)?;
     maybe_prune_workspace_cache(&config.workspace_root, state);
     maybe_notify_cli_missing(state, paths, config.notifications)?;
-    maybe_notify_installed(state, paths, config.notifications)?;
     if if_stale && upstream_check_is_fresh(config, state) {
         if let Err(error) = detect_and_record_wrapper_update(config, state, paths) {
             warn!(
@@ -570,7 +585,7 @@ fn run_status(
 ) -> Result<()> {
     codex_cli::reconcile_if_present(state, paths)?;
     complete_current_dmg_update_if_already_installed(config, state, paths)?;
-    complete_pending_install_if_already_installed(state, paths)?;
+    let _ = complete_pending_install_if_already_installed(state, paths)?;
     normalize_workspace_dir_and_persist(state, paths)?;
     if !config.enable_wrapper_updates {
         clear_wrapper_update_candidate_and_persist(state, paths)?;
@@ -977,8 +992,11 @@ async fn reconcile_pending_install(
 ) -> Result<()> {
     sync_runtime_state(config, state);
     recover_interrupted_install(state, paths)?;
-    if complete_pending_install_if_already_installed(state, paths)? {
-        let _ = maybe_notify_installed(state, paths, config.notifications);
+    let pending_recovery = complete_pending_install_if_already_installed(state, paths)?;
+    if pending_recovery.completed() {
+        if pending_recovery.should_notify_installed() {
+            let _ = maybe_notify_installed(state, paths, config.notifications);
+        }
         return Ok(());
     }
 
@@ -1092,8 +1110,11 @@ async fn run_install_ready(
         return Ok(());
     }
 
-    if complete_pending_install_if_already_installed(state, paths)? {
-        let _ = maybe_notify_installed(state, paths, config.notifications);
+    let pending_recovery = complete_pending_install_if_already_installed(state, paths)?;
+    if pending_recovery.completed() {
+        if pending_recovery.should_notify_installed() {
+            let _ = maybe_notify_installed(state, paths, config.notifications);
+        }
         println!("Codex Desktop update is already installed or superseded.");
         return Ok(());
     }
@@ -1286,22 +1307,27 @@ fn upstream_dmg_sha256_from_build_info(path: &Path) -> Option<String> {
 fn complete_pending_install_if_already_installed(
     state: &mut PersistedState,
     paths: &RuntimePaths,
-) -> Result<bool> {
+) -> Result<PendingInstallRecovery> {
     if !matches!(
         state.status,
         UpdateStatus::ReadyToInstall | UpdateStatus::WaitingForAppExit
     ) {
-        return Ok(false);
+        return Ok(PendingInstallRecovery::NoChange);
     }
 
     let Some(candidate_version) = state.candidate_version.clone().filter(|candidate| {
         installed_version_satisfies_candidate(&state.installed_version, candidate)
     }) else {
-        return Ok(false);
+        return Ok(PendingInstallRecovery::NoChange);
     };
 
     let candidate_is_installed =
         installed_version_matches_candidate(&state.installed_version, &candidate_version);
+    let recovery = if candidate_is_installed {
+        PendingInstallRecovery::CandidateInstalled
+    } else {
+        PendingInstallRecovery::SupersededByInstalledVersion
+    };
 
     state.status = UpdateStatus::Installed;
     state.waiting_for_app_exit_auto_install = false;
@@ -1314,7 +1340,7 @@ fn complete_pending_install_if_already_installed(
     cache_cleanup::normalize_artifact_workspace_dir(&paths.cache_dir, state);
     persist_state(paths, state)?;
     info!("recovered pending install state because the candidate version is already installed or superseded");
-    Ok(true)
+    Ok(recovery)
 }
 
 fn recover_interrupted_install(state: &mut PersistedState, paths: &RuntimePaths) -> Result<()> {
@@ -3234,9 +3260,10 @@ mod tests {
             .notified_events
             .insert("install_auth_required:2026.04.28.082247+abcdef12".to_string());
 
-        assert!(complete_pending_install_if_already_installed(
-            &mut state, &paths
-        )?);
+        assert_eq!(
+            complete_pending_install_if_already_installed(&mut state, &paths)?,
+            PendingInstallRecovery::CandidateInstalled
+        );
 
         assert_eq!(state.status, UpdateStatus::Installed);
         assert_eq!(state.candidate_version, None);
@@ -3271,9 +3298,10 @@ mod tests {
                 .join("cache/workspaces/2026.04.28.082247+abcdef12"),
         );
 
-        assert!(complete_pending_install_if_already_installed(
-            &mut state, &paths
-        )?);
+        assert_eq!(
+            complete_pending_install_if_already_installed(&mut state, &paths)?,
+            PendingInstallRecovery::SupersededByInstalledVersion
+        );
 
         assert_eq!(state.status, UpdateStatus::Installed);
         assert_eq!(state.candidate_version, None);
@@ -3282,6 +3310,62 @@ mod tests {
         assert_eq!(state.error_message, None);
         crate::rollback::record_current_package_as_known_good(&mut state);
         assert_eq!(state.artifact_paths.rollback_package_path, None);
+        Ok(())
+    }
+
+    #[test]
+    fn matching_pending_install_recovery_records_installed_notification_event() -> Result<()> {
+        let temp = tempfile::tempdir()?;
+        let paths = test_paths(temp.path());
+        paths.ensure_dirs()?;
+
+        let mut state = PersistedState::new(true);
+        state.status = UpdateStatus::ReadyToInstall;
+        state.installed_version = "2026.04.28.082247-abcdef12.fc43".to_string();
+        state.candidate_version = Some("2026.04.28.082247+abcdef12".to_string());
+
+        let recovery = complete_pending_install_if_already_installed(&mut state, &paths)?;
+        if recovery.should_notify_installed() {
+            maybe_notify_installed(&mut state, &paths, false)?;
+        }
+
+        assert_eq!(state.status, UpdateStatus::Installed);
+        assert_eq!(state.candidate_version, None);
+        assert!(state
+            .notified_events
+            .contains("installed:2026.04.28.082247-abcdef12.fc43"));
+        Ok(())
+    }
+
+    #[test]
+    fn superseded_pending_install_recovery_skips_installed_notification_event() -> Result<()> {
+        let temp = tempfile::tempdir()?;
+        let paths = test_paths(temp.path());
+        paths.ensure_dirs()?;
+
+        let package_path = temp.path().join("superseded.pkg.tar.zst");
+        std::fs::write(&package_path, b"package")?;
+
+        let mut state = PersistedState::new(true);
+        state.status = UpdateStatus::ReadyToInstall;
+        state.installed_version = "2026.06.24.051729-1".to_string();
+        state.candidate_version = Some("2026.06.24.050316+4bb552bf".to_string());
+        state.artifact_paths.package_path = Some(package_path);
+        state
+            .notified_events
+            .insert("ready_to_install:2026.06.24.050316+4bb552bf".to_string());
+
+        let recovery = complete_pending_install_if_already_installed(&mut state, &paths)?;
+        if recovery.should_notify_installed() {
+            maybe_notify_installed(&mut state, &paths, false)?;
+        }
+
+        assert_eq!(state.status, UpdateStatus::Installed);
+        assert_eq!(state.candidate_version, None);
+        assert!(!state
+            .notified_events
+            .iter()
+            .any(|event| event.starts_with("installed:")));
         Ok(())
     }
 
