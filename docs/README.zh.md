@@ -18,7 +18,7 @@
 | Fedora | `make bootstrap-native` | 构建并安装 `.rpm` |
 | openSUSE | `make bootstrap-native` | 构建并安装 `.rpm` |
 | Arch, Manjaro, EndeavourOS | `make bootstrap-native` | 构建并安装 pacman 包 |
-| NixOS / Nix | `nix run github:ilysenko/codex-desktop-linux` | 参见 [Nix 文档](docs/nix.md) |
+| NixOS / Nix | `nix run github:ilysenko/codex-desktop-linux` | 参见 [Nix 文档](nix.md) |
 | 原子桌面/其他发行版 | `make build-app && make appimage` | 本地自构建，无自动更新 |
 
 原生安装：
@@ -54,7 +54,7 @@ sudo dnf groupinstall 'Development Tools'
 make setup-native
 ```
 
-详情参见 [Native setup](docs/native-setup.md)，包含向导、非交互式功能选择、清理流程和 `PACKAGE_WITH_UPDATER=0`。
+详情参见 [Native setup](native-setup.md)，包含向导、非交互式功能选择、清理流程和 `PACKAGE_WITH_UPDATER=0`。
 
 ---
 
@@ -64,7 +64,7 @@ make setup-native
 
 运行时仍需 Codex CLI。首次启动可通过内置 `npm` 安装或更新 `@openai/codex`，也可自行管理 CLI。
 
-支持 X11 和 Wayland 会话。启动器在 Wayland 下优先使用 XWayland（以获得更好的 Electron 弹窗定位），然后回退到 Electron 的自动 Wayland 处理。GPU、Vulkan 和 `/tmp noexec` 问题的解决方法参见 [Troubleshooting](docs/troubleshooting.md)。
+支持 X11 和 Wayland 会话。启动器在 Wayland 下优先使用 XWayland（以获得更好的 Electron 弹窗定位），然后回退到 Electron 的自动 Wayland 处理。GPU、Vulkan 和 `/tmp noexec` 问题的解决方法参见 [Troubleshooting](troubleshooting.md)。
 
 ---
 
@@ -73,19 +73,19 @@ make setup-native
 | 功能 | 默认 | 启用方式 | 文档 |
 |------|------|---------|------|
 | 标准 Codex Desktop UI | 始终启用 | 安装或运行生成的应用 | 本文档 |
-| 托管的 Linux Node.js 运行时 | 始终启用 | 构建/安装时自动捆绑 | [构建与打包](docs/build-and-packaging.md) |
-| 原生包 | 始终启用 | `make package && make install` | [构建与打包](docs/build-and-packaging.md) |
-| 自动更新管理器 | 原生包 | 默认包含，`PACKAGE_WITH_UPDATER=0` 除外 | [更新器](docs/updater.md) |
-| AppImage 自构建 | 手动 | `make build-app && make appimage` | [构建与打包](docs/build-and-packaging.md#appimage-local-self-build) |
-| Nix flake | 手动 | `nix run github:ilysenko/codex-desktop-linux` | [Nix](docs/nix.md) |
-| GUI 安装提示 | 如已安装 | 使用 `kdialog` / `zenity`，回退到终端 | [原生安装](docs/native-setup.md) |
-| Linux 文件管理器集成 | 始终启用 | 内置于核心 Linux 补丁 | [架构](docs/architecture.md) |
-| Chrome 插件原生主机 | 始终启用 | 与捆绑插件一同安装 | [架构](docs/architecture.md) |
-| 浏览器标注 | 始终启用 | 内置于修补后的 webview | [架构](docs/architecture.md) |
-| 托盘和热启动切换 | 始终启用 | 正常启动应用即可 | [架构](docs/architecture.md) |
-| 多实例 | 可选 | `./codex-app/start.sh --new-instance` | [构建与打包](docs/build-and-packaging.md#running-the-generated-app) |
-| Linux Computer Use 后端 | 捆绑 | MCP 后端默认注册 | [Linux Computer Use](docs/linux-computer-use.md) |
-| Linux Computer Use UI | 可选 | `CODEX_LINUX_ENABLE_COMPUTER_USE_UI=1` 或设置标志 | [Linux Computer Use](docs/linux-computer-use.md#enable-the-in-app-ui) |
+| 托管的 Linux Node.js 运行时 | 始终启用 | 构建/安装时自动捆绑 | [构建与打包](build-and-packaging.md) |
+| 原生包 | 始终启用 | `make package && make install` | [构建与打包](build-and-packaging.md) |
+| 自动更新管理器 | 原生包 | 默认包含，`PACKAGE_WITH_UPDATER=0` 除外 | [更新器](updater.md) |
+| AppImage 自构建 | 手动 | `make build-app && make appimage` | [构建与打包](build-and-packaging.md#appimage-local-self-build) |
+| Nix flake | 手动 | `nix run github:ilysenko/codex-desktop-linux` | [Nix](nix.md) |
+| GUI 安装提示 | 如已安装 | 使用 `kdialog` / `zenity`，回退到终端 | [原生安装](native-setup.md) |
+| Linux 文件管理器集成 | 始终启用 | 内置于核心 Linux 补丁 | [架构](architecture.md) |
+| Chrome 插件原生主机 | 始终启用 | 与捆绑插件一同安装 | [架构](architecture.md) |
+| 浏览器标注 | 始终启用 | 内置于修补后的 webview | [架构](architecture.md) |
+| 托盘和热启动切换 | 始终启用 | 正常启动应用即可 | [架构](architecture.md) |
+| 多实例 | 可选 | `./codex-app/start.sh --new-instance` | [构建与打包](build-and-packaging.md#running-the-generated-app) |
+| Linux Computer Use 后端 | 捆绑 | MCP 后端默认注册 | [Linux Computer Use](linux-computer-use.md) |
+| Linux Computer Use UI | 可选 | `CODEX_LINUX_ENABLE_COMPUTER_USE_UI=1` 或设置标志 | [Linux Computer Use](linux-computer-use.md#enable-the-in-app-ui) |
 | Linux Features 框架 | 可选 | 编辑 `linux-features/features.json` | [Linux Features](linux-features/README.md) |
 | Agent Workspaces | 可选 | `agent-workspace` | [文档](linux-features/agent-workspace/README.md) |
 | Linux AppShots | 可选 | `appshots` | [文档](linux-features/appshots/README.md) |
@@ -130,7 +130,7 @@ cp linux-features/features.example.json linux-features/features.json
 make install-native
 ```
 
-完整约定：`linux-features/README.md` 和 [`docs/linux-features-architecture.md`](docs/linux-features-architecture.md)。
+完整约定：`linux-features/README.md` 和 [`docs/linux-features-architecture.md`](linux-features-architecture.md)。
 
 ---
 
@@ -151,7 +151,7 @@ make install
 PACKAGE_WITH_UPDATER=0 make update-native
 ```
 
-AppImage 构建和仅仓库生成的应用不包含原生包更新器。参见 [Updater](docs/updater.md)。
+AppImage 构建和仅仓库生成的应用不包含原生包更新器。参见 [Updater](updater.md)。
 
 ---
 
@@ -186,7 +186,7 @@ make pacman
 make appimage
 ```
 
-包脚本仅重新打包已生成的 `codex-app/`。它们不会自行下载或提取 DMG。参见 [构建与打包](docs/build-and-packaging.md)。
+包脚本仅重新打包已生成的 `codex-app/`。它们不会自行下载或提取 DMG。参见 [构建与打包](build-and-packaging.md)。
 
 ---
 
@@ -203,22 +203,22 @@ make appimage
 | Computer Use 无输入后端 | 检查 `/dev/uinput`、portal 支持或 `ydotoold` / `ydotool.service` |
 | 更新器似乎卡住 | 检查 `codex-update-manager status --json` 和服务日志 |
 
-完整列表：[Troubleshooting](docs/troubleshooting.md)。
+完整列表：[Troubleshooting](troubleshooting.md)。
 
 ---
 
 ## 项目文档
 
-- [Native setup](docs/native-setup.md) — 原生安装向导
-- [Nix](docs/nix.md) — Nix flake 使用说明
-- [Linux Computer Use](docs/linux-computer-use.md) — Linux Computer Use 后端
-- [Updater](docs/updater.md) — 更新管理器设计
-- [Build and packaging](docs/build-and-packaging.md) — 构建流水线和打包参考
-- [Troubleshooting](docs/troubleshooting.md) — 常见问题排查
-- [Architecture](docs/architecture.md) — 整体架构
-- [GitHub CLI auth](docs/github-cli-auth.md) — GitHub CLI 认证
-- [Linux Features architecture](docs/linux-features-architecture.md) — Linux 功能框架
-- [Webview server evaluation](docs/webview-server-evaluation.md) — Webview 服务评估
+- [Native setup](native-setup.md) — 原生安装向导
+- [Nix](nix.md) — Nix flake 使用说明
+- [Linux Computer Use](linux-computer-use.md) — Linux Computer Use 后端
+- [Updater](updater.md) — 更新管理器设计
+- [Build and packaging](build-and-packaging.md) — 构建流水线和打包参考
+- [Troubleshooting](troubleshooting.md) — 常见问题排查
+- [Architecture](architecture.md) — 整体架构
+- [GitHub CLI auth](github-cli-auth.md) — GitHub CLI 认证
+- [Linux Features architecture](linux-features-architecture.md) — Linux 功能框架
+- [Webview server evaluation](webview-server-evaluation.md) — Webview 服务评估
 
 ---
 
