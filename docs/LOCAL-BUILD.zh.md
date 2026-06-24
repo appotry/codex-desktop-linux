@@ -18,9 +18,53 @@ OpenAI Codex Desktop 官方只提供 macOS 和 Windows 版。[ilysenko/codex-des
 
 ---
 
-## 2. 前置条件
+## 2. 直接下载安装（无需构建）
 
-### 2.1 系统依赖
+如果不想从源码构建，可以直接从 GitHub Releases 下载预构建的安装包。
+
+### 2.1 从 Releases 下载
+
+访问 [GitHub Releases 页面](https://github.com/appotry/codex-desktop-linux/releases)，根据你的发行版选择对应包：
+
+| 发行版 | 下载文件 | 说明 |
+|--------|---------|------|
+| Debian / Ubuntu / Pop!_OS / Mint | `codex-desktop_*.deb` | 通用 deb 包 |
+| Fedora / RHEL / openSUSE | `codex-desktop-*.rpm` | 通用 rpm 包 |
+| Arch / Manjaro / EndeavourOS | `codex-desktop-*.pkg.tar.zst` | Pacman 包 |
+| 任何发行版 | `codex-desktop-*.AppImage` | 无需安装，直接运行 |
+
+### 2.2 安装方法
+
+```bash
+# Debian/Ubuntu（替换 * 为实际版本号）
+sudo dpkg -i codex-desktop_*.deb
+sudo apt install -f   # 如有依赖问题
+
+# Fedora/RHEL
+sudo rpm -ivh codex-desktop-*.rpm
+
+# Arch Linux
+sudo pacman -U codex-desktop-*.pkg.tar.zst
+
+# AppImage（无需安装）
+chmod +x codex-desktop-*.AppImage
+./codex-desktop-*.AppImage
+```
+
+安装后启动：
+```bash
+codex-desktop
+```
+
+首次启动会提示安装 Codex CLI，按引导操作即可。
+
+> **注意**：预构建包可能与你的系统不完全兼容。如有问题，请从源码构建（见 §4 源码构建）。
+
+---
+
+## 3. 前置条件
+
+### 7.1 系统依赖
 
 ```bash
 # Ubuntu/Debian
@@ -47,11 +91,11 @@ export ELECTRON_MIRROR="https://npmmirror.com/mirrors/electron/"
 
 ---
 
-## 3. 网络加速（国内用户必读）
+## 4. 网络加速（国内用户必读）
 
 海外用户可跳过此节。国内访问 GitHub / crates.io / OpenAI CDN 极慢，必须配置。
 
-### 3.1 cargo 镜像
+### 7.1 cargo 镜像
 
 国内访问 crates.io 极慢，必须配置镜像：
 
@@ -72,7 +116,7 @@ curl -sI --max-time 10 "https://mirrors.sjtug.sjtu.edu.cn/crates.io-index/config
 # 应返回 HTTP/2 200
 ```
 
-### 3.2 预下载大文件
+### 7.2 预下载大文件
 
 用 motrix-next（aria2 前端）多线程下载，避免 curl 单线程超时：
 
@@ -94,9 +138,9 @@ curl -s "http://localhost:30000/jsonrpc" \
 
 ---
 
-## 4. 构建步骤
+## 5. 构建步骤
 
-### 4.1 快速构建（重用缓存）
+### 7.1 快速构建（重用缓存）
 
 ```bash
 cd ~/Work/codex-desktop-linux
@@ -111,7 +155,7 @@ make build-app && make package
 
 > `CODEX_MANAGED_NODE_SOURCE` 和 `CODEX_ELECTRON_ZIP_SOURCE` 是项目原生支持的 env var，不需要修改代码。
 
-### 4.2 完整构建（从零开始）
+### 7.2 完整构建（从零开始）
 
 ```bash
 make install-native
@@ -122,7 +166,7 @@ make install-native
 2. `package` — 打包为 .deb/.rpm
 3. `install` — 安装到系统
 
-### 4.3 分步执行
+### 7.3 分步执行
 
 | 步骤 | 命令 | 说明 |
 |------|------|------|
@@ -131,7 +175,7 @@ make install-native
 | 安装 | `sudo dpkg -i dist/*.deb` | 安装到系统 |
 | 运行 | `./codex-app/start.sh` | 直接运行（不安装） |
 
-### 4.4 网络差时避免重复下载
+### 7.4 网络差时避免重复下载
 
 如果构建时网络不稳定（DNS 超时、下载中断），脚本会反复尝试重新下载 DMG。设置环境变量即可跳过远程检测：
 
@@ -143,7 +187,7 @@ make build-app
 
 这个变量是项目原生的配置项（已提交到本 fork 的 `scripts/lib/dmg.sh`），不涉及代码修改。
 
-## 5. 构建产物
+## 6. 构建产物
 
 | 产物 | 路径 | 大小 |
 |------|------|------|
@@ -153,9 +197,9 @@ make build-app
 
 ---
 
-## 6. 常见问题
+## 7. 常见问题
 
-### 6.1 cargo 下载失败
+### 7.1 cargo 下载失败
 
 ```
 error: failed to get `xxx` as a dependency
@@ -163,7 +207,7 @@ error: failed to get `xxx` as a dependency
 
 → 检查 cargo 镜像配置是否正确，切换到 SJTUG sparse 镜像
 
-### 6.2 Codex.dmg 重复下载
+### 7.2 Codex.dmg 重复下载
 
 脚本每次执行 `--fresh` 时删除缓存。已修改 `Makefile` 中 `install-native` 使用 `build-app`（非 fresh）：
 ```bash
@@ -171,7 +215,7 @@ error: failed to get `xxx` as a dependency
 rm -f Codex.dmg.metadata && make build-app
 ```
 
-### 6.3 Electron 版本不匹配
+### 7.3 Electron 版本不匹配
 
 DMG 中包含的 Electron 版本可能变化，需下载对应的 Linux 版：
 ```bash
@@ -182,7 +226,7 @@ grep -o '"version":"[^"]*"' codex-app/resources/app.asar.unpacked/node_modules/e
 motrix-next download-add url="https://npmmirror.com/mirrors/electron/v<版本>/electron-v<版本>-linux-x64.zip"
 ```
 
-### 6.4 启动找不到 Codex CLI
+### 7.4 启动找不到 Codex CLI
 
 首次启动会提示 `Unable to locate the Codex CLI binary`，因为 Desktop 应用在 `resources/bin/codex` 中查找 CLI。
 
@@ -202,11 +246,11 @@ CODEX_CLI_PATH=$(which codex) /opt/codex-desktop/start.sh
 mise use --global npm:@openai/codex
 ```
 
-### 6.5 Codex Desktop 启动后卡在加载界面
+### 7.5 Codex Desktop 启动后卡在加载界面
 
 如果应用启动后一直显示加载界面，通常是两个原因：
 
-1. **Codex CLI 未找到**（见 §6.4）
+1. **Codex CLI 未找到**（见 §7.4）
 2. **Webview 服务未就绪** — 检查端口 5175 是否被占用：
    ```bash
    ss -tlnp | grep 5175
@@ -218,7 +262,7 @@ mise use --global npm:@openai/codex
 start.sh → webview-server.py (:5175) → electron → 界面显示
 ```
 
-### 6.6 Browser Use 下载失败
+### 7.6 Browser Use 下载失败
 
 构建过程中出现 `Downloading Browser Use node_repl fallback runtime` 卡住，是因为从 OpenAI CDN 下载大文件超时。
 
@@ -239,7 +283,7 @@ curl -s "http://localhost:30000/jsonrpc" \
 
 ---
 
-## 7. 参考
+## 8. 参考
 
 | 资源 | 链接 |
 |------|------|
