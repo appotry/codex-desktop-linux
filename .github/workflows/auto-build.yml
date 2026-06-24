@@ -16,7 +16,7 @@ on:
     paths-ignore:
       - 'docs/**'
       - 'README.md'
-      - 'docs/README.zh.md'
+      - 'README.zh.md'
       - '.gitignore'
   schedule:
     - cron: '0 6 * * *'

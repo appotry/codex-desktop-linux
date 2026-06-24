@@ -5,7 +5,7 @@ The official Codex app is available for macOS and Windows; this repository
 covers Linux by converting the upstream macOS `Codex.dmg` into a runnable Linux
 Electron app.
 
-🇬🇧 [English](./README.md) · 🇨🇳 [简体中文](./docs/README.zh.md)
+🇬🇧 [English](./README.md) · 🇨🇳 [简体中文](./README.zh.md)
 
 The project builds native `.deb`, `.rpm`, and `.pkg.tar.zst` packages, supports
 local AppImage self-builds and Nix, and can install a local update manager that
