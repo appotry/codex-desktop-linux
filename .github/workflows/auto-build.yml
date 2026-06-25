@@ -1,9 +1,11 @@
 # Codex Desktop Linux 自动构建与发布
 #
 # 触发方式：
-#   - 推送到 main 分支
-#   - 每日 6:00 UTC 检测上游更新
+#   - 推送到 releases 分支
 #   - 手动触发 (workflow_dispatch)
+#
+# 注意：推送到 main 的修改会被上游同步覆盖，不要在 main 上工作。
+# 所有修改请推到 releases 分支。
 #
 # 构建策略：同一 job 内完成 build + package，避免 artifact 传递问题
 
@@ -12,14 +14,7 @@ name: Auto Build & Release
 on:
   push:
     branches:
-      - main
-    paths-ignore:
-      - 'docs/**'
-      - 'README.md'
-      - 'README.zh.md'
-      - '.gitignore'
-  schedule:
-    - cron: '0 6 * * *'
+      - releases
   workflow_dispatch:
     inputs:
       force:
