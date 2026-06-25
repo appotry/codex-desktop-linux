@@ -5,6 +5,32 @@ const STORAGE_KEY = "codex-linux-persistent-status-panel-open";
 const statusStatePattern =
   /\{conversationId:[^,]+,threadId:[^,]+,rateLimit:[^,]+,onOpenChange:([A-Za-z_$][\w$]*)\}=e,([A-Za-z_$][\w$]*)=[A-Za-z_$][\w$]*\(\),\[([A-Za-z_$][\w$]*),([A-Za-z_$][\w$]*)\]=\(0,([A-Za-z_$][\w$]*)\.useState\)\(!1\),/;
 
+function countOccurrences(source, needle) {
+  if (needle.length === 0) {
+    return 0;
+  }
+  let count = 0;
+  let index = 0;
+  while ((index = source.indexOf(needle, index)) !== -1) {
+    count += 1;
+    index += needle.length;
+  }
+  return count;
+}
+
+function requireUniqueNeedle(source, needle, description) {
+  const count = countOccurrences(source, needle);
+  if (count === 1) {
+    return true;
+  }
+  if (count === 0) {
+    console.warn(`WARN: Could not find ${description} - skipping persistent status panel patch`);
+  } else {
+    console.warn(`WARN: Found ${count} ${description} occurrences - skipping persistent status panel patch`);
+  }
+  return false;
+}
+
 function applyPersistentStatusPanelPatch(source) {
   if (source.includes(STORAGE_KEY)) {
     return source;
@@ -23,8 +49,11 @@ function applyPersistentStatusPanelPatch(source) {
   const [stateNeedle, onOpenChange, _intl, _isOpen, setIsOpen] = match;
   const openNeedle = `async()=>{${setIsOpen}(!0),${onOpenChange}?.(!0)}`;
   const closeNeedle = `()=>{${setIsOpen}(!1),${onOpenChange}?.(!1)}`;
-  if (!source.includes(openNeedle) || !source.includes(closeNeedle)) {
-    console.warn("WARN: Could not find Codex status panel handlers - skipping persistent status panel patch");
+  if (
+    !requireUniqueNeedle(source, stateNeedle, "Codex status panel state") ||
+    !requireUniqueNeedle(source, openNeedle, "Codex status panel open handler") ||
+    !requireUniqueNeedle(source, closeNeedle, "Codex status panel close handler")
+  ) {
     return source;
   }
 

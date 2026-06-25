@@ -18,6 +18,19 @@ const {
 const composerSource =
   "function av(e){let t=(0,$.c)(26),{conversationId:n,threadId:r,rateLimit:i,onOpenChange:o}=e,s=Wt(),[c,l]=(0,Z.useState)(!1),p;t[0]===s&&(p=1);let b,x;t[10]===o?(b=t[11],x=t[12]):(b=async()=>{l(!0),o?.(!0)},x=[o]);let y=s.formatMessage({id:`composer.statusSlashCommand.description`});if(!c)return null;let C;t[18]===o?C=t[19]:(C=()=>{l(!1),o?.(!1)});return C}";
 
+function captureWarns(fn) {
+  const originalWarn = console.warn;
+  const warnings = [];
+  console.warn = (message) => {
+    warnings.push(message);
+  };
+  try {
+    return { value: fn(), warnings };
+  } finally {
+    console.warn = originalWarn;
+  }
+}
+
 function withFeatureConfig(enabled, fn) {
   const originalConfig = process.env.CODEX_LINUX_FEATURES_CONFIG;
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "persistent-status-panel-"));
@@ -63,16 +76,43 @@ test("status panel preference survives component remounts", () => {
   assert.equal(applyPersistentStatusPanelPatch(patched), patched);
 });
 
+test("ambiguous status panel handler needles are unchanged", () => {
+  const ambiguousSource = composerSource.replace(
+    "let y=s.formatMessage",
+    "let extraOpen=async()=>{l(!0),o?.(!0)},extraClose=()=>{l(!1),o?.(!1)},y=s.formatMessage",
+  );
+
+  const { value: patched, warnings } = captureWarns(() =>
+    applyPersistentStatusPanelPatch(ambiguousSource),
+  );
+
+  assert.equal(patched, ambiguousSource);
+  assert.deepEqual(warnings, [
+    "WARN: Found 2 Codex status panel open handler occurrences - skipping persistent status panel patch",
+  ]);
+});
+
+test("composer bundle with changed status state shape is unchanged", () => {
+  const changedStateSource = composerSource.replace(
+    "{conversationId:n,threadId:r,rateLimit:i,onOpenChange:o}=e,s=Wt(),[c,l]=(0,Z.useState)(!1),",
+    "{threadId:r,conversationId:n,rateLimit:i,onOpenChange:o}=e,s=Wt(),[c,l]=Z.useState(!1),",
+  );
+
+  const { value: patched, warnings } = captureWarns(() =>
+    applyPersistentStatusPanelPatch(changedStateSource),
+  );
+
+  assert.equal(patched, changedStateSource);
+  assert.deepEqual(warnings, [
+    "WARN: Could not find Codex status panel state - skipping persistent status panel patch",
+  ]);
+});
+
 test("unknown composer bundle is unchanged", () => {
-  const originalWarn = console.warn;
-  let warningCount = 0;
-  console.warn = () => {
-    warningCount += 1;
-  };
-  try {
-    assert.equal(applyPersistentStatusPanelPatch("unrelated bundle"), "unrelated bundle");
-    assert.equal(warningCount, 0);
-  } finally {
-    console.warn = originalWarn;
-  }
+  const { value: patched, warnings } = captureWarns(() =>
+    applyPersistentStatusPanelPatch("unrelated bundle"),
+  );
+
+  assert.equal(patched, "unrelated bundle");
+  assert.deepEqual(warnings, []);
 });
