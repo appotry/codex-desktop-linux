@@ -1,5 +1,8 @@
 "use strict";
 
+const fs = require("node:fs");
+const path = require("node:path");
+
 const {
   requireName,
 } = require("../shared.js");
@@ -41,6 +44,23 @@ function applyBrowserUseNodeReplApprovalPatch(currentSource) {
     (_match, runtimeFactoryVar, runtimeFactoryMethod, configPrefix, nodeReplPathVar, comma) => {
       patchedAnyCurrentRuntimeConfig = true;
       return `${runtimeFactoryVar}.${runtimeFactoryMethod}({${configPrefix}nodeReplPath:${nodeReplPathVar}${comma}tools:{js:{approval_mode:\`approve\`}},`;
+    },
+  );
+
+  // 26.623+: the browser-use node_repl mcp server config is emitted as a
+  // standalone object literal `{args:[],command:VAR,env:VAR,startup_timeout_sec:120}`
+  // (env is now a hoisted variable, not the old inline `env:{...}` literal) inside
+  // a separate `src-*.js` chunk. Insert the js auto-approval there.
+  const mcpServerConfigRegex =
+    /(\[`mcp_servers\.\$\{[A-Za-z_$][\w$]*\}`\]:\{args:\[\],command:[A-Za-z_$][\w$]*,env:[A-Za-z_$][\w$]*,)(startup_timeout_sec:120\})/g;
+  const mcpServerConfigAlreadyApprovedRegex =
+    /\[`mcp_servers\.\$\{[A-Za-z_$][\w$]*\}`\]:\{args:\[\],command:[A-Za-z_$][\w$]*,env:[A-Za-z_$][\w$]*,tools:\{js:\{approval_mode:`approve`\}\},startup_timeout_sec:120\}/;
+  let patchedAnyMcpServerConfig = false;
+  patchedSource = patchedSource.replace(
+    mcpServerConfigRegex,
+    (_match, configPrefix, configSuffix) => {
+      patchedAnyMcpServerConfig = true;
+      return `${configPrefix}tools:{js:{approval_mode:\`approve\`}},${configSuffix}`;
     },
   );
 
@@ -94,7 +114,8 @@ function applyBrowserUseNodeReplApprovalPatch(currentSource) {
   if (
     !patchedTrustedHashes &&
     !patchedSource.includes("codexLinuxTrustedBrowserClientSha256s(") &&
-    patchedSource.includes("NODE_REPL_TRUSTED_BROWSER_CLIENT_SHA256S")
+    patchedSource.includes("NODE_REPL_TRUSTED_BROWSER_CLIENT_SHA256S") &&
+    /trustedBrowserClientSha256s:[^,{}]+\|\|/.test(patchedSource)
   ) {
     console.warn(
       "WARN: Could not find Browser Use trusted hash insertion point — skipping Linux Browser Use trusted hash patch",
@@ -103,9 +124,12 @@ function applyBrowserUseNodeReplApprovalPatch(currentSource) {
 
   if (
     patchedSource === currentSource &&
+    patchedSource.includes("startup_timeout_sec:120") &&
     !patchedSource.includes(approvalPatch) &&
     !patchedAnyCurrentRuntimeConfig &&
     !currentRuntimeConfigAlreadyApprovedRegex.test(patchedSource) &&
+    !patchedAnyMcpServerConfig &&
+    !mcpServerConfigAlreadyApprovedRegex.test(patchedSource) &&
     !patchedTrustedHashes &&
     !patchedSource.includes("codexLinuxTrustedBrowserClientSha256s(")
   ) {
@@ -115,6 +139,50 @@ function applyBrowserUseNodeReplApprovalPatch(currentSource) {
   }
 
   return patchedSource;
+}
+
+// 26.623+: the node_repl mcp config (and the NODE_REPL_TRUSTED_BROWSER_CLIENT_SHA256S
+// trusted-hash code) was re-chunked out of the main bundle into a sibling
+// `.vite/build/src-*.js` chunk. Scan every build chunk that carries either marker so
+// the approval patch reaches whichever chunk now hosts the config.
+function applyBrowserUseNodeReplApprovalAssets(extractedDir) {
+  const buildDir = path.join(extractedDir, ".vite", "build");
+  if (!fs.existsSync(buildDir)) {
+    return { matched: 0, changed: 0 };
+  }
+
+  const candidates = fs
+    .readdirSync(buildDir)
+    .filter((name) => name.endsWith(".js"))
+    .sort()
+    .map((name) => path.join(buildDir, name))
+    .filter((candidate) => {
+      try {
+        const source = fs.readFileSync(candidate, "utf8");
+        return (
+          source.includes("startup_timeout_sec:120") ||
+          source.includes("NODE_REPL_TRUSTED_BROWSER_CLIENT_SHA256S")
+        );
+      } catch {
+        return false;
+      }
+    });
+
+  let changed = 0;
+  const pendingWrites = [];
+  for (const candidate of candidates) {
+    const currentSource = fs.readFileSync(candidate, "utf8");
+    const patchedSource = applyBrowserUseNodeReplApprovalPatch(currentSource);
+    if (patchedSource !== currentSource) {
+      changed += 1;
+      pendingWrites.push({ filePath: candidate, patchedSource });
+    }
+  }
+  for (const { filePath, patchedSource } of pendingWrites) {
+    fs.writeFileSync(filePath, patchedSource, "utf8");
+  }
+
+  return { matched: candidates.length, changed };
 }
 
 function applyLinuxBrowserUseRouteLivenessPatch(currentSource) {
@@ -252,6 +320,7 @@ function applyLinuxChromeExtensionStatusPatch(currentSource) {
 
 module.exports = {
   applyBrowserUseNodeReplApprovalPatch,
+  applyBrowserUseNodeReplApprovalAssets,
   applyLinuxBrowserUseRouteLivenessPatch,
   applyLinuxChromeExtensionStatusPatch,
 };

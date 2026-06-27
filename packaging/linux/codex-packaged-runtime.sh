@@ -39,12 +39,11 @@ codex_packaged_runtime_prelaunch_background() {
             YDOTOOL_SOCKET >/dev/null 2>&1 || true
     fi
 
-    if systemctl --user is-enabled codex-update-manager.service >/dev/null 2>&1; then
-        systemctl --user start codex-update-manager.service >/dev/null 2>&1 || true
-    else
-        systemctl --user enable --now codex-update-manager.service >/dev/null 2>&1 || true
+    if ! systemctl --user is-enabled codex-update-manager.service >/dev/null 2>&1; then
+        return 0
     fi
 
+    systemctl --user start codex-update-manager.service >/dev/null 2>&1 || true
     codex_packaged_runtime_trigger_update_check
 }
 

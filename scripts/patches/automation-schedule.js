@@ -33,6 +33,10 @@ function findWorkspaceRootDropHandlerBundles(extractedDir) {
             /^automation-schedule-.*\.js$/.test(path.basename(candidate)) &&
             source.includes("hasMultipleTimeValues") &&
             source.includes("function Tn(")
+          ) ||
+          (
+            source.includes("hasMultipleTimeValues") &&
+            /rruleText:e,time:\w+\(r\.byhour,r\.byminute,r\)/.test(source)
           );
       } catch {
         return false;
@@ -115,11 +119,77 @@ function applyAutomationScheduleMultiTimePatch(source) {
     if (currentPatched !== source) {
       return currentPatched;
     }
+    const genericPatched = applyGenericAutomationScheduleMultiTimePatch(source);
+    if (genericPatched !== source) {
+      return genericPatched;
+    }
     console.warn("WARN: Could not find automation schedule helper block — skipping RRULE multi-time patch");
     return source;
   }
 
   return source.slice(0, block.start) + automationScheduleReplacement(block) + source.slice(block.end);
+}
+
+function applyGenericAutomationScheduleMultiTimePatch(source) {
+  if (source.includes("function codexLinuxNormalizeRruleNumbers(")) {
+    return source;
+  }
+
+  const parserRe =
+    /hasMultipleTimeValues:Array\.isArray\(r\.byhour\)&&r\.byhour\.length>1\|\|Array\.isArray\(r\.byminute\)&&r\.byminute\.length>1,interval:Math\.max\(1,Math\.round\(r\.interval\?\?1\)\),minute:a,origOptions:n\.origOptions,rruleText:e,time:(\w+)\(r\.byhour,r\.byminute,r\),weekdays:i/;
+  const parserMatch = parserRe.exec(source);
+  if (!parserMatch) {
+    return source;
+  }
+  const timeFn = parserMatch[1];
+
+  const helperRe = new RegExp(
+    "function " +
+      timeFn +
+      "\\(e,t,n\\)\\{let r=(\\w+)\\(e\\),i=\\1\\(t\\);return r!=null&&i!=null\\?(\\w+)\\(r,i\\):n\\.dtstart\\?\\2\\(n\\.dtstart\\.getHours\\(\\),n\\.dtstart\\.getMinutes\\(\\)\\):(\\w+)\\}function \\1\\(e\\)\\{return Array\\.isArray\\(e\\)\\?typeof e\\[0\\]==`number`\\?e\\[0\\]:null:typeof e==`number`\\?e:null\\}",
+  );
+  const helperMatch = helperRe.exec(source);
+  if (!helperMatch) {
+    return source;
+  }
+  const helperBlock = helperMatch[0];
+  const combineFn = helperMatch[2];
+
+  const summaryRe =
+    /function (\w+)\(e,t\)\{if\(!e\|\|e\.hasMultipleTimeValues\)return null;[\s\S]*?let i=(\w+)\(e\.time,t\);return i\?(\w+)\(\{intl:t,isEveryDay:r,timeLabel:i,weekdays:n\}\):null\}/;
+  const summaryMatch = summaryRe.exec(source);
+  if (!summaryMatch) {
+    return source;
+  }
+  const summaryBlock = summaryMatch[0];
+  const labelFn = summaryMatch[2];
+
+  const helperPatch =
+    helperBlock +
+    "function codexLinuxNormalizeRruleNumbers(e,t,n){let r=Array.isArray(e)?e:[e];return Array.from(new Set(r.filter(e=>typeof e==`number`&&Number.isInteger(e)&&e>=t&&e<=n))).sort((e,t)=>e-t)}" +
+    "function codexLinuxRruleTimes(e,t,n){let r=codexLinuxNormalizeRruleNumbers(e,0,23),i=codexLinuxNormalizeRruleNumbers(t,0,59);n.dtstart&&(r.length!==0||(r=[n.dtstart.getHours()]),i.length!==0||(i=[n.dtstart.getMinutes()]));let a=[];for(let e of r)for(let t of i)a.push(" +
+    combineFn +
+    "(e,t));return Array.from(new Set(a)).sort()}" +
+    "function codexLinuxAutomationTimeLabel(e,t){let n=Array.isArray(e.timeValues)&&e.timeValues.length>0?e.timeValues:[e.time],r=n.map(e=>" +
+    labelFn +
+    "(e,t)).filter(Boolean);return r.length===0?null:typeof t.formatList==`function`?t.formatList(r,{type:`conjunction`}):r.join(`, `)}";
+
+  const parserPatch =
+    "hasMultipleTimeValues:codexLinuxRruleTimes(r.byhour,r.byminute,r).length>1,interval:Math.max(1,Math.round(r.interval??1)),minute:a,origOptions:n.origOptions,rruleText:e,time:" +
+    timeFn +
+    "(r.byhour,r.byminute,r),timeValues:codexLinuxRruleTimes(r.byhour,r.byminute,r),weekdays:i";
+
+  const summaryPatch = summaryBlock
+    .replace("if(!e||e.hasMultipleTimeValues)return null;", "if(!e)return null;")
+    .replace(
+      "let i=" + labelFn + "(e.time,t);",
+      "let i=codexLinuxAutomationTimeLabel(e,t);",
+    );
+
+  let patched = source.replace(helperBlock, () => helperPatch);
+  patched = patched.replace(parserMatch[0], () => parserPatch);
+  patched = patched.replace(summaryBlock, () => summaryPatch);
+  return patched;
 }
 
 function applyCurrentAutomationScheduleMultiTimePatch(source) {

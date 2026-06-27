@@ -51,6 +51,10 @@ codex_ensure_user_service_running() {
     codex_foreach_user_manager codex_ensure_one_user_service_running
 }
 
+codex_start_enabled_user_service() {
+    codex_foreach_user_manager codex_start_one_enabled_user_service
+}
+
 codex_ensure_one_user_service_running() {
     user_name="$1"
     runtime_dir="$2"
@@ -66,6 +70,22 @@ codex_ensure_one_user_service_running() {
         codex_run_systemctl_user "$user_name" "$runtime_dir" "$bus" start "$SERVICE_NAME" || true
     else
         codex_run_systemctl_user "$user_name" "$runtime_dir" "$bus" enable --now "$SERVICE_NAME" || true
+    fi
+}
+
+codex_start_one_enabled_user_service() {
+    user_name="$1"
+    runtime_dir="$2"
+    bus="$3"
+
+    codex_run_systemctl_user "$user_name" "$runtime_dir" "$bus" daemon-reload || true
+
+    if codex_run_systemctl_user "$user_name" "$runtime_dir" "$bus" is-active "$SERVICE_NAME"; then
+        return
+    fi
+
+    if codex_run_systemctl_user "$user_name" "$runtime_dir" "$bus" is-enabled "$SERVICE_NAME"; then
+        codex_run_systemctl_user "$user_name" "$runtime_dir" "$bus" start "$SERVICE_NAME" || true
     fi
 }
 

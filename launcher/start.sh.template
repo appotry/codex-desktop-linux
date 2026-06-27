@@ -41,6 +41,7 @@ COLD_START_HOOK_DIR="$SCRIPT_DIR/.codex-linux/cold-start.d"
 FEATURE_ENV_DIR="$SCRIPT_DIR/.codex-linux/env.d"
 FEATURE_PRELAUNCH_HOOK_DIR="$SCRIPT_DIR/.codex-linux/prelaunch.d"
 FEATURE_ELECTRON_ARGS_DIR="$SCRIPT_DIR/.codex-linux/electron-args.d"
+FEATURE_LAUNCHER_HOOK_DIR="$SCRIPT_DIR/.codex-linux/launcher.d"
 FEATURE_AFTER_EXIT_HOOK_DIR="$SCRIPT_DIR/.codex-linux/after-exit.d"
 MANAGED_NODE_BIN_DIR="$SCRIPT_DIR/resources/node-runtime/bin"
 APP_NOTIFICATION_ICON_NAME="$CODEX_LINUX_APP_ID"
@@ -2613,6 +2614,92 @@ load_feature_electron_args() {
     done
 }
 
+apply_feature_launcher_hook_env() {
+    local assignment="$1"
+    local name
+    local value
+
+    name="${assignment%%=*}"
+    value="${assignment#*=}"
+    if [ "$name" = "$assignment" ] || [[ ! "$name" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+        echo "Ignoring invalid Linux feature launcher hook env assignment: $assignment"
+        return 0
+    fi
+
+    printf -v "$name" '%s' "$value"
+    export "$name"
+}
+
+apply_feature_launcher_hook_electron_arg() {
+    local arg="$1"
+
+    case "$arg" in
+        --enable-features=*)
+            add_electron_enable_features "${arg#--enable-features=}"
+            ;;
+        *)
+            ELECTRON_ARGS+=("$arg")
+            scan_electron_rendering_arg "$arg"
+            ;;
+    esac
+}
+
+run_feature_launcher_hooks() {
+    [ -n "${FEATURE_LAUNCHER_HOOK_DIR:-}" ] || return 0
+    [ -d "$FEATURE_LAUNCHER_HOOK_DIR" ] || return 0
+
+    local hook
+    local output
+    local status
+    local line
+    local payload
+
+    for hook in "$FEATURE_LAUNCHER_HOOK_DIR"/*; do
+        [ -f "$hook" ] || continue
+        [ -x "$hook" ] || {
+            echo "Skipping non-executable Linux feature launcher hook: $hook"
+            continue
+        }
+
+        echo "Running Linux feature launcher hook: $hook"
+        if output="$(
+            CODEX_HOME="$CODEX_HOME" \
+            CODEX_LINUX_APP_DIR="$SCRIPT_DIR" \
+            CODEX_LINUX_APP_STATE_DIR="$APP_STATE_DIR" \
+            CODEX_LINUX_FEATURES_DIR="$CODEX_LINUX_FEATURES_DIR" \
+            CODEX_LINUX_LAUNCHER_LOG="$LOG_FILE" \
+            CODEX_LINUX_FEATURE_HOOK_PHASE=launcher \
+            "$hook" "${ELECTRON_ARGS[@]}"
+        )"; then
+            :
+        else
+            status=$?
+            echo "WARN: Linux feature launcher hook failed with status $status: $hook"
+            continue
+        fi
+
+        while IFS= read -r line || [ -n "$line" ]; do
+            line="${line%$'\r'}"
+            case "$line" in
+                ""|\#*)
+                    continue
+                    ;;
+                env\ *)
+                    payload="${line#env }"
+                    apply_feature_launcher_hook_env "$payload"
+                    ;;
+                electron-arg\ *)
+                    payload="${line#electron-arg }"
+                    apply_feature_launcher_hook_electron_arg "$payload"
+                    ;;
+                *)
+                    echo "Ignoring unsupported Linux feature launcher hook output from $hook: $line"
+                    ;;
+            esac
+        done <<< "$output"
+    done
+}
+
 build_electron_launch_args() {
     local enable_features_arg
 
@@ -2774,6 +2861,7 @@ launch_electron() {
     load_feature_electron_args
     load_user_electron_flags
     set_electron_defaults "${FEATURE_ELECTRON_ARGS[@]}" "${USER_ELECTRON_FLAGS[@]}" "$@"
+    run_feature_launcher_hooks
     build_electron_launch_args
 
     if [ "$WARM_START" -eq 1 ]; then

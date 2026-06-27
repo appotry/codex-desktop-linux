@@ -9,20 +9,27 @@ if [ -f "$DESKTOP_ENTRY_DOCTOR" ]; then
     . "$DESKTOP_ENTRY_DOCTOR"
 fi
 
-post_install() {
+codex_desktop_post_transaction_common() {
     if command -v update-desktop-database >/dev/null 2>&1; then
         update-desktop-database /usr/share/applications >/dev/null 2>&1 || true
     fi
     if [ -f "$DESKTOP_ENTRY_DOCTOR" ]; then
         codex_desktop_repair_system_package_shadow_entries codex-desktop || true
     fi
+}
+
+post_install() {
+    codex_desktop_post_transaction_common
     if [ -f "$SERVICE_HELPER" ]; then
         codex_ensure_user_service_running || true
     fi
 }
 
 post_upgrade() {
-    post_install
+    codex_desktop_post_transaction_common
+    if [ -f "$SERVICE_HELPER" ]; then
+        codex_start_enabled_user_service || true
+    fi
 }
 
 pre_remove() {

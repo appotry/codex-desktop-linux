@@ -1135,8 +1135,12 @@ test("settings nav patches add a visible read aloud section after computer use",
     "case`computer-use`:z=k.isLoading||m.isLoading;break bb0;",
   ].join("");
   const patchedPage = twice(applySettingsPageNavPatch, page);
-  assert.match(patchedPage, /codexLinuxReadAloudSettingsIcon=e=>/);
-  assert.match(patchedPage, /"read-aloud-settings":codexLinuxReadAloudSettingsIcon/);
+  assert.doesNotMatch(patchedPage, /codexLinuxReadAloudSettingsIcon=e=>/);
+  assert.match(
+    patchedPage,
+    /"read-aloud-settings":\(e=>\{try\{return \(0,Z\.jsxs\)\(`svg`,/,
+  );
+  assert.match(patchedPage, /catch\(t\)\{return oe\(e\)\}\}\)/);
   assert.match(patchedPage, /`computer-use`,`read-aloud-settings`,`data-controls`/);
   assert.match(patchedPage, /`computer-use`,`read-aloud-settings`,`local-environments`/);
   assert.match(patchedPage, /case`read-aloud-settings`:return!0;case`computer-use`/);
@@ -1152,12 +1156,13 @@ test("settings nav patch adds the read aloud icon to the current settings page i
     "case`computer-use`:z=D.isLoading||h.isLoading;break bb0;",
   ].join("");
   const patched = twice(applySettingsPageNavPatch, page);
-  assert.match(patched, /codexLinuxReadAloudSettingsIcon=e=>\(0,\$\.jsxs\)/);
-  assert.doesNotMatch(patched, /codexLinuxReadAloudSettingsIcon=e=>\(0,Z\.jsxs\)/);
+  assert.doesNotMatch(patched, /codexLinuxReadAloudSettingsIcon=e=>/);
   assert.match(
     patched,
-    /"browser-use":me,"computer-use":fe,"read-aloud-settings":codexLinuxReadAloudSettingsIcon,"local-environments":pe/,
+    /"browser-use":me,"computer-use":fe,"read-aloud-settings":\(e=>\{try\{return \(0,\$\.jsxs\)\(`svg`,/,
   );
+  assert.match(patched, /catch\(t\)\{return fe\(e\)\}\}\),"local-environments":pe/);
+  assert.doesNotMatch(patched, /\(0,Z\.jsxs\)/);
   assert.match(patched, /`computer-use`,`read-aloud-settings`,`data-controls`/);
   assert.match(patched, /case`read-aloud-settings`:return!0;case`computer-use`/);
   assert.match(patched, /case`read-aloud-settings`:z=!1;break bb0;case`computer-use`/);
@@ -1182,7 +1187,7 @@ test("settings nav patch adds read aloud visibility before drifted computer-use 
   );
 });
 
-test("settings nav patch defines the read aloud icon before var icon maps", () => {
+test("settings nav patch repairs stale read aloud icon references in var icon maps", () => {
   const page = [
     "var $=i();",
     "var codexLinuxAgentWorkspaceSettingsIcon=e=>(0,$.jsxs)(`svg`,{children:[]});",
@@ -1193,13 +1198,36 @@ test("settings nav patch defines the read aloud icon before var icon maps", () =
     "case`computer-use`:I=T.isLoading||g.isLoading;break bb0;",
   ].join("");
   const patched = twice(applySettingsPageNavPatch, page);
-  assert.match(patched, /var codexLinuxReadAloudSettingsIcon=e=>\(0,\$\.jsxs\)/);
-  assert.ok(
-    patched.indexOf("codexLinuxReadAloudSettingsIcon=e=>") <
-      patched.indexOf('"read-aloud-settings":codexLinuxReadAloudSettingsIcon'),
+  assert.doesNotMatch(patched, /codexLinuxReadAloudSettingsIcon=e=>/);
+  assert.match(
+    patched,
+    /"computer-use":De,"read-aloud-settings":\(e=>\{try\{return \(0,\$\.jsxs\)\(`svg`,/,
   );
+  assert.match(patched, /catch\(t\)\{return De\(e\)\}\}\),"local-environments":Oe/);
   assert.match(patched, /case`read-aloud-settings`:return!0;case`computer-use`/);
   assert.match(patched, /case`read-aloud-settings`:I=!1;break bb0;case`computer-use`/);
+});
+
+test("settings nav patch declares legacy read aloud icon assignments before they can throw", () => {
+  const page = [
+    'import{n as e}from"./rolldown-runtime.js";',
+    "var $=i(),Hn,Xn=e((()=>{Hn=null,codexLinuxReadAloudSettingsIcon=e=>(0,$.jsxs)(`svg`,{children:[]}),Hn={\"browser-use\":me,\"computer-use\":fe,\"read-aloud-settings\":codexLinuxReadAloudSettingsIcon,\"local-environments\":pe}}));",
+    "xe=[`browser-use`,`computer-use`,`data-controls`];",
+    "Se=[{slugs:[`browser-use`,`computer-use`,`local-environments`]}];",
+    "case`computer-use`:return A;",
+    "case`computer-use`:z=D.isLoading||h.isLoading;break bb0;",
+  ].join("");
+  const patched = twice(applySettingsPageNavPatch, page);
+  assert.match(
+    patched,
+    /^import\{n as e\}from"\.\/rolldown-runtime\.js";var codexLinuxReadAloudSettingsIcon;/,
+  );
+  assert.match(patched, /codexLinuxReadAloudSettingsIcon=e=>\(0,\$\.jsxs\)/);
+  assert.match(
+    patched,
+    /"computer-use":fe,"read-aloud-settings":\(e=>\{try\{return \(0,\$\.jsxs\)\(`svg`,/,
+  );
+  assert.match(patched, /catch\(t\)\{return fe\(e\)\}\}\),"local-environments":pe/);
 });
 
 test("app route patch wires read aloud settings to the generated page export", () => {
@@ -1356,7 +1384,7 @@ test("settings asset patch creates a first-class read aloud settings section", (
     assert.deepEqual(applySettingsAssetPatch(root), { matched: true, changed: 0 });
     assert.match(
       fs.readFileSync(path.join(assets, "settings-page-current.js"), "utf8"),
-      /"read-aloud-settings":codexLinuxReadAloudSettingsIcon/,
+      /"read-aloud-settings":\(e=>\{try\{return \(0,Z\.jsxs\)\(`svg`,/,
     );
     assert.match(
       fs.readFileSync(path.join(assets, "app-main-current.js"), "utf8"),

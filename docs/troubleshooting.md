@@ -20,6 +20,7 @@
 | Computer Use `doctor` reports `ydotool_socket: Permission denied` | Adjust the daemon socket so users in the `input` group can use it |
 | `ConnectTimeoutError` for Electron headers | Re-run `make build-app`; the installer uses `https://artifacts.electronjs.org/headers/dist` by default |
 | Computer Use AT-SPI tree empty | Run `codex-computer-use-linux setup`, then restart the target app |
+| `ERR_NO_SUPPORTED_PROXIES` with an authenticated proxy | Do not pass credentials inside Chromium's `--proxy-server` URL; enable the optional `authenticated-proxy` Linux feature |
 | `codex-update-manager` keeps running after package removal | Run `systemctl --user disable --now codex-update-manager.service` and confirm `/opt/codex-desktop` is gone |
 
 ## Persistent Launch Flags
@@ -51,6 +52,14 @@ For native Wayland IME setups, try:
 
 Restart Codex Desktop after changing this file. Warm-start launches reuse the
 running Electron process and will not pick up new flags.
+
+## Authenticated HTTP Proxies
+
+Chromium does not accept `user:password@` credentials inside the proxy list
+passed through `--proxy-server`. Authenticated proxy support is available as
+the disabled-by-default `linux-features/authenticated-proxy/` feature; enable
+that feature and follow its README for `CODEX_LINUX_PROXY_*`, standard proxy
+environment variable, and Flatpak override examples.
 
 ## Transparent Or Dark Sidebar
 

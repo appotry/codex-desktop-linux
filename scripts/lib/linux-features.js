@@ -11,11 +11,16 @@ const RESERVED_TOP_LEVEL_NAMES = new Set([
   "features.example.json",
   "features.json",
 ]);
+// Keep removed feature ids loadable so preserved update-builder configs still rebuild.
+const LEGACY_FEATURE_ID_ALIASES = new Map([
+  ["zed-opener", "open-target-discovery"],
+]);
 
 const RUNTIME_HOOK_DIRS = {
   env: { dir: "env.d", executable: false },
   prelaunch: { dir: "prelaunch.d", executable: true },
   electronArgs: { dir: "electron-args.d", executable: false },
+  launcher: { dir: "launcher.d", executable: true },
   coldStart: { dir: "cold-start.d", executable: true },
   afterExit: { dir: "after-exit.d", executable: true },
 };
@@ -97,11 +102,12 @@ function normalizeEnabledFeatureIds(value, sourcePath) {
       console.warn(`WARN: Invalid Linux feature id in ${sourcePath}: ${String(item)}`);
       continue;
     }
-    if (seen.has(item)) {
+    const id = LEGACY_FEATURE_ID_ALIASES.get(item) ?? item;
+    if (seen.has(id)) {
       continue;
     }
-    seen.add(item);
-    ids.push(item);
+    seen.add(id);
+    ids.push(id);
   }
   return ids;
 }

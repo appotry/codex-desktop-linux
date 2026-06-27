@@ -545,7 +545,7 @@ function applyLinuxBrowserUseExternalAvailabilityPatch(currentSource) {
   const availabilityPattern =
     /let ([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*)\),([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)===`chrome-extension`\|\|([A-Za-z_$][\w$]*)&&\1\.enabled&&!\1\.isLoading,([A-Za-z_$][\w$]*)=\5===`chrome-extension`\?!1:\1\.isLoading,/g;
 
-  const patchedSource = currentSource.replace(
+  let patchedSource = currentSource.replace(
     availabilityPattern,
     (
       match,
@@ -568,6 +568,22 @@ function applyLinuxBrowserUseExternalAvailabilityPatch(currentSource) {
       return `let ${featureQueryVar}=${featureQueryFn}(${featureQueryArg}),${availableVar}=${windowTypeVar}===\`chrome-extension\`||navigator.userAgent.includes(\`Linux\`)||${statsigVar}&&${featureQueryVar}.enabled&&!${featureQueryVar}.isLoading,${loadingVar}=${windowTypeVar}===\`chrome-extension\`||navigator.userAgent.includes(\`Linux\`)?!1:${featureQueryVar}.isLoading,`;
     },
   );
+
+  if (!changed) {
+    // 26.623 refactored the inline availability gate into a status-string helper:
+    //   function X({isExternalBrowserUseFeatureEnabled:e,isExternalBrowserUseFeatureLoading:t,
+    //     isExternalBrowserUseGateEnabled:n,windowType:r}){return r===`chrome-extension`?`available`:...}
+    // Treat Linux like chrome-extension so the resolved status is `available`.
+    const statusFnPattern =
+      /(function [A-Za-z_$][\w$]*\(\{isExternalBrowserUseFeatureEnabled:[A-Za-z_$][\w$]*,isExternalBrowserUseFeatureLoading:[A-Za-z_$][\w$]*,isExternalBrowserUseGateEnabled:[A-Za-z_$][\w$]*,windowType:([A-Za-z_$][\w$]*)\}\)\{return )\2===`chrome-extension`\?`available`:/;
+    patchedSource = patchedSource.replace(
+      statusFnPattern,
+      (match, prefix, windowTypeVar) => {
+        changed = true;
+        return `${prefix}${windowTypeVar}===\`chrome-extension\`||navigator.userAgent.includes(\`Linux\`)?\`available\`:`;
+      },
+    );
+  }
 
   if (changed || alreadyPatched()) {
     return patchedSource;
@@ -1018,9 +1034,11 @@ function applySubagentNicknameMetadataPatch(currentSource) {
   if (
     patchedSource === currentSource &&
     !(sourceShapePatchedRegex.test(currentSource) && nicknamePatchedRegex.test(currentSource)) &&
-    (currentSource.includes("agentNickname") ||
-      currentSource.includes("agent_nickname") ||
-      currentSource.includes("thread_spawn"))
+    // `thread_spawn` uniquely marks the subagent metadata module. Other webview
+    // chunks reference `agentNickname` without carrying these needles, so gate
+    // the warning on `thread_spawn` to avoid false drift alarms when the patch
+    // pattern matches the shared bundle alongside unrelated chunks.
+    currentSource.includes("thread_spawn")
   ) {
     console.warn("WARN: Could not find subagent nickname metadata needles — skipping metadata shape patch");
   }
@@ -1231,6 +1249,13 @@ function applyBrowserAnnotationScreenshotPatch(currentSource) {
       "Ze=(qe?A?.kind===`comment`?ge:[]:Xe==null?ge:ge.filter(e=>e.id!==Xe.id)).flatMap";
     const electron42CommentPreloadMarkersPatch =
       "Ze=(qe?A?.kind===`comment`?Ke:[]:Xe==null?ge:ge.filter(e=>e.id!==Xe.id)).flatMap";
+    // 26.623 refactored the marker-list computation into imperative form and
+    // adopted the screenshot fix natively: when a comment is selected it now
+    // assigns `it=rt?[j.annotation]:ye`, i.e. only the selected comment's marker
+    // is shown in screenshot mode. Detect that native-safe shape so we skip the
+    // patch without warning.
+    const nativeCommentPreloadMarkersRegex =
+      /([A-Za-z_$][\w$]*)\?\.kind===`comment`\?([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\?\[\1\.annotation\]:([A-Za-z_$][\w$]*):\3\|\|[A-Za-z_$][\w$]*\?\2=\[\]:[A-Za-z_$][\w$]*!=null&&\(\2=\4\.filter\(e=>e\.id!==[A-Za-z_$][\w$]*\.id\)\)/;
     if (patchedSource.includes(currentMarkersPatch)) {
       // Already patched.
     } else if (patchedSource.includes(currentSelectedMarkersPatch)) {
@@ -1267,6 +1292,9 @@ function applyBrowserAnnotationScreenshotPatch(currentSource) {
         electron42CommentPreloadMarkersNeedle,
         electron42CommentPreloadMarkersPatch,
       );
+    } else if (nativeCommentPreloadMarkersRegex.test(patchedSource)) {
+      // Already native: upstream now scopes screenshot markers to the selected
+      // comment, so no marker patch is required for this build.
     } else {
       console.warn("WARN: Could not find browser annotation screenshot markers — skipping screenshot marker patch");
     }

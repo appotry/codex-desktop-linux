@@ -176,6 +176,21 @@ function applyLinuxOwlFeatureBindingFallbackPatch(currentSource) {
     /function ([A-Za-z_$][\w$]*)\(\)\{let ([A-Za-z_$][\w$]*)=process\._linkedBinding;if\(typeof \2!=`function`\)throw Error\(`Owl feature binding is unavailable`\);return ([A-Za-z_$][\w$]*)\.parse\(\2\.call\(process,`electron_common_owl_features`\)\)\}/u;
   const match = currentSource.match(loaderRegex);
   if (match == null) {
+    // 26.623+ rewrote the loader to natively return null when the binding is
+    // unavailable (`process._linkedBinding` missing) and to swallow the
+    // "No such binding was linked" error — exactly the Linux fallback this
+    // patch injected. When that native-safe shape is present there is nothing
+    // to patch, so stand down silently instead of failing the required patch.
+    const upstreamReturnsNullOnMissingBinding =
+      /let ([A-Za-z_$][\w$]*)=process\._linkedBinding;if\(typeof \1!=`function`\)return null;/u.test(
+        currentSource,
+      );
+    if (
+      upstreamReturnsNullOnMissingBinding &&
+      currentSource.includes("No such binding was linked:")
+    ) {
+      return currentSource;
+    }
     console.warn(
       "WARN: Could not find Owl feature binding loader - skipping Linux Owl feature fallback patch",
     );

@@ -458,49 +458,73 @@ function detectSettingsPageJsxRuntime(source) {
   return iconMatch?.[2] ?? "Z";
 }
 
-function readAloudSettingsNavIconSource(jsxVar = "Z") {
-  return `codexLinuxReadAloudSettingsIcon=e=>(0,${jsxVar}.jsxs)(\`svg\`,{width:16,height:16,viewBox:\`0 0 16 16\`,fill:\`none\`,xmlns:\`http://www.w3.org/2000/svg\`,...e,children:[(0,${jsxVar}.jsx)(\`path\`,{d:\`M7.25 3.25 4.35 5.7H2.75A1.25 1.25 0 0 0 1.5 6.95v2.1c0 .69.56 1.25 1.25 1.25h1.6l2.9 2.45c.5.42 1.25.06 1.25-.59V3.84c0-.65-.75-1.01-1.25-.59Z\`,fill:\`currentColor\`}),(0,${jsxVar}.jsx)(\`path\`,{d:\`M10.25 6.1a2.7 2.7 0 0 1 0 3.8\`,stroke:\`currentColor\`,strokeWidth:1.2,strokeLinecap:\`round\`}),(0,${jsxVar}.jsx)(\`path\`,{d:\`M12.25 4.45a5.05 5.05 0 0 1 0 7.1\`,stroke:\`currentColor\`,strokeWidth:1.2,strokeLinecap:\`round\`})]})`;
+function readAloudSettingsNavIconExpression(jsxVar = "Z", fallbackIcon = null) {
+  const customIcon = `(0,${jsxVar}.jsxs)(\`svg\`,{width:16,height:16,viewBox:\`0 0 16 16\`,fill:\`none\`,xmlns:\`http://www.w3.org/2000/svg\`,...e,children:[(0,${jsxVar}.jsx)(\`path\`,{d:\`M7.25 3.25 4.35 5.7H2.75A1.25 1.25 0 0 0 1.5 6.95v2.1c0 .69.56 1.25 1.25 1.25h1.6l2.9 2.45c.5.42 1.25.06 1.25-.59V3.84c0-.65-.75-1.01-1.25-.59Z\`,fill:\`currentColor\`}),(0,${jsxVar}.jsx)(\`path\`,{d:\`M10.25 6.1a2.7 2.7 0 0 1 0 3.8\`,stroke:\`currentColor\`,strokeWidth:1.2,strokeLinecap:\`round\`}),(0,${jsxVar}.jsx)(\`path\`,{d:\`M12.25 4.45a5.05 5.05 0 0 1 0 7.1\`,stroke:\`currentColor\`,strokeWidth:1.2,strokeLinecap:\`round\`})]})`;
+  if (fallbackIcon == null) {
+    return `(e=>${customIcon})`;
+  }
+  return `(e=>{try{return ${customIcon}}catch(t){return ${fallbackIcon}(e)}})`;
+}
+
+function hasReadAloudSettingsIconDeclaration(source) {
+  return /(?:^|[;\n])\s*(?:var|let|const)\s+codexLinuxReadAloudSettingsIcon(?:[=,;])/.test(source);
+}
+
+function declareLegacyReadAloudSettingsIconIfNeeded(source) {
+  if (
+    !source.includes("codexLinuxReadAloudSettingsIcon=e=>") ||
+    hasReadAloudSettingsIconDeclaration(source)
+  ) {
+    return source;
+  }
+  let insertionIndex = 0;
+  while (source.startsWith("import", insertionIndex)) {
+    const statementEnd = source.indexOf(";", insertionIndex);
+    if (statementEnd === -1) {
+      break;
+    }
+    insertionIndex = statementEnd + 1;
+  }
+  return `${source.slice(0, insertionIndex)}var codexLinuxReadAloudSettingsIcon;${source.slice(insertionIndex)}`;
 }
 
 function applySettingsPageNavPatch(source) {
-  let patched = source;
-  if (!patched.includes("codexLinuxReadAloudSettingsIcon=e=>")) {
-    const iconSource = readAloudSettingsNavIconSource(detectSettingsPageJsxRuntime(patched));
-    if (patched.includes(",pe={")) {
-      patched = patched.replace(",pe={", `,${iconSource},pe={`);
-    } else {
-      const iconMapMatch = patched.match(
-        /(?:var |let |const |,)[A-Za-z_$][\w$]*=\{(?=[^;\n]*"general-settings":)(?=[^;\n]*"computer-use":)[^;\n]*\}/,
-      );
-      if (iconMapMatch != null) {
-        const index = iconMapMatch.index ?? 0;
-        if (iconMapMatch[0].startsWith(",")) {
-          patched = `${patched.slice(0, index)},${iconSource}${patched.slice(index)}`;
-        } else {
-          const keyword = iconMapMatch[0].match(/^(var |let |const )/)?.[1] ?? "var ";
-          patched = `${patched.slice(0, index)}${keyword}${iconSource};${patched.slice(index)}`;
-        }
-      } else {
-        patched = patched.replace(
-          /,([A-Za-z_$][\w$]*)=\{"general-settings":/,
-          `,${iconSource},$1={"general-settings":`,
-        );
-      }
-    }
-  }
-  if (!patched.includes(`"read-aloud-settings":codexLinuxReadAloudSettingsIcon`)) {
+  let patched = declareLegacyReadAloudSettingsIconIfNeeded(source);
+  const jsxVar = detectSettingsPageJsxRuntime(patched);
+  const staleReadAloudIconRegex =
+    /("computer-use":([A-Za-z_$][\w$]*),"read-aloud-settings":)(codexLinuxReadAloudSettingsIcon|[A-Za-z_$][\w$]*)(,"local-environments")/;
+  if (staleReadAloudIconRegex.test(patched)) {
+    patched = patched.replace(
+      staleReadAloudIconRegex,
+      (_match, prefix, computerUseIcon, _staleIcon, suffix) =>
+        `${prefix}${readAloudSettingsNavIconExpression(jsxVar, computerUseIcon)}${suffix}`,
+    );
+  } else if (!patched.includes(`"read-aloud-settings":`)) {
     const iconMapRegex =
-      /("browser-use":[A-Za-z_$][\w$]*,"computer-use":[A-Za-z_$][\w$]*,)(?!"read-aloud-settings":)/;
+      /("browser-use":[A-Za-z_$][\w$]*,"computer-use":([A-Za-z_$][\w$]*),)(?!"read-aloud-settings":)/;
     if (iconMapRegex.test(patched)) {
-      patched = patched.replace(iconMapRegex, '$1"read-aloud-settings":codexLinuxReadAloudSettingsIcon,');
+      patched = patched.replace(
+        iconMapRegex,
+        (_match, prefix, computerUseIcon) =>
+          `${prefix}"read-aloud-settings":${readAloudSettingsNavIconExpression(
+            jsxVar,
+            computerUseIcon,
+          )},`,
+      );
     } else {
       patched = patched.replace(
         `"computer-use":oe,"local-environments"`,
-        `"computer-use":oe,"read-aloud-settings":codexLinuxReadAloudSettingsIcon,"local-environments"`,
+        `"computer-use":oe,"read-aloud-settings":${readAloudSettingsNavIconExpression(
+          jsxVar,
+          "oe",
+        )},"local-environments"`,
       );
       patched = patched.replace(
         `"computer-use":oe,"read-aloud-settings":G,"local-environments"`,
-        `"computer-use":oe,"read-aloud-settings":codexLinuxReadAloudSettingsIcon,"local-environments"`,
+        `"computer-use":oe,"read-aloud-settings":${readAloudSettingsNavIconExpression(
+          jsxVar,
+          "oe",
+        )},"local-environments"`,
       );
     }
   }

@@ -1,7 +1,8 @@
 "use strict";
 
+const { patchStatusFromChange } = require("../../../../../lib/patch-report.js");
 const {
-  applyBrowserUseNodeReplApprovalPatch,
+  applyBrowserUseNodeReplApprovalAssets,
   applyLinuxBrowserUseRouteLivenessPatch,
   applyLinuxChromeExtensionStatusPatch,
 } = require("../../../../main-process.js");
@@ -17,10 +18,20 @@ module.exports = [
   },
   {
     id: "browser-use-node-repl-approval",
-    phase: "main-bundle",
+    phase: "extracted-app",
     order: 160,
     ciPolicy: "optional",
-    apply: applyBrowserUseNodeReplApprovalPatch,
+    apply: applyBrowserUseNodeReplApprovalAssets,
+    status: (result, warnings) => ({
+      status:
+        result?.matched === 0
+          ? "skipped-optional"
+          : patchStatusFromChange(Boolean(result?.changed), warnings, "optional"),
+      reason:
+        result?.matched === 0
+          ? "Browser Use node_repl mcp config bundle not found"
+          : warnings[0] ?? null,
+    }),
   },
   {
     id: "linux-browser-use-route-liveness",

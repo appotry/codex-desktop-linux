@@ -25,6 +25,7 @@ const {
   applyKeybindsSettingsIndexPatch,
   applyLinuxComputerUseFeaturePatch,
   applyLinuxComputerUseInstallFlowPatch,
+  applyLinuxNativeDesktopAppsHandlerPatch,
   applyLinuxComputerUsePluginGatePatch,
   applyLinuxComputerUseRendererAvailabilityPatch,
   applyLinuxDesktopSettingsIndexPatch,
@@ -473,7 +474,7 @@ test("build info captures DMG hash, features, distro profile, and source revisio
     fs.mkdirSync(featuresRoot, { recursive: true });
     fs.writeFileSync(
       path.join(featuresRoot, "features.json"),
-      JSON.stringify({ enabled: ["read-aloud", "zed-opener"] }),
+      JSON.stringify({ enabled: ["read-aloud", "open-target-discovery"] }),
       "utf8",
     );
 
@@ -511,7 +512,7 @@ test("build info captures DMG hash, features, distro profile, and source revisio
     assert.equal(info.source.commitUrl, "https://github.com/example/codex-desktop-linux/commit/abcdef1234567890");
     assert.equal(info.packageProfile.id, "debian-family");
     assert.equal(info.packageProfile.packageManager, "apt");
-    assert.deepEqual(info.linuxFeatures.enabled, ["read-aloud", "zed-opener"]);
+    assert.deepEqual(info.linuxFeatures.enabled, ["read-aloud", "open-target-discovery"]);
     assert.equal(info.linuxFeatures.configPath, undefined);
   } finally {
     if (pinnedFeaturesConfig != null) {
@@ -700,6 +701,7 @@ test("default core patch descriptors are grouped and unique", () => {
     "linux-single-instance",
     "linux-computer-use-ui-feature",
     "linux-computer-use-plugin-gate",
+    "linux-computer-use-native-desktop-apps",
     "linux-chrome-plugin-auto-install",
     "linux-chrome-native-host-runtime",
     "browser-use-node-repl-approval",
@@ -760,6 +762,10 @@ test("default core patch descriptors are grouped and unique", () => {
     descriptors.find((descriptor) => descriptor.id === "local-environment-action-modal-draft")?.ciPolicy,
     "optional",
   );
+  assert.equal(
+    descriptors.find((descriptor) => descriptor.id === "linux-computer-use-native-desktop-apps")?.ciPolicy,
+    "opt-in",
+  );
   for (const id of [
     "linux-window-options",
     "linux-native-titlebar",
@@ -779,6 +785,46 @@ test("default core patch descriptors are grouped and unique", () => {
     descriptorOrder.get("linux-native-titlebar") > descriptorOrder.get("linux-opaque-background"),
     "linux-native-titlebar must run after linux-opaque-background so it can reuse the inserted Linux background branch aliases",
   );
+});
+
+test("patch descriptors reject unsupported ciPolicy values", () => {
+  assert.throws(
+    () =>
+      normalizePatchDescriptors([
+        {
+          id: "unsupported-policy",
+          ciPolicy: "required",
+          apply: (source) => source,
+        },
+      ]),
+    /unsupported ciPolicy 'required'/,
+  );
+});
+
+test("opt-in patch descriptors are recognized as non-critical drift", () => {
+  const [descriptor] = normalizePatchDescriptors([
+    {
+      id: "opt-in-policy",
+      ciPolicy: "opt-in",
+      apply: (source) => source,
+    },
+  ]);
+  assert.equal(descriptor.ciPolicy, "opt-in");
+
+  const report = {
+    patches: [
+      {
+        name: "opt-in-policy",
+        status: "skipped-optional",
+        ciPolicy: "opt-in",
+        reason: "enable gate disabled",
+      },
+    ],
+  };
+  assert.deepEqual(criticalFailuresFromReport(report), []);
+  assert.deepEqual(optionalDriftFromReport(report), [
+    { name: "opt-in-policy", status: "skipped-optional", reason: "enable gate disabled" },
+  ]);
 });
 
 test("fast-mode guard descriptor follows upstream service-tier bundle names", () => {
@@ -1527,7 +1573,11 @@ test("bypasses the upstream before-quit confirmation after a Linux explicit quit
 
   assert.match(
     patched,
-    /if\(\(typeof codexLinuxShouldBypassQuitPrompt===`function`&&codexLinuxShouldBypassQuitPrompt\(\)\)\|\|e\|\|i\.canQuitWithoutPrompt\(\)\|\|r\|\|!s&&!c\)\{g=!0,a\.markAppQuitting\(\);return\}/,
+    /if\(\(typeof codexLinuxShouldBypassQuitPrompt===`function`&&codexLinuxShouldBypassQuitPrompt\(\)\)\|\|e\|\|i\.canQuitWithoutPrompt\(\)\|\|r\|\|!s&&!c\)\{process\.platform===`linux`&&typeof codexLinuxMarkQuitInProgress===`function`&&codexLinuxMarkQuitInProgress\(\),g=!0,a\.markAppQuitting\(\);return\}/,
+  );
+  assert.match(
+    patched,
+    /process\.platform===`linux`&&typeof codexLinuxMarkQuitInProgress===`function`&&codexLinuxMarkQuitInProgress\(\),i\.markQuitApproved\(\),g=!0,a\.markAppQuitting\(\)/,
   );
 });
 
@@ -1559,7 +1609,7 @@ test("patches remaining before-quit and drain guards when another copy is alread
   assert.equal((patchedPromptSource.match(/codexLinuxShouldBypassQuitPrompt\(\)/g) ?? []).length, 2);
   assert.match(
     patchedPromptSource,
-    /function secondPrompt\(\)\{if\(\(typeof codexLinuxShouldBypassQuitPrompt===`function`&&codexLinuxShouldBypassQuitPrompt\(\)\)\|\|e\|\|i\.canQuitWithoutPrompt\(\)\|\|r\|\|!s&&!c\)\{g=!0,a\.markAppQuitting\(\);return\}\}/,
+    /function secondPrompt\(\)\{if\(\(typeof codexLinuxShouldBypassQuitPrompt===`function`&&codexLinuxShouldBypassQuitPrompt\(\)\)\|\|e\|\|i\.canQuitWithoutPrompt\(\)\|\|r\|\|!s&&!c\)\{process\.platform===`linux`&&typeof codexLinuxMarkQuitInProgress===`function`&&codexLinuxMarkQuitInProgress\(\),g=!0,a\.markAppQuitting\(\);return\}\}/,
   );
 
   const unpatchedDrain =
@@ -2137,8 +2187,12 @@ test("adds Linux avatar overlay mouse passthrough recovery", () => {
   assert.match(patched, /Number\(d\)!==t\.width/);
   assert.doesNotMatch(patched, /let\[,l,u,d,f\]=c/);
   assert.doesNotMatch(patched, /this\.codexLinuxIsI3Session\(\)\)\{this\.codexLinuxStopAvatarPassthroughRecovery\(\),this\.codexLinuxAvatarInputShapeKey=null,this\.pointerInteractive=!0,this\.mousePassthroughEnabled&&\(this\.mousePassthroughEnabled=!1\),e\.setIgnoreMouseEvents\(!1\);return\}/);
-  assert.match(patched, /if\(process\.platform===`linux`&&typeof e\.setShape==`function`\)\{/);
-  assert.match(patched, /if\(process\.platform===`linux`&&typeof e\.setShape==`function`\)\{this\.codexLinuxStartAvatarPassthroughRecovery\(\),/);
+  assert.match(patched, /if\(this\.codexLinuxIsAvatarShapeBackend\(\)&&typeof e\.setShape==`function`\)\{/);
+  assert.match(patched, /if\(this\.codexLinuxIsAvatarShapeBackend\(\)&&typeof e\.setShape==`function`\)\{this\.codexLinuxStartAvatarPassthroughRecovery\(\),/);
+  assert.match(patched, /codexLinuxIsAvatarShapeBackend\(\)\{/);
+  assert.match(patched, /getSwitchValue\(`ozone-platform`\)/);
+  assert.match(patched, /return e===`x11`\|\|e===``&&!process\.env\.WAYLAND_DISPLAY/);
+  assert.doesNotMatch(patched, /XDG_SESSION_TYPE/);
   assert.doesNotMatch(patched, /if\(process\.platform===`linux`&&typeof e\.setShape==`function`\)\{this\.codexLinuxStopAvatarPassthroughRecovery\(\),/);
   assert.doesNotMatch(patched, /typeof e\.setShape==`function`&&!this\.codexLinuxIsI3Session\(\)/);
   assert.match(patched, /if\(t==null\)return null/);
@@ -2152,7 +2206,8 @@ test("adds Linux avatar overlay mouse passthrough recovery", () => {
   assert.match(patched, /this\.dragState!=null/);
   assert.match(patched, /this\.codexLinuxIsCursorInAvatarInteractiveRegion\(e\)/);
   assert.match(patched, /__codexWindowHit=__codexX>=0&&__codexY>=0&&__codexX<=__codexBounds\.width&&__codexY<=__codexBounds\.height/);
-  assert.match(patched, /return __codexHit\(t\.mascot\)\|\|__codexHit\(t\.tray\)\|\|__codexWindowHit/);
+  assert.match(patched, /return __codexHit\(t\.mascot\)\|\|__codexHit\(t\.tray\)/);
+  assert.doesNotMatch(patched, /return __codexHit\(t\.mascot\)\|\|__codexHit\(t\.tray\)\|\|__codexWindowHit/);
   assert.doesNotMatch(patched, /let r=r\.screen\.getCursorScreenPoint\(\)/);
   assert.match(patched, /catch\{t=!0\}/);
   assert.match(patched, /this\.pointerInteractive=t/);
@@ -2186,11 +2241,13 @@ test("keeps Linux avatar overlay above the app while reply inputs are focusable"
   );
 });
 
-test("Linux avatar overlay treats visible window content as interactive fallback", () => {
+test("Linux avatar overlay interactivity is bounded to avatar regions", () => {
   const patched = applyPatchTwice(
     applyLinuxAvatarOverlayMousePassthroughPatch,
     avatarOverlayBundleFixture(),
   );
+  const cursor = { x: 5843, y: 1036 };
+  let ozonePlatform = "";
   const context = {
     globalThis: {},
     process: {
@@ -2208,9 +2265,10 @@ test("Linux avatar overlay treats visible window content as interactive fallback
     n: {
       app: {
         getName: () => "Codex",
+        commandLine: { getSwitchValue: () => ozonePlatform },
       },
       screen: {
-        getCursorScreenPoint: () => ({ x: 5765, y: 1088 }),
+        getCursorScreenPoint: () => cursor,
         getDisplayNearestPoint: () => ({ bounds: { x: 0, y: 0, width: 800, height: 600 } }),
       },
     },
@@ -2232,6 +2290,14 @@ test("Linux avatar overlay treats visible window content as interactive fallback
     }),
     true,
   );
+  cursor.x = 5765;
+  cursor.y = 1088;
+  assert.equal(
+    controller.codexLinuxIsCursorInAvatarInteractiveRegion({
+      getContentBounds: () => ({ x: 5743, y: 936, width: 356, height: 320 }),
+    }),
+    false,
+  );
   assert.equal(
     controller.codexLinuxIsCursorInAvatarInteractiveRegion({
       getContentBounds: () => ({ x: 6000, y: 936, width: 100, height: 100 }),
@@ -2251,8 +2317,32 @@ test("Linux avatar overlay treats visible window content as interactive fallback
   ]);
   controller.pointerInteractive = true;
   assert.deepEqual(serializeShape(controller.codexLinuxBuildAvatarInputShape(overlayWindow)), [
+    { x: 220, y: 190, width: 113, height: 122 },
+    { x: 57, y: 55, width: 276, height: 131 },
+  ]);
+  controller.dragState = {};
+  assert.deepEqual(serializeShape(controller.codexLinuxBuildAvatarInputShape(overlayWindow)), [
     { x: 0, y: 0, width: 356, height: 320 },
   ]);
+  controller.dragState = null;
+  context.process.env.WAYLAND_DISPLAY = "wayland-0";
+  assert.equal(controller.codexLinuxIsAvatarShapeBackend(), false);
+  assert.equal(controller.codexLinuxApplyAvatarInputShape(overlayWindow), false);
+  let setShapeCalls = 0;
+  ozonePlatform = "x11";
+  assert.equal(controller.codexLinuxIsAvatarShapeBackend(), true);
+  assert.equal(
+    controller.codexLinuxApplyAvatarInputShape({
+      ...overlayWindow,
+      setShape() {
+        setShapeCalls += 1;
+      },
+    }),
+    true,
+  );
+  assert.equal(setShapeCalls, 1);
+  ozonePlatform = "wayland";
+  assert.equal(controller.codexLinuxIsAvatarShapeBackend(), false);
   assert.equal(
     controller.codexLinuxApplyAvatarInputShape({
       isDestroyed: () => false,
@@ -2400,6 +2490,24 @@ test("adds Linux window icon handling to current Linux autoHideMenuBar options",
   assert.match(patched, /process\.platform===`win32`\?\{autoHideMenuBar:!0\}:process\.platform===`linux`/);
   assert.doesNotMatch(patched, /process\.platform===`win32`\|\|process\.platform===`linux`/);
   assert.match(patched, new RegExp(`icon:${escapeRegExp(iconPathExpression)}`));
+});
+
+test("omits undefined BrowserWindow options in the current window manager bundle", () => {
+  const iconAsset = "app-test.png";
+  const source = [
+    "let M=new a.BrowserWindow({width:b,height:x,...S===void 0||C===void 0?{}:{x:S,y:C},",
+    "title:n??a.app.getName(),backgroundColor:A,show:l,parent:p,focusable:m,",
+    "...process.platform===`win32`?{autoHideMenuBar:!0}:process.platform===`linux`?{icon:process.resourcesPath+`/../content/webview/assets/app-test.png`}:{},",
+    "backgroundMaterial:j??void 0,...D,minWidth:T?.width,minHeight:T?.height,webPreferences:k});",
+  ].join("");
+
+  const patched = applyPatchTwice(applyLinuxWindowOptionsPatch, source, iconAsset);
+
+  assert.match(patched, /show:l,\.\.\.p==null\?\{\}:\{parent:p\},\.\.\.m==null\?\{\}:\{focusable:m\}/);
+  assert.match(patched, /\.\.\.j==null\?\{\}:\{backgroundMaterial:j\},\.\.\.D,\.\.\.T==null\?\{\}:\{minWidth:T\.width,minHeight:T\.height\},webPreferences:k/);
+  assert.doesNotMatch(patched, /show:l,parent:p,focusable:m/);
+  assert.doesNotMatch(patched, /backgroundMaterial:j\?\?void 0/);
+  assert.doesNotMatch(patched, /minWidth:T\?\.width/);
 });
 
 test("patches remaining Linux window icon snippets when another window is already patched", () => {
@@ -3327,6 +3435,230 @@ test("allows bundled Computer Use on Linux as well as macOS", () => {
     /\{installWhenMissing:!0,name:tn,isEnabled:\(\{features:e,platform:t\}\)=>\(t===`darwin`\|\|t===`linux`\)&&e\.computerUse/,
   );
   assert.doesNotMatch(patched, /t===`darwin`&&e\.computerUse/);
+});
+
+test("returns Linux native desktop apps from the Computer Use backend", async () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "codex-linux-native-apps-"));
+  try {
+    const backendPath = path.join(tempRoot, "codex-computer-use-linux");
+    const dataHome = path.join(tempRoot, "share");
+    const desktopDir = path.join(dataHome, "applications");
+    const iconDir = path.join(dataHome, "icons", "hicolor", "scalable", "apps");
+    const desktopPath = path.join(desktopDir, "org.example.Terminal.desktop");
+    const iconPath = path.join(iconDir, "example-terminal.svg");
+    fs.mkdirSync(desktopDir, { recursive: true });
+    fs.mkdirSync(iconDir, { recursive: true });
+    fs.writeFileSync(
+      desktopPath,
+      [
+        "[Desktop Entry]",
+        "Name=Example Terminal",
+        "Exec=example-terminal",
+        "Icon=example-terminal",
+        "StartupWMClass=ExampleTerminal",
+        "",
+      ].join("\n"),
+    );
+    fs.writeFileSync(iconPath, "<svg xmlns=\"http://www.w3.org/2000/svg\"/>");
+    fs.writeFileSync(
+      backendPath,
+      [
+        "#!/usr/bin/env node",
+        "if (process.argv[2] === 'windows') {",
+        "  console.log(JSON.stringify({ backend: 'test', windows: [{",
+        "    app_id: 'org.example.Terminal',",
+        "    wm_class: 'ExampleTerminal',",
+        "    title: 'Project - Example Terminal',",
+        "    pid: 123,",
+        "    window_id: 77,",
+        "    focused: true,",
+        "    client_type: 'wayland',",
+        "    backend: 'test'",
+        "  }] }));",
+        "} else {",
+        "  console.log(JSON.stringify({}));",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    fs.chmodSync(backendPath, 0o755);
+
+    const source = [
+      "\"use strict\";",
+      "let cp=require(`node:child_process`),fs=require(`node:fs`),p=require(`node:path`),os=require(`node:os`);",
+      "var h={handlers:{\"computer-use-native-desktop-app-icon\":async()=>({iconSmall:`mac-icon`}),\"native-desktop-apps\":async()=>({apps:[{bundleId:`mac`,appPath:`/Applications/Mac.app`,displayName:`Mac App`}]})}};",
+    ].join("");
+    const patched = applyPatchTwice(applyLinuxNativeDesktopAppsHandlerPatch, source);
+    const sandbox = {
+      Buffer,
+      require,
+      console,
+      process: {
+        env: {
+          CODEX_LINUX_COMPUTER_USE_BACKEND_SOURCE: backendPath,
+          HOME: tempRoot,
+          PATH: process.env.PATH,
+          XDG_DATA_HOME: dataHome,
+          XDG_DATA_DIRS: "",
+        },
+        platform: "linux",
+        resourcesPath: path.join(tempRoot, "missing-resources"),
+      },
+    };
+
+    const result = await vm.runInNewContext(
+      `(async()=>{${patched};return h.handlers["native-desktop-apps"]({params:{order:"usage"}})})()`,
+      sandbox,
+    );
+    assert.equal(result.apps.length, 1);
+    assert.deepEqual(JSON.parse(JSON.stringify(result.apps[0])), {
+      appPath: desktopPath,
+      backend: "test",
+      bundleId: "org.example.Terminal",
+      clientType: "wayland",
+      description: "Window: Project - Example Terminal",
+      displayName: "Example Terminal",
+      focused: true,
+      iconSmall: "",
+      linuxAppId: "org.example.Terminal",
+      pid: 123,
+      windowId: 77,
+      wmClass: "ExampleTerminal",
+    });
+
+    const icon = await vm.runInNewContext(
+      `(async()=>{${patched};return h.handlers["computer-use-native-desktop-app-icon"]({params:{appPath:${JSON.stringify(desktopPath)}}})})()`,
+      sandbox,
+    );
+    assert.match(icon.iconSmall, /^data:image\/svg\+xml;base64,/);
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("does not resolve the native desktop apps backend from relative PATH entries", async () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "codex-linux-native-apps-path-"));
+  const originalCwd = process.cwd();
+  try {
+    const relativeBin = path.join(tempRoot, "relative-bin");
+    const backendPath = path.join(relativeBin, "codex-computer-use-linux");
+    const markerPath = path.join(tempRoot, "backend-ran");
+    fs.mkdirSync(relativeBin, { recursive: true });
+    fs.writeFileSync(
+      backendPath,
+      [
+        "#!/bin/sh",
+        `touch ${JSON.stringify(markerPath)}`,
+        "printf '%s\\n' '{\"windows\":[{\"app_id\":\"relative.backend\",\"focused\":true}]}'",
+        "",
+      ].join("\n"),
+    );
+    fs.chmodSync(backendPath, 0o755);
+    process.chdir(tempRoot);
+
+    const source = [
+      "\"use strict\";",
+      "let cp=require(`node:child_process`),fs=require(`node:fs`),p=require(`node:path`),os=require(`node:os`);",
+      "var h={handlers:{\"native-desktop-apps\":async()=>({apps:[]})}};",
+    ].join("");
+    const patched = applyPatchTwice(applyLinuxNativeDesktopAppsHandlerPatch, source);
+    const result = await vm.runInNewContext(
+      `(async()=>{${patched};return h.handlers["native-desktop-apps"]({params:{}})})()`,
+      {
+        Buffer,
+        require,
+        console,
+        process: {
+          env: {
+            HOME: tempRoot,
+            PATH: `relative-bin:/usr/bin:/bin`,
+            XDG_DATA_HOME: path.join(tempRoot, "share"),
+            XDG_DATA_DIRS: "",
+          },
+          platform: "linux",
+          resourcesPath: path.join(tempRoot, "missing-resources"),
+        },
+      },
+    );
+
+    assert.deepEqual(JSON.parse(JSON.stringify(result)), { apps: [] });
+    assert.equal(fs.existsSync(markerPath), false);
+  } finally {
+    process.chdir(originalCwd);
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("keeps native desktop apps delegated to upstream outside Linux", async () => {
+  const source = [
+    "\"use strict\";",
+    "let cp=require(`node:child_process`),fs=require(`node:fs`),p=require(`node:path`),os=require(`node:os`);",
+    "var h={handlers:{\"native-desktop-apps\":async()=>({apps:[{bundleId:`mac`,appPath:`/Applications/Mac.app`,displayName:`Mac App`}]})}};",
+  ].join("");
+  const patched = applyPatchTwice(applyLinuxNativeDesktopAppsHandlerPatch, source);
+  const result = await vm.runInNewContext(
+    `(async()=>{${patched};return h.handlers["native-desktop-apps"]({params:{}})})()`,
+    {
+      Buffer,
+      require,
+      console,
+      process: { env: {}, platform: "darwin", resourcesPath: "/Applications/Codex.app/Contents/Resources" },
+    },
+  );
+
+  assert.deepEqual(JSON.parse(JSON.stringify(result)), {
+    apps: [{ appPath: "/Applications/Mac.app", bundleId: "mac", displayName: "Mac App" }],
+  });
+});
+
+test("inserts native desktop app icon handler before a final native apps handler", async () => {
+  const source = [
+    "\"use strict\";",
+    "let cp=require(`node:child_process`),fs=require(`node:fs`),p=require(`node:path`),os=require(`node:os`);",
+    "var h={handlers:{\"native-desktop-apps\":async(e)=>{return {apps:[{bundleId:`mac`,appPath:`/Applications/Mac.app`,displayName:`Mac App`,order:e?.params?.order??null}]}}}};",
+  ].join("");
+  const patched = applyPatchTwice(applyLinuxNativeDesktopAppsHandlerPatch, source);
+
+  assert.equal((patched.match(/"computer-use-native-desktop-app-icon"/g) ?? []).length, 1);
+  assert.ok(
+    patched.indexOf("\"computer-use-native-desktop-app-icon\"") <
+      patched.indexOf("\"native-desktop-apps\""),
+  );
+
+  const darwinResult = await vm.runInNewContext(
+    `(async()=>{${patched};return h.handlers["native-desktop-apps"]({params:{order:"usage"}})})()`,
+    {
+      Buffer,
+      require,
+      console,
+      process: { env: {}, platform: "darwin", resourcesPath: "/Applications/Codex.app/Contents/Resources" },
+    },
+  );
+  assert.deepEqual(JSON.parse(JSON.stringify(darwinResult)), {
+    apps: [
+      {
+        appPath: "/Applications/Mac.app",
+        bundleId: "mac",
+        displayName: "Mac App",
+        order: "usage",
+      },
+    ],
+  });
+
+  const linuxIcon = await vm.runInNewContext(
+    `(async()=>{${patched};return h.handlers["computer-use-native-desktop-app-icon"]({params:{appPath:"/tmp/missing.desktop"}})})()`,
+    {
+      Buffer,
+      require,
+      console,
+      process: {
+        env: { HOME: os.tmpdir(), PATH: process.env.PATH, XDG_DATA_DIRS: "" },
+        platform: "linux",
+        resourcesPath: "/missing-resources",
+      },
+    },
+  );
+  assert.deepEqual(JSON.parse(JSON.stringify(linuxIcon)), { iconSmall: "" });
 });
 
 test("adds Keybinds settings route after upstream minified variable drift", () => {

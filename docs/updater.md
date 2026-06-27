@@ -84,6 +84,21 @@ codex-update-manager status --json
 `make service-enable` is meant for installed packages, not repo-only generated
 apps.
 
+To temporarily pause automatic package rebuilds and installs while keeping Codex
+Desktop usable, disable the user service:
+
+```bash
+systemctl --user disable --now codex-update-manager.service
+```
+
+Launching Codex Desktop and upgrading the package will not re-enable a disabled
+updater service. Re-enable updater behavior explicitly when you want automatic
+checks again:
+
+```bash
+systemctl --user enable --now codex-update-manager.service
+```
+
 ## Wrapper Updates
 
 Optional wrapper-update tracking can watch this repository's own Linux wrapper

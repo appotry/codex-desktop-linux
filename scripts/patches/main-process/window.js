@@ -36,47 +36,63 @@ function ensureLinuxTitlebarOverlayHelper(source, anchorText, helperSource) {
 // Main-process patches adapt Electron shell behavior: windows, tray, menu,
 // single-instance handling, file manager integration, and packaged runtime glue.
 function applyLinuxWindowOptionsPatch(currentSource, iconAsset) {
-  if (iconAsset == null) {
-    return currentSource;
-  }
-
-  const iconPathExpression = `process.resourcesPath+\`/../content/webview/assets/${iconAsset}\``;
-  const iconPathNeedle = `icon:${iconPathExpression}`;
-  const setIconNeedle = `setIcon(${iconPathExpression})`;
-  const readyToShowSetIconInsertionPattern = /[A-Za-z_$][\w$]*\.once\(`ready-to-show`,\(\)=>\{/;
-
-  const windowOptionsNeedle = "...process.platform===`win32`?{autoHideMenuBar:!0}:{},";
-  const currentLinuxAutoHideMenuBarNeedle =
-    "...process.platform===`win32`||process.platform===`linux`?{autoHideMenuBar:!0}:{},";
-  const legacyLinuxSystemTitlebarNeedle =
-    `...process.platform===\`win32\`||process.platform===\`linux\`?{autoHideMenuBar:!0,...process.platform===\`linux\`?{${iconPathNeedle}}:{}}:{},`;
-  const windowOptionsReplacement =
-    `...process.platform===\`win32\`?{autoHideMenuBar:!0}:process.platform===\`linux\`?{${iconPathNeedle}}:{},`;
-
   let patchedSource = currentSource;
-  if (patchedSource.includes(legacyLinuxSystemTitlebarNeedle)) {
-    patchedSource = patchedSource.split(legacyLinuxSystemTitlebarNeedle).join(windowOptionsReplacement);
+
+  if (iconAsset != null) {
+    const iconPathExpression = `process.resourcesPath+\`/../content/webview/assets/${iconAsset}\``;
+    const iconPathNeedle = `icon:${iconPathExpression}`;
+    const setIconNeedle = `setIcon(${iconPathExpression})`;
+    const readyToShowSetIconInsertionPattern = /[A-Za-z_$][\w$]*\.once\(`ready-to-show`,\(\)=>\{/;
+
+    const windowOptionsNeedle = "...process.platform===`win32`?{autoHideMenuBar:!0}:{},";
+    const currentLinuxAutoHideMenuBarNeedle =
+      "...process.platform===`win32`||process.platform===`linux`?{autoHideMenuBar:!0}:{},";
+    const legacyLinuxSystemTitlebarNeedle =
+      `...process.platform===\`win32\`||process.platform===\`linux\`?{autoHideMenuBar:!0,...process.platform===\`linux\`?{${iconPathNeedle}}:{}}:{},`;
+    const windowOptionsReplacement =
+      `...process.platform===\`win32\`?{autoHideMenuBar:!0}:process.platform===\`linux\`?{${iconPathNeedle}}:{},`;
+
+    if (patchedSource.includes(legacyLinuxSystemTitlebarNeedle)) {
+      patchedSource = patchedSource.split(legacyLinuxSystemTitlebarNeedle).join(windowOptionsReplacement);
+    }
+
+    if (patchedSource.includes(windowOptionsNeedle)) {
+      patchedSource = patchedSource.split(windowOptionsNeedle).join(windowOptionsReplacement);
+    } else if (patchedSource.includes(currentLinuxAutoHideMenuBarNeedle)) {
+      patchedSource = patchedSource.split(currentLinuxAutoHideMenuBarNeedle).join(windowOptionsReplacement);
+    } else if (
+      patchedSource === currentSource &&
+      !patchedSource.includes(iconPathNeedle) &&
+      !patchedSource.includes(setIconNeedle) &&
+      !readyToShowSetIconInsertionPattern.test(patchedSource)
+    ) {
+      console.warn("WARN: Could not find BrowserWindow autoHideMenuBar snippet — skipping window options patch");
+    }
   }
 
-  if (patchedSource.includes(windowOptionsNeedle)) {
-    return patchedSource.split(windowOptionsNeedle).join(windowOptionsReplacement);
-  }
+  patchedSource = applyDefinedBrowserWindowOptionsPatch(patchedSource);
+  return patchedSource;
+}
 
-  if (patchedSource.includes(currentLinuxAutoHideMenuBarNeedle)) {
-    return patchedSource.split(currentLinuxAutoHideMenuBarNeedle).join(windowOptionsReplacement);
-  }
+function applyDefinedBrowserWindowOptionsPatch(currentSource) {
+  const browserWindowOptionsRegex =
+    /show:([A-Za-z_$][\w$]*),parent:([A-Za-z_$][\w$]*),focusable:([A-Za-z_$][\w$]*),(\.\.\.process\.platform===`win32`\?\{autoHideMenuBar:!0\}:process\.platform===`linux`\?\{icon:process\.resourcesPath\+`\/\.\.\/content\/webview\/assets\/[^`]+`\}:\{\},)backgroundMaterial:([A-Za-z_$][\w$]*)\?\?void 0,\.\.\.([A-Za-z_$][\w$]*),minWidth:([A-Za-z_$][\w$]*)\?\.width,minHeight:\7\?\.height,webPreferences:([A-Za-z_$][\w$]*)/g;
 
-  if (
-    patchedSource !== currentSource ||
-    patchedSource.includes(iconPathNeedle) ||
-    patchedSource.includes(setIconNeedle) ||
-    readyToShowSetIconInsertionPattern.test(patchedSource)
-  ) {
-    return patchedSource;
-  }
-
-  console.warn("WARN: Could not find BrowserWindow autoHideMenuBar snippet — skipping window options patch");
-  return currentSource;
+  return currentSource.replace(
+    browserWindowOptionsRegex,
+    (
+      _match,
+      showAlias,
+      parentAlias,
+      focusableAlias,
+      platformOptions,
+      backgroundMaterialAlias,
+      appearanceOptionsAlias,
+      minimumSizeAlias,
+      webPreferencesAlias,
+    ) =>
+      `show:${showAlias},...${parentAlias}==null?{}:{parent:${parentAlias}},...${focusableAlias}==null?{}:{focusable:${focusableAlias}},${platformOptions}...${backgroundMaterialAlias}==null?{}:{backgroundMaterial:${backgroundMaterialAlias}},...${appearanceOptionsAlias},...${minimumSizeAlias}==null?{}:{minWidth:${minimumSizeAlias}.width,minHeight:${minimumSizeAlias}.height},webPreferences:${webPreferencesAlias}`,
+  );
 }
 
 function applyLinuxNativeTitlebarPatch(currentSource) {
@@ -511,6 +527,23 @@ process.platform===\`linux\`?null:$1?$2($3):null,
 process.platform===\`linux\`?Promise.resolve((()=>{let __codexLinuxAboutIcon=$4.nativeImage.createFromPath(${iconPathExpression});return __codexLinuxAboutIcon.isEmpty()?null:__codexLinuxAboutIcon})()):$4.app.getFileIcon($5,{size:process.platform===\`win32\`?\`large\`:\`normal\`}).catch(()=>null)
 ]`,
     );
+    if (patchedSource === currentSource) {
+      // 26.623 reshaped the about icon promise array: the non-win32 size
+      // ternary collapsed to {size:`normal`} and a win32 nativeImage branch was
+      // added — [t?k_(i):null,n?a.nativeImage.createFromPath(i):a.app.getFileIcon(i,{size:`normal`})].
+      // Without this branch the Linux-safe icon (and the .catch on getFileIcon)
+      // never apply, so a getFileIcon rejection on Linux makes the About window
+      // builder throw before its try/catch and the dialog never opens.
+      const aboutIconPromiseRegex26623 =
+        /\[([A-Za-z_$][\w$]*)\?([A-Za-z_$][\w$]*)\(([^()]+)\):null,([A-Za-z_$][\w$]*)\?([A-Za-z_$][\w$]*)\.nativeImage\.createFromPath\(([^()]+)\):([A-Za-z_$][\w$]*)\.app\.getFileIcon\(([^()]+),\{size:`normal`\}\)\]/;
+      patchedSource = patchedSource.replace(
+        aboutIconPromiseRegex26623,
+        `[
+process.platform===\`linux\`?null:$1?$2($3):null,
+process.platform===\`linux\`?Promise.resolve((()=>{let __codexLinuxAboutIcon=$5.nativeImage.createFromPath(${iconPathExpression});return __codexLinuxAboutIcon.isEmpty()?null:__codexLinuxAboutIcon})()):$4?$5.nativeImage.createFromPath($6):$7.app.getFileIcon($8,{size:\`normal\`}).catch(()=>null)
+]`,
+      );
+    }
   } else {
     const patchedGetFileIconRegex =
       /([A-Za-z_$][\w$]*)\.app\.getFileIcon\(([^()]+),\{size:process\.platform===`win32`\?`large`:`normal`\}\)\.catch\(\(\)=>null\)/;
@@ -521,6 +554,20 @@ process.platform===\`linux\`?Promise.resolve((()=>{let __codexLinuxAboutIcon=$4.
         getFileIconRegex,
         "$1.app.getFileIcon($2,{size:process.platform===`win32`?`large`:`normal`}).catch(()=>null)",
       );
+    }
+    if (patchedSource === currentSource) {
+      // 26.623 fallback (no bundled icon): just make the reshaped getFileIcon
+      // call rejection-proof so the About window builder cannot throw on Linux.
+      const patchedGetFileIconRegex26623 =
+        /([A-Za-z_$][\w$]*)\.app\.getFileIcon\(([^()]+),\{size:`normal`\}\)\.catch\(\(\)=>null\)/;
+      if (!patchedGetFileIconRegex26623.test(patchedSource)) {
+        const getFileIconRegex26623 =
+          /([A-Za-z_$][\w$]*)\.app\.getFileIcon\(([^()]+),\{size:`normal`\}\)/;
+        patchedSource = patchedSource.replace(
+          getFileIconRegex26623,
+          "$1.app.getFileIcon($2,{size:`normal`}).catch(()=>null)",
+        );
+      }
     }
   }
 
