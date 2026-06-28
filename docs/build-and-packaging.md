@@ -26,10 +26,10 @@ packages, and bootstraps Rust through `rustup` when needed.
 
 ```bash
 # Fedora 41+
-sudo dnf install python3 7zip curl unzip rpm-build @development-tools
+sudo dnf install python3 7zip curl unzip rpm-build make gcc-c++ @development-tools
 
 # Fedora < 41
-sudo dnf install python3 p7zip p7zip-plugins curl unzip rpm-build
+sudo dnf install python3 p7zip p7zip-plugins curl unzip rpm-build make gcc-c++
 sudo dnf groupinstall 'Development Tools'
 
 # openSUSE
@@ -74,6 +74,8 @@ The default path stores upstream DMG headers, plus a hash of the upstream URL,
 next to `Codex.dmg` and refreshes the cached file when that upstream fingerprint
 changes. `--fresh` still forces a cache removal before rebuilding, and an
 explicit `DMG=/path/to/Codex.dmg` uses that file exactly.
+Native install shortcuts use `--fresh --reuse-dmg`, so they clean the generated
+app directory while still reusing the cached DMG when upstream metadata matches.
 
 Run the generated app:
 

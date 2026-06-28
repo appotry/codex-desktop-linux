@@ -540,7 +540,6 @@ function applyLinuxRemoteControlClientRevokeSetupResetPatch(source) {
   ) {
     const helperNeedle = source.match(/var [A-Za-z_$][\w$]*=`remote-control-client-revoke-success`/u)?.[0] ?? null;
     if (helperNeedle == null) {
-      console.warn("WARN: Could not find remote-control revoke toast marker - skipping setup reset helper insertion");
       return source;
     }
     const helper = [
@@ -562,14 +561,12 @@ function applyLinuxRemoteControlClientRevokeSetupResetPatch(source) {
     /mutationFn:[A-Za-z_$][\w$]*=>([A-Za-z_$][\w$]*)\([A-Za-z_$][\w$]*,[A-Za-z_$][\w$]*\.ADDED_REMOTE_CONTROL_ENV_IDS,/u,
   );
   if (setGlobalStateMatch == null) {
-    console.warn("WARN: Could not find global-state setter alias - skipping remote-control revoke setup reset patch");
     return source;
   }
 
   const setGlobalStateFn = setGlobalStateMatch[1];
   const helperNeedle = source.match(/var [A-Za-z_$][\w$]*=`remote-control-client-revoke-success`/u)?.[0] ?? null;
   if (helperNeedle == null) {
-    console.warn("WARN: Could not find remote-control revoke toast marker - skipping setup reset helper insertion");
     return source;
   }
 
@@ -584,7 +581,6 @@ function applyLinuxRemoteControlClientRevokeSetupResetPatch(source) {
   const successPattern =
     /([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*),\{eventName:`codex_remote_control_client_revoke_result`,metadata:\{result:`succeeded`\}\}\),([A-Za-z_$][\w$]*)\.setData\(([A-Za-z_$][\w$]*)=>\4\?\.filter\(\4=>\4\.client_id!==([A-Za-z_$][\w$]*)\)\)/u;
   if (!successPattern.test(patched)) {
-    console.warn("WARN: Could not find remote-control revoke success cache update - skipping setup reset patch");
     return source;
   }
 
@@ -1187,6 +1183,10 @@ function applyLinuxRemoteMobileChromeBridgePatch(source) {
     return source;
   }
 
+  if (browserClientHasNativeChromeBackendPreferenceRouting(source)) {
+    return source;
+  }
+
   // 26.527.x moved the browser-use backend allowlist from the
   // x-codex-browser-use-available-backends request-meta header to the
   // BROWSER_USE_AVAILABLE_BACKENDS config value (var dy), renamed the allowlist
@@ -1230,6 +1230,15 @@ function applyLinuxRemoteMobileChromeBridgePatch(source) {
   return source;
 }
 
+function browserClientHasNativeChromeBackendPreferenceRouting(source) {
+  return (
+    source.includes("BROWSER_USE_AVAILABLE_BACKENDS") &&
+    source.includes("browserPreference") &&
+    source.includes("preferredWindowIdFor") &&
+    /var [A-Za-z_$][\w$]*=\["chrome","iab","cdp"\];function [A-Za-z_$][\w$]*\([A-Za-z_$][\w$]*\)\{return [A-Za-z_$][\w$]*\.some\([A-Za-z_$][\w$]*=>[A-Za-z_$][\w$]*===[A-Za-z_$][\w$]*\)\}/u.test(source)
+  );
+}
+
 function applyLinuxRemoteMobileConversationHydrationPatch(source) {
   let patched = source;
 
@@ -1257,10 +1266,10 @@ function applyLinuxRemoteMobileConversationHydrationPatch(source) {
   // Re-implement hydrate-on-turn/started + queue-while-hydrating without the deleted routes.
   if (!patched.includes(REMOTE_MOBILE_NOTIFICATION_QUEUE_MARKER)) {
     const unknownTurnNeedle =
-      /if\(!this\.conversations\.get\(([A-Za-z_$][\w$]*)\)\)\{([A-Za-z_$][\w$]*)\.error\(`Received turn\/started for unknown conversation`,\{safe:\{conversationId:\1\},sensitive:\{\}\}\);break\}/u;
+      /(let\{threadId:([A-Za-z_$][\w$]*),turn:[A-Za-z_$][\w$]*\}=([A-Za-z_$][\w$]*)\.params,([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\(\2\);)if\(!this\.conversations\.get\(\4\)\)\{([A-Za-z_$][\w$]*)\.error\(`Received turn\/started for unknown conversation`,\{safe:\{conversationId:\4\},sensitive:\{\}\}\);break\}/u;
     const unknownTurnReplacement =
-      (_needle, conversationIdVar, loggerVar) =>
-        `if(!this.conversations.get(${conversationIdVar})){/*${REMOTE_MOBILE_UNKNOWN_TURN_MARKER}*//*${REMOTE_MOBILE_NOTIFICATION_QUEUE_MARKER}*/let i=this.codexLinuxRemoteMobilePendingNotifications??=new Map,a=i.get(${conversationIdVar});a||(a=[],i.set(${conversationIdVar},a)),a.push(n),${loggerVar}.warning(\`Hydrating conversation for turn/started\`,{safe:{conversationId:${conversationIdVar},queuedNotificationCount:a.length},sensitive:{}});let o=(s=0)=>this.readThread(${conversationIdVar},{includeTurns:!1}).then(e=>{let t=e?.thread??e,c=this.codexLinuxRemoteMobilePendingNotifications?.get(${conversationIdVar})??[];if(!t){if(s<12){${loggerVar}.warning(\`Retrying hydration for missing conversation\`,{safe:{conversationId:${conversationIdVar},queuedNotificationCount:c.length,attempt:s+1},sensitive:{}}),setTimeout(()=>o(s+1),250);return}this.codexLinuxRemoteMobilePendingNotifications?.delete(${conversationIdVar}),${loggerVar}.warning(\`Skipping hydration for missing conversation\`,{safe:{conversationId:${conversationIdVar},queuedNotificationCount:c.length},sensitive:{}});return}this.upsertConversationFromThread(t),this.codexLinuxRemoteMobilePendingNotifications?.delete(${conversationIdVar});for(let e of c)this.onNotification(e.method,e.params)}).catch(e=>{if(s<12){${loggerVar}.warning(\`Retrying hydration for turn/started\`,{safe:{conversationId:${conversationIdVar},attempt:s+1},sensitive:{error:e}}),setTimeout(()=>o(s+1),250);return}this.codexLinuxRemoteMobilePendingNotifications?.delete(${conversationIdVar}),${loggerVar}.error(\`Failed to hydrate conversation for turn/started\`,{safe:{conversationId:${conversationIdVar}},sensitive:{error:e}})});o();break}`;
+      (_needle, prefix, _threadIdParamVar, notificationVar, conversationIdVar, normalizerFn, loggerVar) =>
+        `${prefix}if(!this.conversations.get(${conversationIdVar})){/*${REMOTE_MOBILE_UNKNOWN_TURN_MARKER}*//*${REMOTE_MOBILE_NOTIFICATION_QUEUE_MARKER}*/let l=${notificationVar}.params?.turn?.threadId??${notificationVar}.params?.thread?.id,d=l!=null?${normalizerFn}(l):null,u=${notificationVar}.params?.turn?.id??${notificationVar}.params?.turnId;if(d==null||u!=null&&d===${normalizerFn}(u)){${loggerVar}.warning(\`Skipping hydration for ambiguous turn/started\`,{safe:{conversationId:${conversationIdVar},resolvedConversationId:d,turnId:u??null},sensitive:{}});break}${notificationVar}={...${notificationVar},params:{...${notificationVar}.params,threadId:l}};if(this.conversations.get(d)){this.onNotification(${notificationVar}.method,${notificationVar}.params);break}let i=this.codexLinuxRemoteMobilePendingNotifications??=new Map,a=i.get(d);a||(a=[],i.set(d,a)),a.push(${notificationVar}),${loggerVar}.warning(\`Hydrating conversation for turn/started\`,{safe:{conversationId:d,queuedNotificationCount:a.length},sensitive:{}});let o=(s=0)=>this.readThread(d,{includeTurns:!1}).then(e=>{let t=e?.thread??e,c=this.codexLinuxRemoteMobilePendingNotifications?.get(d)??[];if(!t){if(s<12){${loggerVar}.warning(\`Retrying hydration for missing conversation\`,{safe:{conversationId:d,queuedNotificationCount:c.length,attempt:s+1},sensitive:{}}),setTimeout(()=>o(s+1),250);return}this.codexLinuxRemoteMobilePendingNotifications?.delete(d),${loggerVar}.warning(\`Skipping hydration for missing conversation\`,{safe:{conversationId:d,queuedNotificationCount:c.length},sensitive:{}});return}this.upsertConversationFromThread(t),this.codexLinuxRemoteMobilePendingNotifications?.delete(d);for(let e of c)this.onNotification(e.method,e.params)}).catch(e=>{if(s<12){${loggerVar}.warning(\`Retrying hydration for turn/started\`,{safe:{conversationId:d,attempt:s+1},sensitive:{error:e}}),setTimeout(()=>o(s+1),250);return}this.codexLinuxRemoteMobilePendingNotifications?.delete(d),${loggerVar}.error(\`Failed to hydrate conversation for turn/started\`,{safe:{conversationId:d},sensitive:{error:e}})});o();break}`;
     if (unknownTurnNeedle.test(patched)) {
       patched = patched.replace(unknownTurnNeedle, unknownTurnReplacement);
     } else if (patched.includes("Received turn/started for unknown conversation")) {
@@ -1572,7 +1581,7 @@ module.exports = [
   {
     id: "linux-remote-control-load-gate",
     phase: "webview-asset",
-    pattern: /^remote-connection-visibility-.*\.js$/,
+    pattern: /^(?:remote-connection-visibility|app-initial~app-main~worktree-init-v2-page~remote-conversation-page~new-thread-panel-page~o~).*\.js$/,
     order: 20_118,
     ciPolicy: "optional",
     missingDescription: "remote-control loader gate bundle",
@@ -1652,7 +1661,7 @@ module.exports = [
   {
     id: "linux-remote-mobile-conversation-hydration",
     phase: "webview-asset",
-    pattern: /^(?:app-server-manager-signals|thread-context-inputs)-.*\.js$/,
+    pattern: /^(?:app-server-manager-signals|thread-context-inputs|app-initial~app-main~worktree-init-v2-page~remote-conversation-page~new-thread-panel-page~o~).*\.js$/,
     order: 20_150,
     ciPolicy: "optional",
     missingDescription: "app-server manager signals bundle",
@@ -1662,7 +1671,7 @@ module.exports = [
   {
     id: "linux-remote-control-status-read-guard",
     phase: "webview-asset",
-    pattern: /^(?:app-server-manager-signals|thread-context-inputs)-.*\.js$/,
+    pattern: /^(?:app-server-manager-signals|thread-context-inputs|app-initial~app-main~worktree-init-v2-page~remote-conversation-page~new-thread-panel-page~o~).*\.js$/,
     order: 20_151,
     ciPolicy: "optional",
     missingDescription: "app-server manager signals bundle",
@@ -1692,7 +1701,7 @@ module.exports = [
   {
     id: "linux-remote-mobile-projectless-remote-task",
     phase: "webview-asset",
-    pattern: /^sidebar-project-groups-.*\.js$/,
+    pattern: /^(?:sidebar-project-groups|app-initial~app-main~worktree-init-v2-page~remote-conversation-page~pull-requests-page~plug~).*\.js$/,
     order: 20_170,
     ciPolicy: "optional",
     missingDescription: "sidebar project groups bundle",

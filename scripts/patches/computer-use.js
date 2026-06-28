@@ -116,6 +116,16 @@ function hasComputerUseLiteral(source) {
   return /(?:`computer-use`|"computer-use"|'computer-use')/.test(source);
 }
 
+function hasComputerUseNativeAppsMention(source) {
+  return source.includes("native-desktop-apps") &&
+    (
+      hasComputerUseLiteral(source) ||
+      source.includes("computer-use-native-desktop-app-icon") ||
+      source.includes("computerUse.nativeApps") ||
+      source.includes("computerUse.label")
+    );
+}
+
 function isComputerUseNameExpr(nameExpr, computerUseNameVar) {
   return /^(?:`computer-use`|"computer-use"|'computer-use')$/.test(nameExpr) ||
     nameExpr === computerUseNameVar ||
@@ -444,7 +454,7 @@ function applyLinuxComputerUseRendererAvailabilityPatch(currentSource) {
     },
   );
 
-  if (patchedSource.includes("native-desktop-apps") && hasComputerUseLiteral(patchedSource)) {
+  if (hasComputerUseNativeAppsMention(patchedSource)) {
     const nativeAppsPlatformPattern =
       /([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)&&\(([A-Za-z_$][\w$]*)===`macOS`\|\|\3===`windows`\)/g;
     patchedSource = patchedSource.replace(
@@ -471,26 +481,34 @@ function applyLinuxComputerUseRendererAvailabilityPatch(currentSource) {
 }
 
 function applyLinuxComputerUseInstallFlowPatch(currentSource) {
-  const availabilityNeedle =
-    "ne=f({featureName:`computer_use`,hostId:t}),re=!ne.isLoading&&ne.enabled,";
-  const availabilityPatch =
-    "ne=f({featureName:`computer_use`,hostId:t}),re=!ne.isLoading&&ne.enabled||navigator.userAgent.includes(`Linux`),";
-  const currentAvailabilityPattern =
-    /([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\(\{featureName:`computer_use`,hostId:([^}]+)\}\),([^;]{0,300}?)([A-Za-z_$][\w$]*)=!\1\.isLoading&&\1\.enabled,/g;
+  const currentRequiredFeaturesObjectPattern =
+    /([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\(\{areRequiredFeaturesEnabled:([A-Za-z_$][\w$]*),enabled:([A-Za-z_$][\w$]*),isAnyFeatureLoading:([A-Za-z_$][\w$]*),isComputerUseGateEnabled:([A-Za-z_$][\w$]*),isHostCompatiblePlatform:([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*)\),isPlatformLoading:([A-Za-z_$][\w$]*),windowType:`electron`\}\)/g;
 
   let changed = false;
   let patchedSource = currentSource;
 
-  if (patchedSource.includes(availabilityNeedle)) {
-    patchedSource = patchedSource.split(availabilityNeedle).join(availabilityPatch);
-    changed = true;
-  }
-
   patchedSource = patchedSource.replace(
-    currentAvailabilityPattern,
-    (_, queryVar, queryFn, hostExpr, between, availableVar) => {
+    currentRequiredFeaturesObjectPattern,
+    (
+      match,
+      resultVar,
+      helperVar,
+      requiredFeaturesVar,
+      enabledVar,
+      featureLoadingVar,
+      rolloutVar,
+      platformPredicateVar,
+      platformVar,
+      platformLoadingVar,
+      offset,
+    ) => {
+      const contextStart = Math.max(0, offset - 1200);
+      const context = patchedSource.slice(contextStart, offset + match.length);
+      if (!context.includes("featureName:`computer_use`")) {
+        return match;
+      }
       changed = true;
-      return `${queryVar}=${queryFn}({featureName:\`computer_use\`,hostId:${hostExpr}}),${between}${availableVar}=!${queryVar}.isLoading&&${queryVar}.enabled||navigator.userAgent.includes(\`Linux\`),`;
+      return `${resultVar}=${helperVar}({areRequiredFeaturesEnabled:${platformVar}===\`linux\`||${requiredFeaturesVar},enabled:${enabledVar},isAnyFeatureLoading:${platformVar}===\`linux\`?!1:${featureLoadingVar},isComputerUseGateEnabled:${platformVar}===\`linux\`||${rolloutVar},isHostCompatiblePlatform:${platformVar}===\`linux\`||${platformPredicateVar}(${platformVar}),isPlatformLoading:${platformLoadingVar},windowType:\`electron\`})`;
     },
   );
 
@@ -498,7 +516,9 @@ function applyLinuxComputerUseInstallFlowPatch(currentSource) {
     return patchedSource;
   }
 
-  if (/=[^=]+\.isLoading&&[^=]+\.enabled\|\|navigator\.userAgent\.includes\(`Linux`\),/.test(currentSource)) {
+  if (
+    /featureName:`computer_use`[\s\S]{0,2200}?areRequiredFeaturesEnabled:([A-Za-z_$][\w$]*)===`linux`\|\|[A-Za-z_$][\w$]*,enabled:[A-Za-z_$][\w$]*,isAnyFeatureLoading:\1===`linux`\?!1:[A-Za-z_$][\w$]*,isComputerUseGateEnabled:\1===`linux`\|\|[A-Za-z_$][\w$]*,isHostCompatiblePlatform:\1===`linux`\|\|[A-Za-z_$][\w$]*\(\1\),isPlatformLoading:/.test(currentSource)
+  ) {
     return currentSource;
   }
 

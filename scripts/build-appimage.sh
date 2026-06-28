@@ -11,7 +11,7 @@ APPDIR="${APPIMAGE_APPDIR_OVERRIDE:-$REPO_DIR/dist/appimage.AppDir}"
 APPRUN_TEMPLATE="$REPO_DIR/packaging/appimage/AppRun"
 DESKTOP_TEMPLATE="$REPO_DIR/packaging/appimage/codex-desktop.desktop"
 APPIMAGE_RUNTIME_TEMPLATE="$REPO_DIR/packaging/appimage/codex-appimage-runtime.sh"
-ICON_SOURCE="$REPO_DIR/assets/codex.png"
+ICON_SOURCE="$REPO_DIR/assets/codex-linux.png"
 
 PACKAGE_NAME="${PACKAGE_NAME:-codex-desktop}"
 PACKAGE_DISPLAY_NAME="${PACKAGE_DISPLAY_NAME:-Codex Desktop}"

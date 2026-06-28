@@ -784,6 +784,7 @@ stage_update_builder_bundle() {
     stage_update_builder_linux_features_config "$update_builder_root"
     cp "$REPO_DIR/packaging/linux/codex-update-manager.postrm" "$update_builder_root/packaging/linux/codex-update-manager.postrm"
     cp "$REPO_DIR/assets/codex.png" "$update_builder_root/assets/codex.png"
+    cp "$REPO_DIR/assets/codex-linux.png" "$update_builder_root/assets/codex-linux.png"
     stage_update_builder_source_info "$update_builder_root"
     if [ -d "$node_runtime_source" ]; then
         cp -a "$node_runtime_source" "$update_builder_root/node-runtime"

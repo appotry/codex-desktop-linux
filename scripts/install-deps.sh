@@ -296,9 +296,11 @@ install_apt() {
 
 install_dnf5() {
     info "Detected RPM-based distro (dnf5)"
-    # dnf5: 7zip provides /usr/bin/7z; @development-tools is the group syntax
+    # dnf5: 7zip provides /usr/bin/7z; @development-tools is the group syntax.
+    # Install make and gcc-c++ explicitly because the group may already be marked
+    # installed without providing the g++ executable required by install.sh.
     sudo dnf install -y \
-        python3 7zip curl unzip rpm-build \
+        python3 7zip curl unzip rpm-build make gcc-c++ \
         @development-tools
 }
 
@@ -307,7 +309,7 @@ install_dnf() {
     # Older dnf: 7z comes from p7zip + p7zip-plugins
     sudo dnf install -y \
         nodejs npm python3 \
-        p7zip p7zip-plugins curl unzip rpm-build
+        p7zip p7zip-plugins curl unzip rpm-build make gcc-c++
     sudo dnf groupinstall -y 'Development Tools'
 }
 
@@ -395,16 +397,25 @@ bootstrap_7zz() {
         install_dir="/usr/local/bin"
     fi
 
-    # Try pinned versions newest-first with HEAD verification — no HTML parsing
+    local tmpdir
+    tmpdir="$(mktemp -d)"
+    # shellcheck disable=SC2064
+    trap "rm -rf '$tmpdir'" EXIT
+
+    # Try pinned versions newest-first by downloading the tarball directly.
+    # Some CI/container networks handle 7-zip.org HEAD requests inconsistently,
+    # so validate the archive contents instead of relying on a separate probe.
     local -a versions=(2600 2500 2409)
     local version="" url="" candidate_url
     for candidate in "${versions[@]}"; do
         candidate_url="https://www.7-zip.org/a/7z${candidate}-linux-${sevenzip_arch}.tar.xz"
-        if curl -fsI "$candidate_url" >/dev/null 2>&1; then
+        if curl -fsL --retry 2 --retry-delay 2 -o "$tmpdir/7z.tar.xz" "$candidate_url" \
+            && tar -tf "$tmpdir/7z.tar.xz" 7zz >/dev/null 2>&1; then
             version="$candidate"
             url="$candidate_url"
             break
         fi
+        rm -f "$tmpdir/7z.tar.xz"
     done
 
     if [ -z "$url" ]; then
@@ -413,13 +424,7 @@ Tried versions: ${versions[*]}
 Install 7zz manually from https://www.7-zip.org/download.html and ensure it is on your PATH."
     fi
 
-    local tmpdir
-    tmpdir="$(mktemp -d)"
-    # shellcheck disable=SC2064
-    trap "rm -rf '$tmpdir'" EXIT
-
-    info "Downloading 7zz ${version} from $url"
-    curl -fL --progress-bar -o "$tmpdir/7z.tar.xz" "$url"
+    info "Installing 7zz ${version} from $url"
     tar -C "$tmpdir" -xf "$tmpdir/7z.tar.xz" 7zz
 
     if [ "$install_dir" = "/usr/local/bin" ]; then
@@ -490,8 +495,8 @@ case "$DISTRO" in
         error "Unsupported package manager. Install manually:
   # Debian/Ubuntu: install Node.js 20+ with npm/npx from NodeSource, nvm, or another compatible source, then:
   sudo apt install python3 p7zip-full curl unzip build-essential                   # Debian/Ubuntu
-  sudo dnf install python3 7zip curl unzip rpm-build @development-tools             # Fedora 41+ (dnf5)
-  sudo dnf install nodejs npm python3 p7zip p7zip-plugins curl unzip rpm-build      # Fedora <41 (dnf)
+  sudo dnf install python3 7zip curl unzip rpm-build make gcc-c++ @development-tools             # Fedora 41+ (dnf5)
+  sudo dnf install nodejs npm python3 p7zip p7zip-plugins curl unzip rpm-build make gcc-c++      # Fedora <41 (dnf)
     && sudo dnf groupinstall 'Development Tools'
   sudo pacman -S nodejs npm python p7zip curl unzip zstd base-devel                 # Arch
   sudo zypper install nodejs-default npm-default python3 p7zip-full curl unzip      # openSUSE

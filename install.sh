@@ -25,6 +25,7 @@ MIN_BETTER_SQLITE3_VERSION_FOR_ELECTRON_41="12.9.0"
 WORK_DIR="$(mktemp -d)"
 ARCH="$(uname -m)"
 ICON_SOURCE="$SCRIPT_DIR/assets/codex.png"
+LINUX_ICON_SOURCE="${CODEX_LINUX_ICON_SOURCE:-$SCRIPT_DIR/assets/codex-linux.png}"
 
 # ---- Source library helpers ----
 . "$SCRIPT_DIR/scripts/lib/install-helpers.sh"
@@ -62,10 +63,12 @@ SCRIPT
     chmod +x "$INSTALL_DIR/start.sh"
     mkdir -p "$INSTALL_DIR/.codex-linux"
     cp "$SCRIPT_DIR/launcher/webview-server.py" "$INSTALL_DIR/.codex-linux/webview-server.py"
-    if [ -f "$ICON_SOURCE" ]; then
-        cp "$ICON_SOURCE" "$INSTALL_DIR/.codex-linux/$CODEX_APP_ID.png"
+    local linux_icon_source="$LINUX_ICON_SOURCE"
+    [ -f "$linux_icon_source" ] || linux_icon_source="$ICON_SOURCE"
+    if [ -f "$linux_icon_source" ]; then
+        cp "$linux_icon_source" "$INSTALL_DIR/.codex-linux/$CODEX_APP_ID.png"
     else
-        warn "Notification icon not found at $ICON_SOURCE"
+        warn "Notification icon not found at $linux_icon_source"
     fi
     info "Start script created"
 }

@@ -607,6 +607,7 @@ function applyLinuxAppServerFeatureEnablementPatch(currentSource) {
     "remote_control",
     "remote_plugin",
     "tool_call_mcp_elicitation",
+    "tool_search",
     "tool_suggest",
   ]);
   const defaultFeaturesMarker = "statsig_default_enable_features";
@@ -630,19 +631,22 @@ function applyLinuxAppServerFeatureEnablementPatch(currentSource) {
 
   function sanitizeFeatureArrayDeclaration(source, arrayVar) {
     const arrayDeclarationRegex = new RegExp(
-      `(var\\s+${escapeRegExp(arrayVar)}=\\[)([^\\]]*?)(\\])`,
+      `(^|[^\\w$])((?:var\\s+)?${escapeRegExp(arrayVar)}=\\[)([^\\]]*?)(\\])`,
       "u",
     );
     const match = source.match(arrayDeclarationRegex);
     if (match == null) {
       return source;
     }
-    const [, prefix, featureArrayItems, suffix] = match;
+    const [, boundary, prefix, featureArrayItems, suffix] = match;
     const supportedFeatureArrayItems = sanitizeFeatureArrayItems(featureArrayItems);
     if (supportedFeatureArrayItems === featureArrayItems) {
       return source;
     }
-    return source.replace(arrayDeclarationRegex, `${prefix}${supportedFeatureArrayItems}${suffix}`);
+    return source.replace(
+      arrayDeclarationRegex,
+      `${boundary}${prefix}${supportedFeatureArrayItems}${suffix}`,
+    );
   }
 
   const featureArrayRegex =

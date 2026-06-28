@@ -470,7 +470,7 @@ header_value() {
 extract_icon() {
     ensure_layout
     local dmg_file source_icon tmp_dir
-    source_icon="${SOURCE_REPO_DIR:-$REPO_DIR_DEFAULT}/assets/codex.png"
+    source_icon="${SOURCE_REPO_DIR:-$REPO_DIR_DEFAULT}/assets/codex-linux.png"
     if [ -f "$source_icon" ]; then
         cp "$source_icon" "$ICON_PATH"
         return 0

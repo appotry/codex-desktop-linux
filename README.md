@@ -39,18 +39,19 @@ If dependencies are already installed:
 make install-native
 ```
 
-`make bootstrap-native` installs build dependencies, downloads a fresh upstream
-`Codex.dmg`, builds `codex-app/`, packages it for your distro, and installs the
-newest artifact from `dist/`.
+`make bootstrap-native` installs build dependencies, validates the cached
+upstream `Codex.dmg`, downloads it only when missing or stale, builds
+`codex-app/`, packages it for your distro, and installs the newest artifact
+from `dist/`.
 
 If you are installing dependencies manually on Fedora:
 
 ```bash
 # Fedora 41+
-sudo dnf install python3 7zip curl unzip rpm-build @development-tools
+sudo dnf install python3 7zip curl unzip rpm-build make gcc-c++ @development-tools
 
 # Fedora < 41
-sudo dnf install python3 p7zip p7zip-plugins curl unzip rpm-build
+sudo dnf install python3 p7zip p7zip-plugins curl unzip rpm-build make gcc-c++
 sudo dnf groupinstall 'Development Tools'
 ```
 
@@ -105,6 +106,7 @@ workarounds.
 | Copilot reasoning effort defaults | Opt-in | `copilot-reasoning-effort` | [Docs](linux-features/copilot-reasoning-effort/README.md) |
 | Example Linux Feature | Developer example | `example-feature` | [Docs](linux-features/example-feature/README.md) |
 | Open Target Discovery | Opt-in | `open-target-discovery` | [Docs](linux-features/open-target-discovery/README.md) |
+| API key service tier | Opt-in | `api-key-service-tier` | [Docs](linux-features/api-key-service-tier/README.md) |
 | Read Aloud button | Opt-in | `read-aloud` | [Docs](linux-features/read-aloud/README.md) |
 | Read Aloud MCP | Opt-in | `read-aloud-mcp` | [Docs](linux-features/read-aloud-mcp/README.md) |
 | Remote Control UI gates | Opt-in | `remote-control-ui` | [Docs](linux-features/remote-control-ui/README.md) |
