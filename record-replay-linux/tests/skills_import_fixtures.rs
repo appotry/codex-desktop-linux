@@ -39,7 +39,13 @@ fn import_options(source: &Path, target_dir: &Path) -> SkillImportOptions {
 #[test]
 fn instruction_only_defaults_to_supported_importable_skill() {
     let temp = tempfile::tempdir().unwrap();
-    let skill = fixture_skill("instruction-only");
+    let fixture = fixture_skill("instruction-only");
+    let skill = temp.path().join("instruction-only");
+    // DrvFS can expose every tracked fixture file as executable, so materialize
+    // the mode this test is meant to classify.
+    fs::create_dir(&skill).unwrap();
+    fs::copy(fixture.join("SKILL.md"), skill.join("SKILL.md")).unwrap();
+    fs::set_permissions(skill.join("SKILL.md"), fs::Permissions::from_mode(0o644)).unwrap();
 
     let inspection = inspect_skill(&skill).unwrap();
     assert_eq!(inspection.status, SkillStatus::Supported);

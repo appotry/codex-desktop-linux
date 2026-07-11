@@ -4567,8 +4567,18 @@ source_path, output_path = sys.argv[1:3]
 source = open(source_path, encoding="utf-8").read()
 start = source.index("is_wsl_environment() {")
 end = source.index("configure_side_by_side_app_env() {")
-probe = "#!/usr/bin/env bash\n" + source[start:end] + r'''
+helpers = source[start:end].replace(
+    "is_wsl_environment() {",
+    "launcher_is_wsl_environment() {",
+    1,
+)
+probe = "#!/usr/bin/env bash\n" + helpers + r'''
 set -Eeuo pipefail
+
+is_wsl_environment() {
+    [ "${CODEX_TEST_ASSUME_NON_WSL:-0}" != "1" ] || return 1
+    launcher_is_wsl_environment
+}
 
 CODEX_LINUX_APP_ID="${CODEX_LINUX_APP_ID:-codex-desktop}"
 SCRIPT_DIR="${SCRIPT_DIR:-/tmp/codex-launcher-probe-app}"
@@ -4680,7 +4690,7 @@ EOF
     mkdir -p "$drm_stub_dir/card0-DP-2" "$drm_stub_dir/card0-HDMI-3"
     printf '%s\n' connected > "$drm_stub_dir/card0-DP-2/status"
     printf '%s\n' connected > "$drm_stub_dir/card0-HDMI-3/status"
-    output="$(env -i PATH="$PATH" HOME="$HOME" CODEX_DRM_CLASS_ROOT="$drm_stub_dir" DISPLAY=:0 XDG_SESSION_TYPE=wayland XDG_CURRENT_DESKTOP=ubuntu:GNOME "$launcher_probe" probe)"
+    output="$(env -i PATH="$PATH" HOME="$HOME" CODEX_TEST_ASSUME_NON_WSL=1 CODEX_DRM_CLASS_ROOT="$drm_stub_dir" DISPLAY=:0 XDG_SESSION_TYPE=wayland XDG_CURRENT_DESKTOP=ubuntu:GNOME "$launcher_probe" probe)"
     [[ "$output" == *"mode=gnome-wayland-multi-monitor"* && "$output" == *"<--ozone-platform=x11>"* ]] || fail "GNOME Wayland multi-monitor auto profile must force X11 for stable maximize/scale behavior: $output"
     [[ "$output" != *"<--ozone-platform-hint=auto>"* ]] || fail "GNOME Wayland multi-monitor auto profile must not leave backend selection to Electron: $output"
 

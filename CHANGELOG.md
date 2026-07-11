@@ -7,6 +7,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- Linux settings search no longer shows unavailable macOS Dock icon controls or
+  Suggested prompts results that do not render in the generated Linux settings
+  page.
 - Read Aloud no longer crashes the generated Linux desktop settings page after
   its shared controls moved from React hooks to class components. The feature's
   enabled state, voice setup actions, and speech pace now use the same

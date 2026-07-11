@@ -46,6 +46,112 @@ function applyLinuxSafeMonospaceFontStackPatch(currentSource) {
   return currentSource;
 }
 
+function applyLinuxSettingsSearchVisibilityPatch(currentSource) {
+  if (currentSource.includes("function codexLinuxFilterSettingsSearchSection(")) {
+    return currentSource;
+  }
+
+  let sharedSettingsImport = null;
+  let featureGateImport = null;
+  for (const match of currentSource.matchAll(/import\{([^}]*)\}from"[^"]+"/gu)) {
+    const featureGateMatch = match[1].match(/\bE\$ as ([A-Za-z_$][\w$]*)\b/u);
+    if (featureGateMatch == null) {
+      continue;
+    }
+    sharedSettingsImport = {
+      text: match[0],
+      specifiers: match[1],
+    };
+    featureGateImport = featureGateMatch;
+    break;
+  }
+  const functionPattern =
+    /function ([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*)\)\{let [A-Za-z_$][\w$]*=\(0,[A-Za-z_$][\w$]*\.c\)\(\d+\),/gu;
+  let settingsSearchFunction = null;
+  let match;
+  while ((match = functionPattern.exec(currentSource)) != null) {
+    const openBrace = currentSource.indexOf("{", match.index);
+    const closeBrace = findMatchingBrace(currentSource, openBrace);
+    if (closeBrace === -1) {
+      continue;
+    }
+    const text = currentSource.slice(match.index, closeBrace + 1);
+    if (
+      text.includes("isSystemBackdropSupported") &&
+      text.includes("?.platform===`darwin`") &&
+      text.includes("sectionSlug===`appearance`") &&
+      text.includes("sectionSlug===`agent`")
+    ) {
+      settingsSearchFunction = {
+        start: match.index,
+        end: closeBrace + 1,
+        name: match[1],
+        param: match[2],
+        text,
+      };
+      break;
+    }
+  }
+
+  const darwinVariable = settingsSearchFunction?.text.match(
+    /,([A-Za-z_$][\w$]*)=[A-Za-z_$][\w$]*\?\.platform===`darwin`,/u,
+  )?.[1];
+  const resultVariable = settingsSearchFunction?.text.match(
+    /return ([A-Za-z_$][\w$]*)\}$/u,
+  )?.[1];
+  if (
+    featureGateImport == null ||
+    settingsSearchFunction == null ||
+    darwinVariable == null ||
+    resultVariable == null
+  ) {
+    if (
+      currentSource.includes("settingsSearchDocuments") ||
+      currentSource.includes("isSystemBackdropSupported")
+    ) {
+      console.warn(
+        "WARN: Could not find settings search visibility insertion point — skipping Linux settings search visibility patch",
+      );
+    }
+    return currentSource;
+  }
+
+  const importAdditions = [
+    "T2 as codexLinuxAccountInfoQuery",
+    "j7 as codexLinuxSuggestedPromptsEligible",
+    "qk as codexLinuxUseAuthSession",
+  ].filter((specifier) => !sharedSettingsImport.specifiers.includes(specifier));
+  const patchedImport = importAdditions.length === 0
+    ? sharedSettingsImport.text
+    : sharedSettingsImport.text.replace(
+        sharedSettingsImport.specifiers,
+        `${sharedSettingsImport.specifiers},${importAdditions.join(",")}`,
+      );
+  const helper =
+    `var codexLinuxDarwinOnlySettingsSearchMessageIds=new Set([\`settings.general.appearance.dockIcon.chatGPT.ariaLabel\`,\`settings.general.appearance.dockIcon.codex.ariaLabel\`,\`settings.general.appearance.dockIcon.label\`,\`settings.general.appearance.dockIcon.row.description\`]);function codexLinuxSuggestedPromptsSearchEnabled(){return ${featureGateImport[1]}(\`2425897452\`)}function codexLinuxSuggestedPromptsSearchVisible(e){let t=codexLinuxSuggestedPromptsSearchEnabled(),n=codexLinuxUseAuthSession(),{authMethod:r,email:i,planAtLogin:a}=n,o=e&&t&&r===\`chatgpt\`,s={queryConfig:{enabled:o}},{data:c}=codexLinuxAccountInfoQuery(\`account-info\`,s);return e&&t&&codexLinuxSuggestedPromptsEligible({authMethod:r,email:c?.email??i,plan:c?.plan??a})}function codexLinuxFilterSettingsSearchSection(e,t,n){let r=e.messages;return e.sectionSlug===\`appearance\`&&!t&&(r=r.filter(e=>!codexLinuxDarwinOnlySettingsSearchMessageIds.has(e.id))),((e.sectionSlug===\`agent\`||e.sectionSlug===\`general-settings\`)&&!n)&&(r=r.filter(e=>!e.id.startsWith(\`settings.agent.ambientSuggestions.\`))),r===e.messages?e:{...e,messages:r}}`;
+  const functionStart = `function ${settingsSearchFunction.name}(${settingsSearchFunction.param}){`;
+  const functionPatch =
+    `${functionStart}let codexLinuxSuggestedPromptsVisible=codexLinuxSuggestedPromptsSearchVisible(${settingsSearchFunction.param}.enabled);`;
+  const returnNeedle = `return ${resultVariable}}`;
+  const returnPatch =
+    `return ${resultVariable}.map(e=>codexLinuxFilterSettingsSearchSection(e,${darwinVariable},codexLinuxSuggestedPromptsVisible))}`;
+  const patchedFunction = settingsSearchFunction.text
+    .replace(functionStart, functionPatch)
+    .replace(returnNeedle, returnPatch);
+
+  if (patchedFunction === settingsSearchFunction.text) {
+    console.warn(
+      "WARN: Could not find settings search visibility insertion point — skipping Linux settings search visibility patch",
+    );
+    return currentSource;
+  }
+
+  return `${currentSource.slice(0, settingsSearchFunction.start)}${helper}${patchedFunction}${currentSource.slice(settingsSearchFunction.end)}`.replace(
+    sharedSettingsImport.text,
+    patchedImport,
+  );
+}
+
 function applyLinuxOpaqueWindowsDefaultPatch(currentSource) {
   if (
     /navigator\.userAgent\.includes\(`Linux`\)&&[A-Za-z_$][\w$]*\?\.opaqueWindows==null/u.test(
@@ -2023,6 +2129,7 @@ module.exports = {
   applyLinuxTooltipWindowControlsCollisionPatch,
   applyLinuxWindowControlsSafeAreaPatch,
   applyLinuxSafeMonospaceFontStackPatch,
+  applyLinuxSettingsSearchVisibilityPatch,
   applyLinuxFastModeModelGuardPatch,
   applyLinuxSkillsListDedupePatch,
   applyLocalEnvironmentActionModalDraftPatch,

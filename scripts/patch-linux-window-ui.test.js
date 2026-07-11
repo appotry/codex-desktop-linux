@@ -167,6 +167,7 @@ const {
   applyLinuxI18nGatePatch,
   applyLinuxOpaqueWindowsDefaultPatch,
   applyLinuxSafeMonospaceFontStackPatch,
+  applyLinuxSettingsSearchVisibilityPatch,
   applyLinuxSkillsListDedupePatch,
   applyLinuxThreadSidePanelNativeTooltipPatch,
   applyLinuxTooltipWindowControlsCollisionPatch,
@@ -384,6 +385,161 @@ test("Linux safe monospace font stack patch warns when the unsafe stack drifts",
   assert.equal(value, source);
   assert.equal(warnings.length, 1);
   assert.match(warnings[0], /Could not find Linux monospace font stack insertion point/);
+});
+
+test("Linux settings search hides controls that cannot render", () => {
+  const source = [
+    'import{E$ as l}from"./app-current.js";',
+    "function qn(e){let t=(0,Zn.c)(17),n=re(),r=Bn(e),{data:i}=_(e),a=i?.isSystemBackdropSupported!==!1,o=i?.platform===`darwin`,{data:s}=T(k,e.selectedHostId),c,l=c;if(a){let e;e=e=>e.sectionSlug===`appearance`&&!a?{...e,messages:e.messages.filter(Jn)}:e.sectionSlug===`agent`?{...e,terms:[]}:e,m=r.map(e)}else m=r;return m}",
+    "function Jn(e){return!Qn.includes(e.id)}",
+  ].join("");
+
+  const patched = applyPatchTwice(applyLinuxSettingsSearchVisibilityPatch, source);
+
+  assert.match(patched, /function codexLinuxFilterSettingsSearchSection\(/);
+  assert.match(patched, /settings\.general\.appearance\.dockIcon\.label/);
+  assert.match(
+    patched,
+    /function codexLinuxSuggestedPromptsSearchEnabled\(\)\{return l\(`2425897452`\)\}/,
+  );
+  assert.match(
+    patched,
+    /T2 as codexLinuxAccountInfoQuery,j7 as codexLinuxSuggestedPromptsEligible,qk as codexLinuxUseAuthSession/,
+  );
+  assert.match(
+    patched,
+    /let codexLinuxSuggestedPromptsVisible=codexLinuxSuggestedPromptsSearchVisible\(e\.enabled\);/,
+  );
+  assert.doesNotMatch(
+    patched,
+    /let codexLinuxSuggestedPromptsVisible=l\(`2425897452`\);/,
+  );
+  assert.match(
+    patched,
+    /return m\.map\(e=>codexLinuxFilterSettingsSearchSection\(e,o,codexLinuxSuggestedPromptsVisible\)\)/,
+  );
+  assert.equal(
+    (patched.match(/function codexLinuxFilterSettingsSearchSection\(/g) || []).length,
+    1,
+  );
+
+  const helperStart = patched.indexOf(
+    "var codexLinuxDarwinOnlySettingsSearchMessageIds",
+  );
+  const helperEnd = patched.indexOf("function qn", helperStart);
+  const context = {
+    accountData: null,
+    authSnapshot: {
+      authMethod: "chatgpt",
+      email: "fallback@example.com",
+      planAtLogin: "free",
+    },
+    eligibilityCalls: [],
+    gateEnabled: false,
+    isEligible: false,
+    l: () => context.gateEnabled,
+    queryCalls: [],
+    codexLinuxAccountInfoQuery: (key, config) => {
+      context.queryCalls.push({ key, config });
+      return { data: context.accountData };
+    },
+    codexLinuxSuggestedPromptsEligible: (input) => {
+      context.eligibilityCalls.push(input);
+      return context.isEligible;
+    },
+    codexLinuxUseAuthSession: () => context.authSnapshot,
+  };
+  vm.runInNewContext(
+    `${patched.slice(helperStart, helperEnd)};globalThis.filter=codexLinuxFilterSettingsSearchSection;globalThis.suggestedPromptsVisible=codexLinuxSuggestedPromptsSearchVisible`,
+    context,
+  );
+  const dockMessage = {
+    id: "settings.general.appearance.dockIcon.label",
+  };
+  const themeMessage = {
+    id: "settings.general.appearance.theme",
+  };
+  const suggestedPromptMessage = {
+    id: "settings.agent.ambientSuggestions.groupTitle",
+  };
+  const permissionsMessage = {
+    id: "settings.agent.permissionsMode.groupTitle",
+  };
+
+  assert.deepEqual(
+    Array.from(context.filter({
+      sectionSlug: "appearance",
+      messages: [dockMessage, themeMessage],
+    }, false, false).messages, (message) => message.id),
+    [themeMessage.id],
+  );
+  assert.deepEqual(
+    Array.from(context.filter({
+      sectionSlug: "appearance",
+      messages: [dockMessage, themeMessage],
+    }, true, false).messages, (message) => message.id),
+    [dockMessage.id, themeMessage.id],
+  );
+  assert.deepEqual(
+    Array.from(context.filter({
+      sectionSlug: "agent",
+      messages: [suggestedPromptMessage, permissionsMessage],
+    }, false, false).messages, (message) => message.id),
+    [permissionsMessage.id],
+  );
+  const filterSuggestedPromptIds = (sectionSlug) =>
+    Array.from(context.filter({
+      sectionSlug,
+      messages: [suggestedPromptMessage, permissionsMessage],
+    }, false, context.suggestedPromptsVisible(true)).messages, (message) => message.id);
+
+  context.gateEnabled = true;
+  context.isEligible = true;
+  assert.equal(context.suggestedPromptsVisible(false), false);
+  assert.deepEqual(JSON.parse(JSON.stringify(context.queryCalls.at(-1).config)), {
+    queryConfig: {
+      enabled: false,
+    },
+  });
+
+  context.gateEnabled = false;
+  context.isEligible = true;
+  assert.equal(context.suggestedPromptsVisible(true), false);
+  assert.deepEqual(filterSuggestedPromptIds("general-settings"), [permissionsMessage.id]);
+
+  context.gateEnabled = true;
+  context.isEligible = true;
+  context.accountData = {
+    email: "account@example.com",
+    plan: "pro",
+  };
+  assert.equal(context.suggestedPromptsVisible(true), true);
+  assert.deepEqual(filterSuggestedPromptIds("general-settings"), [
+    suggestedPromptMessage.id,
+    permissionsMessage.id,
+  ]);
+  assert.deepEqual(JSON.parse(JSON.stringify(context.eligibilityCalls.at(-1))), {
+    authMethod: "chatgpt",
+    email: "account@example.com",
+    plan: "pro",
+  });
+
+  context.gateEnabled = true;
+  context.isEligible = false;
+  assert.equal(context.suggestedPromptsVisible(true), false);
+  assert.deepEqual(filterSuggestedPromptIds("general-settings"), [permissionsMessage.id]);
+});
+
+test("Linux settings search visibility patch warns on current-bundle drift", () => {
+  const source =
+    'import{E$ as h}from"./app-current.js";function qn(e){return settingsSearchDocuments}';
+  const { value, warnings } = captureWarns(() =>
+    applyLinuxSettingsSearchVisibilityPatch(source),
+  );
+
+  assert.equal(value, source);
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /settings search visibility insertion point/);
 });
 
 test("subagent nickname metadata patch accepts session metadata shape", () => {
@@ -877,6 +1033,7 @@ test("default core patch descriptors are grouped and unique", () => {
     "linux-xdg-documents-dir",
     "linux-projectless-xdg-documents-dir",
     "linux-workspace-root-open-targets",
+    "linux-settings-search-visibility",
     "linux-i18n-gate",
     "automation-schedule-multi-time-rrule",
     "automation-update-eager-tool",
