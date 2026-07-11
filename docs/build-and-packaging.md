@@ -164,6 +164,22 @@ make appimage
 The AppImage flow does not include `codex-update-manager`, the systemd user
 service, polkit policy, or the native-package update builder.
 
+To make a local AppImage self-contained, install the CLI with its optional
+Linux package and pass the package directory to the AppImage build:
+
+```bash
+cli_prefix="$HOME/.cache/codex-desktop-linux/appimage-cli"
+npm install --prefix "$cli_prefix" --include=optional @openai/codex
+CODEX_CLI_BUNDLE_SOURCE="$cli_prefix/node_modules/@openai/codex" make appimage
+```
+
+The build copies only `@openai/codex` and the matching Linux architecture
+package on x86-64 and ARM64. It does not fetch packages itself. The bundled CLI
+is used when `CODEX_CLI_PATH` is unset and takes precedence over a host
+installation. This adds the native CLI payload to the AppImage, which is several
+hundred MiB for current releases. Rebuild the AppImage when you want to update
+the embedded CLI.
+
 When upstream ChatGPT Desktop changes:
 
 ```bash

@@ -11,6 +11,7 @@ UPSTREAM_INTEL_PATCH_REPORT ?= $(REBUILD_REPORT_DIR)/patch-report.json
 UPSTREAM_INTEL_IMAGE ?= codex-desktop-linux-devcontainer:local
 PACKAGE_NAME := codex-desktop
 PACKAGE_WITH_UPDATER ?= 1
+CODEX_CLI_BUNDLE_SOURCE ?=
 MAX_BUILD_THREADS ?= 0
 MAX_BUILD_THREADS_VALUE := $(strip $(MAX_BUILD_THREADS))
 MAX_BUILD_THREADS_ENABLED := $(filter-out 0,$(MAX_BUILD_THREADS_VALUE))
@@ -110,6 +111,7 @@ help:
 	@printf '  %-18s %s\n' "DEV_APP_NAME=..." "Override side-by-side test app display name"
 	@printf '  %-18s %s\n' "PACKAGE_VERSION=..." "Override the package version for make deb / make rpm / make pacman / make appimage"
 	@printf '  %-18s %s\n' "PACKAGE_WITH_UPDATER=0" "Build packages without codex-update-manager or the updater service"
+	@printf '  %-18s %s\n' "CODEX_CLI_BUNDLE_SOURCE=..." "Embed an installed Codex CLI package in a local AppImage"
 	@printf '  %-18s %s\n' "MAX_BUILD_THREADS=8" "Set supported build jobs/compression threads (default: 0, tool/user defaults)"
 	@printf '  %-18s %s\n' "RPM_BINARY_PAYLOAD=..." "Advanced RPM payload flags override (default follows MAX_BUILD_THREADS)"
 	@printf '  %-18s %s\n' "APPIMAGETOOL=..." "Override the appimagetool executable for make appimage"
@@ -126,6 +128,7 @@ help:
 	@printf '  %s\n' "make bootstrap-native"
 	@printf '  %s\n' "make install-native"
 	@printf '  %s\n' "PACKAGE_WITH_UPDATER=0 make update-native"
+	@printf '  %s\n' "CODEX_CLI_BUNDLE_SOURCE=/path/to/node_modules/@openai/codex make appimage"
 	@printf '  %s\n' "make inspect-upstream DMG=/tmp/Codex.dmg"
 	@printf '  %s\n' "make inspect-upstream-intel DMG=/tmp/Codex-new.dmg"
 	@printf '  %s\n' "make inspect-upstream-intel-devcontainer"
@@ -282,7 +285,7 @@ pacman: maybe-build-updater
 
 appimage:
 	@echo "[make] Building AppImage"
-	MAX_BUILD_THREADS="$(MAX_BUILD_THREADS)" PACKAGE_VERSION="$(or $(PACKAGE_VERSION),)" ./scripts/build-appimage.sh
+	MAX_BUILD_THREADS="$(MAX_BUILD_THREADS)" PACKAGE_VERSION="$(or $(PACKAGE_VERSION),)" CODEX_CLI_BUNDLE_SOURCE="$(CODEX_CLI_BUNDLE_SOURCE)" ./scripts/build-appimage.sh
 
 package: maybe-build-updater
 	@echo "[make] Building native package (auto-detecting distro)"

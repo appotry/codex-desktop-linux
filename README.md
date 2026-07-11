@@ -165,6 +165,12 @@ order, and logs the resolved CLI path plus best-effort version so GUI PATH
 issues are visible. Set `CODEX_CLI_PATH=/path/to/codex` when you want to pin a
 specific binary.
 
+Local AppImage builds can optionally embed that CLI and its matching Linux
+platform package. Set `CODEX_CLI_BUNDLE_SOURCE` to an installed
+`node_modules/@openai/codex` directory when running `make appimage`; explicit
+`CODEX_CLI_PATH` values still take precedence at runtime. See
+[Build and packaging](docs/build-and-packaging.md#appimage-local-self-build).
+
 X11 and Wayland sessions are supported. The launcher prefers XWayland on
 Wayland when available for better Electron popup positioning, then falls back
 to Electron's automatic Wayland handling. See

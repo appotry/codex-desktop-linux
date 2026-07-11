@@ -20,4 +20,10 @@ resolve_appdir() {
 APPDIR="${APPDIR:-$(resolve_appdir)}"
 export APPDIR
 
+bundled_cli="$APPDIR/opt/__PACKAGE_NAME__/resources/codex-cli/bin/codex"
+if [ -z "${CODEX_CLI_PATH:-}" ] && [ -x "$bundled_cli" ]; then
+    CODEX_CLI_PATH="$bundled_cli"
+    export CODEX_CLI_PATH
+fi
+
 exec "$APPDIR/opt/__PACKAGE_NAME__/start.sh" "$@"

@@ -21,6 +21,29 @@ const {
   descriptors,
 } = require("./patch.js");
 
+const hostPathEntries = (process.env.PATH ?? "")
+  .split(path.delimiter)
+  .filter((entry) => path.isAbsolute(entry));
+const hostPath = [...new Set(hostPathEntries)].join(path.delimiter);
+
+function findHostExecutable(name) {
+  const executable = hostPathEntries
+    .map((entry) => path.join(entry, name))
+    .find((candidate) => {
+      try {
+        if (!fs.statSync(candidate).isFile()) return false;
+        fs.accessSync(candidate, fs.constants.X_OK);
+        return true;
+      } catch {
+        return false;
+      }
+    });
+  assert.ok(executable, `required host executable is unavailable: ${name}`);
+  return executable;
+}
+
+const hostBash = findHostExecutable("bash");
+
 function applyPatchTwice(source) {
   const patched = applyLinuxGlobalDictationMainProcessPatch(source);
   assert.notEqual(patched, source);
@@ -98,12 +121,12 @@ function runX11ReleaseMonitor({ accelerator, xmodmapLines, queryStateLines, test
   fs.mkdirSync(binDir);
   writeExecutable(
     path.join(binDir, "xmodmap"),
-    `#!/bin/sh\nprintf '%s\\n' ${xmodmapLines.map((line) => JSON.stringify(line)).join(" ")}\n`,
+    `#!${hostBash}\nprintf '%s\\n' ${xmodmapLines.map((line) => JSON.stringify(line)).join(" ")}\n`,
   );
   writeExecutable(
     path.join(binDir, "xinput"),
     [
-      "#!/bin/sh",
+      `#!${hostBash}`,
       "if [ \"$1\" = list ]; then printf '%s\\n' 'Virtual keyboard id=12 [slave  keyboard (3)]'; exit 0; fi",
       `if [ "$1" = query-state ]; then printf '%s\\n' ${queryStateLines
         .map((line) => JSON.stringify(line))
@@ -119,7 +142,11 @@ function runX11ReleaseMonitor({ accelerator, xmodmapLines, queryStateLines, test
       ["--accelerator", accelerator],
       {
         encoding: "utf8",
-        env: { ...process.env, DISPLAY: ":99", PATH: `${binDir}:/usr/bin:/bin` },
+        env: {
+          ...process.env,
+          DISPLAY: ":99",
+          PATH: `${binDir}${path.delimiter}${hostPath}`,
+        },
         timeout,
       },
     );
@@ -307,13 +334,13 @@ test("X11 release watcher exits when a required modifier is released", () => {
   fs.writeFileSync(stateFile, "0\n");
   fs.writeFileSync(
     path.join(binDir, "xmodmap"),
-    "#!/bin/sh\nprintf '%s\\n' 'keycode 37 = Control_L' 'keycode 65 = space' 'keycode 105 = Control_R'\n",
+    `#!${hostBash}\nprintf '%s\\n' 'keycode 37 = Control_L' 'keycode 65 = space' 'keycode 105 = Control_R'\n`,
     { mode: 0o755 },
   );
   fs.writeFileSync(
     path.join(binDir, "xinput"),
     [
-      "#!/bin/sh",
+      `#!${hostBash}`,
       "if [ \"$1\" = list ]; then",
       "  printf '%s\\n' 'Virtual keyboard id=12 [slave  keyboard (3)]'",
       "  exit 0",
@@ -339,7 +366,7 @@ test("X11 release watcher exits when a required modifier is released", () => {
         env: {
           ...process.env,
           DISPLAY: ":99",
-          PATH: `${binDir}:/usr/bin:/bin`,
+          PATH: `${binDir}${path.delimiter}${hostPath}`,
           STATE_FILE: stateFile,
         },
         timeout: 2000,
@@ -358,13 +385,13 @@ test("X11 release watcher exits when the primary key is released while the modif
   fs.mkdirSync(binDir);
   fs.writeFileSync(
     path.join(binDir, "xmodmap"),
-    "#!/bin/sh\nprintf '%s\\n' 'keycode 37 = Control_L' 'keycode 65 = space'\n",
+    `#!${hostBash}\nprintf '%s\\n' 'keycode 37 = Control_L' 'keycode 65 = space'\n`,
     { mode: 0o755 },
   );
   fs.writeFileSync(
     path.join(binDir, "xinput"),
     [
-      "#!/bin/sh",
+      `#!${hostBash}`,
       "if [ \"$1\" = list ]; then printf '%s\\n' 'Virtual keyboard id=12 [slave  keyboard (3)]'; exit 0; fi",
       "if [ \"$1\" = query-state ]; then printf '%s\\n' 'key[37]=down' 'key[65]=down'; exit 0; fi",
       "if [ \"$1\" = test ]; then sleep 0.05; printf '%s\\n' 'key release 65'; sleep 10; exit 0; fi",
@@ -379,7 +406,11 @@ test("X11 release watcher exits when the primary key is released while the modif
       ["--accelerator", "Ctrl+Space"],
       {
         encoding: "utf8",
-        env: { ...process.env, DISPLAY: ":99", PATH: `${binDir}:/usr/bin:/bin` },
+        env: {
+          ...process.env,
+          DISPLAY: ":99",
+          PATH: `${binDir}${path.delimiter}${hostPath}`,
+        },
         timeout: 1000,
       },
     );
@@ -396,13 +427,13 @@ test("X11 release watcher prefers resolved keycodes over fallback codes", () => 
   fs.mkdirSync(binDir);
   fs.writeFileSync(
     path.join(binDir, "xmodmap"),
-    "#!/bin/sh\nprintf '%s\\n' 'keycode 90 = Control_L' 'keycode 38 = a A'\n",
+    `#!${hostBash}\nprintf '%s\\n' 'keycode 90 = Control_L' 'keycode 38 = a A'\n`,
     { mode: 0o755 },
   );
   fs.writeFileSync(
     path.join(binDir, "xinput"),
     [
-      "#!/bin/sh",
+      `#!${hostBash}`,
       "if [ \"$1\" = list ]; then printf '%s\\n' 'Remapped keyboard id=12 [slave  keyboard (3)]'; exit 0; fi",
       "if [ \"$1\" = query-state ]; then printf '%s\\n' 'key[90]=up' 'key[37]=down' 'key[38]=down'; exit 0; fi",
       "if [ \"$1\" = test ]; then sleep 10; exit 0; fi",
@@ -417,7 +448,11 @@ test("X11 release watcher prefers resolved keycodes over fallback codes", () => 
       ["--accelerator", "Ctrl+A"],
       {
         encoding: "utf8",
-        env: { ...process.env, DISPLAY: ":99", PATH: `${binDir}:/usr/bin:/bin` },
+        env: {
+          ...process.env,
+          DISPLAY: ":99",
+          PATH: `${binDir}${path.delimiter}${hostPath}`,
+        },
         timeout: 1000,
       },
     );
@@ -517,14 +552,14 @@ test("X11 release watcher fails closed without a display or modifier", () => {
   const monitor = path.join(__dirname, "bin", "global-dictation-release-monitor");
   const withoutDisplay = spawnSync(monitor, ["--accelerator", "Ctrl+Space"], {
     encoding: "utf8",
-    env: { ...process.env, DISPLAY: "", PATH: "/usr/bin:/bin" },
+    env: { ...process.env, DISPLAY: "", PATH: hostPath },
   });
   assert.equal(withoutDisplay.status, 1);
   assert.match(withoutDisplay.stderr, /X11 display is unavailable/);
 
   const withoutModifier = spawnSync(monitor, ["--accelerator", "Space"], {
     encoding: "utf8",
-    env: { ...process.env, DISPLAY: ":99", PATH: "/usr/bin:/bin" },
+    env: { ...process.env, DISPLAY: ":99", PATH: hostPath },
   });
   assert.notEqual(withoutModifier.status, 0);
 });
@@ -536,7 +571,7 @@ test("stage hook accepts a verified prebuilt helper", () => {
       cwd: path.resolve(__dirname, "../.."),
       env: {
         ...process.env,
-        CODEX_GLOBAL_DICTATION_LINUX_SOURCE: "/bin/true",
+        CODEX_GLOBAL_DICTATION_LINUX_SOURCE: process.execPath,
         INSTALL_DIR: tempDir,
         SCRIPT_DIR: path.resolve(__dirname, "../.."),
       },
@@ -560,13 +595,13 @@ test("stage hook builds from the repository root", () => {
   fs.writeFileSync(
     path.join(binDir, "cargo"),
     [
-      "#!/bin/sh",
+      `#!${hostBash}`,
       "set -eu",
       "pwd > \"$FAKE_CARGO_CWD\"",
       "printf '%s\\n' \"$*\" > \"$FAKE_CARGO_ARGS\"",
       "target_dir=\"$FAKE_SOURCE_ROOT/global-dictation-linux/target/release\"",
       "mkdir -p \"$target_dir\"",
-      "cp /bin/true \"$target_dir/codex-global-dictation-linux\"",
+      "cp \"$FAKE_SOURCE_BINARY\" \"$target_dir/codex-global-dictation-linux\"",
     ].join("\n"),
     { mode: 0o755 },
   );
@@ -579,8 +614,9 @@ test("stage hook builds from the repository root", () => {
         FAKE_CARGO_ARGS: path.join(tempDir, "cargo.args"),
         FAKE_CARGO_CWD: observedCwd,
         FAKE_SOURCE_ROOT: sourceRoot,
+        FAKE_SOURCE_BINARY: process.execPath,
         INSTALL_DIR: installDir,
-        PATH: `${binDir}:/usr/bin:/bin`,
+        PATH: `${binDir}${path.delimiter}${hostPath}`,
         SCRIPT_DIR: sourceRoot,
       },
       stdio: "pipe",

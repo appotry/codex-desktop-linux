@@ -1378,11 +1378,27 @@ test_appimage_builder_smoke() {
     local dist_dir="$workspace/dist"
     local appdir="$workspace/codex-desktop.AppDir"
     local capture_dir="$workspace/capture"
+    local cli_root="$workspace/cli/node_modules/@openai"
+    local cli_source="$cli_root/codex"
+    local platform_source
+    local platform_package
+    local target_triple
+    local platform_version_suffix
     local arch
 
     case "$(uname -m)" in
-        x86_64) arch="x86_64" ;;
-        aarch64|arm64) arch="aarch64" ;;
+        x86_64)
+            arch="x86_64"
+            platform_package="codex-linux-x64"
+            target_triple="x86_64-unknown-linux-musl"
+            platform_version_suffix="linux-x64"
+            ;;
+        aarch64|arm64)
+            arch="aarch64"
+            platform_package="codex-linux-arm64"
+            target_triple="aarch64-unknown-linux-musl"
+            platform_version_suffix="linux-arm64"
+            ;;
         armv7l|armhf) arch="armhf" ;;
         *) fail "Unsupported AppImage smoke-test architecture: $(uname -m)" ;;
     esac
@@ -1390,6 +1406,8 @@ test_appimage_builder_smoke() {
     mkdir -p "$workspace" "$dist_dir" "$capture_dir"
     make_stub_bin_dir "$bin_dir"
     make_fake_app "$app_dir"
+    mkdir -p "$app_dir/resources/codex-cli"
+    printf '%s\n' 'upstream-payload' > "$app_dir/resources/codex-cli/preserve.txt"
 
     cat > "$bin_dir/appimagetool" <<'SCRIPT'
 #!/usr/bin/env bash
@@ -1438,6 +1456,8 @@ SCRIPT
     assert_file_exists "$capture_dir/AppDir/opt/codex-desktop/.codex-linux/codex-desktop.png"
     assert_file_exists "$capture_dir/AppDir/opt/codex-desktop/.codex-linux/codex-packaged-runtime.sh"
     assert_file_exists "$capture_dir/AppDir/opt/codex-desktop/resources/node-runtime/bin/node"
+    assert_file_exists "$capture_dir/AppDir/opt/codex-desktop/resources/codex-cli/preserve.txt"
+    assert_file_not_exists "$capture_dir/AppDir/opt/codex-desktop/resources/codex-cli/bin/codex"
     assert_file_not_exists "$capture_dir/AppDir/usr/bin/codex-update-manager"
     assert_file_not_exists "$capture_dir/AppDir/usr/lib/systemd/user/codex-update-manager.service"
     assert_file_not_exists "$capture_dir/AppDir/usr/share/polkit-1/actions/com.github.ilysenko.codex-desktop-linux.update.policy"
@@ -1452,6 +1472,131 @@ SCRIPT
     assert_not_contains "$capture_dir/AppDir/opt/codex-desktop/.codex-linux/codex-packaged-runtime.sh" "/usr/share/applications"
     [ "$(cat "$capture_dir/arch")" = "$arch" ] || fail "Expected appimagetool ARCH=$arch"
     [ "$(cat "$capture_dir/version")" = "2026.03.24.120000+appimage" ] || fail "Expected appimagetool VERSION override"
+
+    if [ "$arch" = "armhf" ]; then
+        return 0
+    fi
+
+    platform_source="$cli_root/$platform_package"
+    mkdir -p \
+        "$cli_source/bin" \
+        "$platform_source/vendor/$target_triple/bin"
+    printf '%s\n' \
+        '{' \
+        '  "name": "@openai/codex",' \
+        '  "version": "0.144.1",' \
+        '  "bin": {"codex": "bin/codex.js"},' \
+        "  \"optionalDependencies\": {\"@openai/$platform_package\": \"npm:@openai/codex@0.144.1-$platform_version_suffix\"}" \
+        '}' > "$cli_source/package.json"
+    printf '%s\n' '#!/usr/bin/env node' 'console.log("fixture");' > "$cli_source/bin/codex.js"
+    printf '%s\n' \
+        '{' \
+        '  "name": "@openai/codex",' \
+        "  \"version\": \"0.144.1-$platform_version_suffix\"" \
+        '}' > "$platform_source/package.json"
+    printf '%s\n' '#!/usr/bin/env bash' 'echo fixture-native-codex' > "$platform_source/vendor/$target_triple/bin/codex"
+    chmod 0755 "$platform_source/vendor/$target_triple/bin/codex"
+
+    rm -rf "$capture_dir"
+    mkdir -p "$capture_dir"
+    PATH="$bin_dir:$PATH" \
+    CAPTURE_DIR="$capture_dir" \
+    APP_DIR_OVERRIDE="$app_dir" \
+    DIST_DIR_OVERRIDE="$dist_dir" \
+    APPIMAGE_APPDIR_OVERRIDE="$appdir" \
+    CODEX_CLI_BUNDLE_SOURCE="$cli_source" \
+    PACKAGE_VERSION="2026.03.24.120000+appimage-cli" \
+    bash "$REPO_DIR/scripts/build-appimage.sh"
+
+    local bundled_cli="$capture_dir/AppDir/opt/codex-desktop/resources/codex-cli/bin/codex"
+    assert_file_exists "$bundled_cli"
+    assert_file_not_exists "$capture_dir/AppDir/opt/codex-desktop/resources/codex-cli/preserve.txt"
+    [ -x "$bundled_cli" ] || fail "Expected bundled Codex CLI wrapper to be executable"
+    assert_file_exists "$capture_dir/AppDir/opt/codex-desktop/resources/codex-cli/node_modules/@openai/codex/bin/codex.js"
+    assert_file_exists "$capture_dir/AppDir/opt/codex-desktop/resources/codex-cli/node_modules/@openai/$platform_package/vendor/$target_triple/bin/codex"
+    assert_contains "$capture_dir/AppDir/AppRun" "resources/codex-cli/bin/codex"
+    assert_contains "$capture_dir/AppDir/AppRun" "export CODEX_CLI_PATH"
+
+    printf '%s\n' '#!/usr/bin/env bash' 'printf "%s\n" "${CODEX_CLI_PATH:-}"' > "$capture_dir/AppDir/opt/codex-desktop/start.sh"
+    chmod 0755 "$capture_dir/AppDir/opt/codex-desktop/start.sh"
+    local app_run_output
+    app_run_output="$(env -i PATH=/usr/bin:/bin HOME="$workspace/home" APPDIR="$capture_dir/AppDir" "$capture_dir/AppDir/AppRun")"
+    [ "$app_run_output" = "$bundled_cli" ] || fail "Expected AppRun to select bundled Codex CLI: $app_run_output"
+    app_run_output="$(env -i PATH=/usr/bin:/bin HOME="$workspace/home" APPDIR="$capture_dir/AppDir" CODEX_CLI_PATH=/custom/codex "$capture_dir/AppDir/AppRun")"
+    [ "$app_run_output" = "/custom/codex" ] || fail "Expected explicit CODEX_CLI_PATH to override bundled CLI: $app_run_output"
+    [ "$("$bundled_cli" --version)" = "v22.22.2" ] || fail "Expected bundled CLI wrapper to use the managed Node runtime"
+
+    rm -rf "$platform_source" "$capture_dir"
+    mkdir -p "$capture_dir"
+    local missing_platform_log="$workspace/missing-platform.log"
+    if PATH="$bin_dir:$PATH" \
+        CAPTURE_DIR="$capture_dir" \
+        APP_DIR_OVERRIDE="$app_dir" \
+        DIST_DIR_OVERRIDE="$dist_dir" \
+        APPIMAGE_APPDIR_OVERRIDE="$appdir" \
+        CODEX_CLI_BUNDLE_SOURCE="$cli_source" \
+        PACKAGE_VERSION="2026.03.24.120000+appimage-cli-missing" \
+        bash "$REPO_DIR/scripts/build-appimage.sh" >"$missing_platform_log" 2>&1; then
+        fail "AppImage build should reject a Codex CLI bundle without its Linux platform package"
+    fi
+    assert_contains "$missing_platform_log" "Missing bundled Codex CLI platform package"
+
+    mkdir -p "$platform_source/vendor/$target_triple/bin"
+    printf '%s\n' \
+        '{' \
+        '  "name": "@openai/codex",' \
+        "  \"version\": \"0.144.1-$platform_version_suffix\"" \
+        '}' > "$platform_source/package.json"
+    printf '%s\n' '#!/usr/bin/env bash' 'echo fixture-native-codex' > "$platform_source/vendor/$target_triple/bin/codex"
+    chmod 0755 "$platform_source/vendor/$target_triple/bin/codex"
+    ln -s package.json "$cli_source/package-link.json"
+
+    local symlink_log="$workspace/symlink.log"
+    if PATH="$bin_dir:$PATH" \
+        CAPTURE_DIR="$capture_dir" \
+        APP_DIR_OVERRIDE="$app_dir" \
+        DIST_DIR_OVERRIDE="$dist_dir" \
+        APPIMAGE_APPDIR_OVERRIDE="$appdir" \
+        CODEX_CLI_BUNDLE_SOURCE="$cli_source" \
+        PACKAGE_VERSION="2026.03.24.120000+appimage-cli-symlink" \
+        bash "$REPO_DIR/scripts/build-appimage.sh" >"$symlink_log" 2>&1; then
+        fail "AppImage build should reject symlinks inside a bundled Codex CLI package"
+    fi
+    assert_contains "$symlink_log" "Bundled Codex CLI package contains a symlink"
+    rm "$cli_source/package-link.json"
+
+    mkfifo "$cli_source/unsupported.pipe"
+    local unsupported_entry_log="$workspace/unsupported-entry.log"
+    if PATH="$bin_dir:$PATH" \
+        CAPTURE_DIR="$capture_dir" \
+        APP_DIR_OVERRIDE="$app_dir" \
+        DIST_DIR_OVERRIDE="$dist_dir" \
+        APPIMAGE_APPDIR_OVERRIDE="$appdir" \
+        CODEX_CLI_BUNDLE_SOURCE="$cli_source" \
+        PACKAGE_VERSION="2026.03.24.120000+appimage-cli-fifo" \
+        bash "$REPO_DIR/scripts/build-appimage.sh" >"$unsupported_entry_log" 2>&1; then
+        fail "AppImage build should reject unsupported filesystem entries in a bundled Codex CLI package"
+    fi
+    assert_contains "$unsupported_entry_log" "Bundled Codex CLI package contains an unsupported filesystem entry"
+    rm "$cli_source/unsupported.pipe"
+
+    printf '%s\n' \
+        '{' \
+        '  "name": "@openai/codex",' \
+        "  \"version\": \"0.143.0-$platform_version_suffix\"" \
+        '}' > "$platform_source/package.json"
+    local version_log="$workspace/version.log"
+    if PATH="$bin_dir:$PATH" \
+        CAPTURE_DIR="$capture_dir" \
+        APP_DIR_OVERRIDE="$app_dir" \
+        DIST_DIR_OVERRIDE="$dist_dir" \
+        APPIMAGE_APPDIR_OVERRIDE="$appdir" \
+        CODEX_CLI_BUNDLE_SOURCE="$cli_source" \
+        PACKAGE_VERSION="2026.03.24.120000+appimage-cli-version" \
+        bash "$REPO_DIR/scripts/build-appimage.sh" >"$version_log" 2>&1; then
+        fail "AppImage build should reject mismatched Codex CLI package versions"
+    fi
+    assert_contains "$version_log" "Bundled Codex CLI platform package version does not match"
 }
 
 test_missing_input_failure() {
