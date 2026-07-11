@@ -3699,7 +3699,7 @@ if [ -z "${CODEX_CLI_PATH:-}" ]; then
     log_phase "cli_lookup"
 fi
 export CHROME_DESKTOP="${CHROME_DESKTOP:-$CODEX_LINUX_APP_ID.desktop}"
-if truthy_env_value "${CODEX_LINUX_PIN_RENDERER_URL:-}" && ! truthy_env_value "${CODEX_LINUX_ALLOW_RENDERER_URL_OVERRIDE:-}"; then
+if ! truthy_env_value "${CODEX_LINUX_ALLOW_RENDERER_URL_OVERRIDE:-}"; then
     if [ -n "${ELECTRON_RENDERER_URL:-}" ] && [ "$ELECTRON_RENDERER_URL" != "$WEBVIEW_ORIGIN/" ]; then
         echo "Ignoring inherited ELECTRON_RENDERER_URL; set CODEX_LINUX_ALLOW_RENDERER_URL_OVERRIDE=1 to allow overrides"
     fi

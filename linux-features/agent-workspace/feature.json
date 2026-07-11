@@ -14,11 +14,6 @@
     }
   ],
   "runtimeHooks": {
-    "env": {
-      "source": "pin-renderer.env",
-      "name": "pin-renderer.env",
-      "mode": "0644"
-    },
     "prelaunch": {
       "source": "install-skill.sh",
       "name": "install-skill.sh",

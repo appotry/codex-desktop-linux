@@ -7,7 +7,10 @@ with `python3 "$SCRIPT_DIR/.codex-linux/webview-server.py"
 "$CODEX_LINUX_WEBVIEW_PORT" --bind 127.0.0.1` for the extracted webview
 bundle. It waits for the configured port to become reachable before launching
 Electron, validates the served origin, and exports `ELECTRON_RENDERER_URL` so
-side-by-side app IDs can use an isolated local origin.
+side-by-side app IDs can use an isolated local origin. An inherited renderer
+URL is ignored by default so a new build cannot load another running install's
+stale assets; explicit debugging overrides require
+`CODEX_LINUX_ALLOW_RENDERER_URL_OVERRIDE=1`.
 
 The extracted webview payload is a static bundle under `codex-app/content/webview` and is relatively large: about 35 MB across 693 files. The generated `index.html` references hashed assets through relative paths, so the app still expects a stable local origin.
 

@@ -43,9 +43,8 @@ editor are also parsed into an argv array directly; shell syntax such as
 redirection, pipes, or environment assignment is not interpreted unless the user
 explicitly chooses a shell binary as the program.
 
-When this feature is enabled, it also sets `CODEX_LINUX_PIN_RENDERER_URL=1` for
-the launcher so Electron keeps using the managed local webview origin even if
-the environment contains an inherited `ELECTRON_RENDERER_URL`. Set
+The launcher ignores an inherited `ELECTRON_RENDERER_URL` by default so the app
+always uses its own verified webview bundle. Set
 `CODEX_LINUX_ALLOW_RENDERER_URL_OVERRIDE=1` only for explicit debugging.
 
 Install `agent-workspace-linux` (v0.1.1 or newer) from the **Agent Workspaces**

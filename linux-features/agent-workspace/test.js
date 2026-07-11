@@ -388,13 +388,6 @@ test("agent-workspace feature exposes optional bridge, settings, resources, and 
       [
         [
           "agent-workspace",
-          "env",
-          path.join("agent-workspace", "pin-renderer.env"),
-          ".codex-linux/env.d/agent-workspace-pin-renderer.env",
-          0o644,
-        ],
-        [
-          "agent-workspace",
           "prelaunch",
           path.join("agent-workspace", "install-skill.sh"),
           ".codex-linux/prelaunch.d/agent-workspace-install-skill.sh",
@@ -471,10 +464,7 @@ test("agent-workspace declarative staging copies skill and prelaunch hook into t
         ),
         fs.readFileSync(path.join(featuresRoot, "agent-workspace", "skills", "agent-workspace-linux", "SKILL.md"), "utf8"),
       );
-      assert.equal(
-        fs.readFileSync(path.join(appDir, ".codex-linux", "env.d", "agent-workspace-pin-renderer.env"), "utf8"),
-        "CODEX_LINUX_PIN_RENDERER_URL=1\n",
-      );
+      assert.equal(fs.existsSync(path.join(appDir, ".codex-linux", "env.d", "agent-workspace-pin-renderer.env")), false);
       const hookPath = path.join(appDir, ".codex-linux", "prelaunch.d", "agent-workspace-install-skill.sh");
       assert.match(fs.readFileSync(hookPath, "utf8"), /CODEX_LINUX_FEATURES_DIR/);
       assert.equal((fs.statSync(hookPath).mode & 0o777), 0o755);
