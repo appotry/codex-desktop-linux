@@ -3,6 +3,41 @@ set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+normalize_host_tool_path() {
+    local entry
+    local normalized=""
+    local -a entries=()
+
+    IFS=: read -r -a entries <<< "${PATH-}"
+    for entry in "${entries[@]}"; do
+        [[ "$entry" == /* ]] || continue
+        case ":$normalized:" in
+            *":$entry:"*) continue ;;
+        esac
+        normalized="${normalized:+$normalized:}$entry"
+    done
+
+    [ -n "$normalized" ] || {
+        printf '%s\n' "No absolute tool directories found in PATH" >&2
+        return 1
+    }
+    printf '%s\n' "$normalized"
+}
+
+# Keep host tools available to portable fixtures without inheriting empty or
+# relative PATH entries that could resolve executables from the worktree.
+HOST_TOOL_PATH="$(normalize_host_tool_path)"
+BASH_BIN="$(PATH="$HOST_TOOL_PATH" type -P bash)"
+TRUE_BIN="$(PATH="$HOST_TOOL_PATH" type -P true)"
+[ -x "$BASH_BIN" ] || {
+    printf '%s\n' "Could not resolve executable Bash from absolute PATH entries" >&2
+    exit 1
+}
+[ -x "$TRUE_BIN" ] || {
+    printf '%s\n' "Could not resolve executable true from absolute PATH entries" >&2
+    exit 1
+}
 TMP_DIR="$(mktemp -d)"
 
 export CODEX_LINUX_FEATURES_CONFIG="$REPO_DIR/linux-features/features.example.json"
@@ -155,7 +190,7 @@ make_fake_portable_plugins_upstream_app() {
 {"plugins":[{"name":"sites","source":{"source":"local","path":"./plugins/sites"},"policy":{"installation":"AVAILABLE","authentication":"ON_INSTALL"},"category":"Productivity"},{"name":"record-and-replay","source":{"source":"local","path":"./plugins/record-and-replay"},"policy":{"installation":"AVAILABLE"}},{"name":"latex","source":{"source":"local","path":"./plugins/latex"},"policy":{"installation":"AVAILABLE"}},{"name":"deep-research","source":{"source":"local","path":"./plugins/deep-research"},"policy":{"installation":"AVAILABLE"},"category":"Research"},{"name":"visualize","source":{"source":"local","path":"./plugins/visualize"},"policy":{"installation":"AVAILABLE"},"category":"Productivity"}]}
 JSON
     printf '%s\n' '{"name":"sites","version":"1.0.0","mcpServers":"./.mcp.json"}' > "$plugins_dir/sites/.codex-plugin/plugin.json"
-    printf '%s\n' '#!/bin/bash' 'set -euo pipefail' > "$plugins_dir/sites/scripts/init-site.sh"
+    printf '%s\n' "#!$BASH_BIN" 'set -euo pipefail' > "$plugins_dir/sites/scripts/init-site.sh"
     chmod 0755 "$plugins_dir/sites/scripts/init-site.sh"
     printf '%s\n' 'console.log("sites");' > "$plugins_dir/sites/mcp/server.mjs"
     printf '%s\n' '{"name":"deep-research","version":"1.0.0"}' > "$plugins_dir/deep-research/.codex-plugin/plugin.json"
@@ -411,9 +446,9 @@ test_package_payload_permission_normalization() {
     local private_file="$app_root/.codex-linux/features/private/secret.txt"
 
     mkdir -p "$app_root/content/webview" "$root/usr/bin" "$(dirname "$private_file")"
-    printf '%s\n' '#!/bin/bash' 'echo start' > "$app_root/start.sh"
+    printf '%s\n' "#!$BASH_BIN" 'echo start' > "$app_root/start.sh"
     printf '%s\n' '<!doctype html>' > "$app_root/content/webview/index.html"
-    printf '%s\n' '#!/bin/bash' 'exec /opt/codex-desktop/start.sh "$@"' > "$root/usr/bin/codex-desktop"
+    printf '%s\n' "#!$BASH_BIN" 'exec /opt/codex-desktop/start.sh "$@"' > "$root/usr/bin/codex-desktop"
     printf '%s\n' 'secret' > "$private_file"
     cat > "$app_root/.codex-linux/linux-features-staged.json" <<'JSON'
 {
@@ -616,6 +651,7 @@ SCRIPT
     assert_file_exists "$pkg_root/opt/codex-desktop/update-builder/Cargo.toml"
     assert_file_exists "$pkg_root/opt/codex-desktop/update-builder/CHANGELOG.md"
     assert_file_exists "$pkg_root/opt/codex-desktop/update-builder/computer-use-linux/Cargo.toml"
+    assert_file_not_exists "$pkg_root/opt/codex-desktop/update-builder/global-dictation-linux/Cargo.toml"
     assert_file_exists "$pkg_root/opt/codex-desktop/update-builder/read-aloud-linux/Cargo.toml"
     assert_file_exists "$pkg_root/opt/codex-desktop/update-builder/updater/Cargo.toml"
     assert_file_exists "$pkg_root/opt/codex-desktop/update-builder/plugins/openai-bundled/plugins/computer-use/.mcp.json"
@@ -697,15 +733,21 @@ test_update_builder_preserves_enabled_linux_features_config() {
     local staged_local_manifest="$root/opt/codex-desktop/update-builder/linux-features/local/local-tool/feature.json"
     local source_info="$root/opt/codex-desktop/update-builder/.codex-linux/source-info.json"
     local update_builder_manifest="$root/opt/codex-desktop/update-builder/.codex-linux/update-builder-manifest.txt"
+    local global_dictation_target_marker="$REPO_DIR/global-dictation-linux/target/codex-smoke-should-not-stage.txt"
 
     mkdir -p "$workspace"
     make_fake_app "$app_dir"
-    mkdir -p "$features_root/example-feature" "$features_root/local/local-tool"
+    mkdir -p "$features_root/example-feature" "$features_root/global-dictation" "$features_root/local/local-tool"
+    mkdir -p "$(dirname "$global_dictation_target_marker")"
+    printf '%s\n' "generated build output" > "$global_dictation_target_marker"
     printf '%s\n' '# Linux Features' > "$features_root/README.md"
     printf '%s\n' '{"enabled":[]}' > "$features_root/features.example.json"
     printf '%s\n' '{"id":"example-feature","title":"Example Linux Feature"}' \
         > "$features_root/example-feature/feature.json"
     printf '%s\n' '# Example Linux Feature' > "$features_root/example-feature/README.md"
+    printf '%s\n' '{"id":"global-dictation","title":"Global Dictation"}' \
+        > "$features_root/global-dictation/feature.json"
+    printf '%s\n' '# Global Dictation' > "$features_root/global-dictation/README.md"
     printf '%s\n' '{"id":"local-tool","title":"Local Tool"}' \
         > "$features_root/local/local-tool/feature.json"
     printf '%s\n' '# Local Tool' > "$features_root/local/local-tool/README.md"
@@ -713,6 +755,7 @@ test_update_builder_preserves_enabled_linux_features_config() {
 {
   "enabled": [
     "example-feature",
+    "global-dictation",
     "local-tool"
   ],
   "settings": {
@@ -750,21 +793,27 @@ JSON
     assert_file_exists "$staged_local_manifest"
     assert_file_exists "$update_builder_manifest"
     assert_contains "$staged_config" "example-feature"
+    assert_contains "$staged_config" "global-dictation"
     assert_contains "$staged_config" "local-tool"
     assert_contains "$staged_config" "tweaks"
     assert_contains "$staged_config" "mode"
     assert_not_contains "$staged_config" "localComment"
     assert_not_contains "$staged_config" "disabled-feature"
     assert_contains "$update_builder_manifest" "record-replay-linux/Cargo.toml"
+    assert_contains "$update_builder_manifest" "global-dictation-linux/Cargo.toml"
     assert_contains "$update_builder_manifest" "assets/codex-linux.png"
     assert_not_contains "$update_builder_manifest" "^node-runtime/"
+    assert_not_contains "$update_builder_manifest" "global-dictation-linux/target/"
+    assert_file_exists "$root/opt/codex-desktop/update-builder/global-dictation-linux/Cargo.toml"
+    assert_file_not_exists "$root/opt/codex-desktop/update-builder/global-dictation-linux/target/codex-smoke-should-not-stage.txt"
+    rm -f "$global_dictation_target_marker"
 
     node - "$staged_config" <<'NODE' || fail "Expected staged Linux features config to be sanitized"
 const fs = require("node:fs");
 const configPath = process.argv[2];
 const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
 const expected = {
-  enabled: ["example-feature", "local-tool"],
+  enabled: ["example-feature", "global-dictation", "local-tool"],
   settings: {
     "example-feature": {
       tweaks: {
@@ -2285,8 +2334,8 @@ test_fedora_atomic_rpm_ostree_target_detection() {
     local helper_output="$workspace/helper-output.log"
 
     mkdir -p "$fake_bin"
-    printf '%s\n' '#!/bin/sh' 'exit 0' > "$fake_bin/rpm-ostree"
-    printf '%s\n' '#!/bin/sh' 'exit 0' > "$fake_bin/rpmbuild"
+    printf '%s\n' "#!$BASH_BIN" 'exit 0' > "$fake_bin/rpm-ostree"
+    printf '%s\n' "#!$BASH_BIN" 'exit 0' > "$fake_bin/rpmbuild"
     chmod +x "$fake_bin/rpm-ostree" "$fake_bin/rpmbuild"
     cat > "$os_release" <<'EOF'
 ID=fedora
@@ -2297,11 +2346,11 @@ VARIANT_ID=kde
 EOF
     : > "$ostree_booted"
 
-    PATH="$fake_bin:/usr/bin:/bin" \
+    PATH="$fake_bin:$PATH" \
     OS_RELEASE_FILE="$os_release" \
     OSTREE_BOOTED_FILE="$ostree_booted" \
     DETECT_ONLY=1 \
-        bash "$REPO_DIR/scripts/install-deps.sh" >"$install_log"
+        "$BASH_BIN" "$REPO_DIR/scripts/install-deps.sh" >"$install_log"
     assert_contains "$install_log" "Detected dependency profile: rpm-ostree"
     assert_contains "$install_log" "ID=fedora"
     assert_not_contains "$install_log" "ID_LIKE=ubuntu"
@@ -2312,7 +2361,7 @@ EOF
     for command in dirname pwd uname; do
         ln -s "$(command -v "$command")" "$missing_bin/$command"
     done
-    printf '%s\n' '#!/bin/sh' 'exit 0' > "$missing_bin/rpm-ostree"
+    printf '%s\n' "#!$BASH_BIN" 'exit 0' > "$missing_bin/rpm-ostree"
     chmod +x "$missing_bin/rpm-ostree"
 
     local status=0
@@ -2320,7 +2369,7 @@ EOF
     OS_RELEASE_FILE="$os_release" \
     OSTREE_BOOTED_FILE="$ostree_booted" \
     HOME="$workspace/home-missing" \
-        /bin/bash "$REPO_DIR/scripts/install-deps.sh" >"$missing_log" 2>&1 || status=$?
+        "$BASH_BIN" "$REPO_DIR/scripts/install-deps.sh" >"$missing_log" 2>&1 || status=$?
     [ "$status" -ne 0 ] || fail "Expected rpm-ostree install-deps to stop before packages are layered"
     assert_contains "$missing_log" "sudo rpm-ostree install python3 7zip curl unzip rpm-build make gcc-c++"
     assert_contains "$missing_log" "Still missing:"
@@ -2333,8 +2382,8 @@ EOF
         ln -s "$(command -v "$command")" "$layered_bin/$command"
     done
     for command in rpm-ostree python3 7zz curl unzip rpmbuild make g++ cargo; do
-        cat > "$layered_bin/$command" <<'SCRIPT'
-#!/bin/sh
+        printf '%s\n' "#!$BASH_BIN" > "$layered_bin/$command"
+        cat >> "$layered_bin/$command" <<'SCRIPT'
 command_name="${0##*/}"
 case "$command_name" in
     7zz) echo "7-Zip 26.00" ;;
@@ -2349,20 +2398,20 @@ SCRIPT
     OS_RELEASE_FILE="$os_release" \
     OSTREE_BOOTED_FILE="$ostree_booted" \
     HOME="$workspace/home-layered" \
-        /bin/bash "$REPO_DIR/scripts/install-deps.sh" >"$layered_log" 2>&1
+        "$BASH_BIN" "$REPO_DIR/scripts/install-deps.sh" >"$layered_log" 2>&1
     assert_contains "$layered_log" "rpm-ostree layered build dependencies are already available"
     assert_contains "$layered_log" "Skipping system Node.js check; install.sh provides the managed Node.js runtime"
     assert_contains "$layered_log" "All dependencies installed"
     assert_not_contains "$layered_log" "Node.js 20+ with npm and npx is required"
 
-    PATH="$fake_bin:/usr/bin:/bin" \
+    PATH="$fake_bin:$PATH" \
     OS_RELEASE_FILE="$os_release" \
     OSTREE_BOOTED_FILE="$ostree_booted" \
     CODEX_BOOTSTRAP_DRY_RUN=1 \
     CODEX_BOOTSTRAP_NONINTERACTIVE=1 \
     CODEX_LINUX_FEATURES_ROOT="$REPO_DIR/linux-features" \
     CODEX_LINUX_FEATURES_CONFIG="$workspace/features.json" \
-        bash "$REPO_DIR/scripts/bootstrap-wizard.sh" >"$wizard_log"
+        "$BASH_BIN" "$REPO_DIR/scripts/bootstrap-wizard.sh" >"$wizard_log"
     assert_contains "$wizard_log" "Package manager: rpm-ostree"
     assert_contains "$wizard_log" "Native package format: rpm"
     assert_contains "$wizard_log" "Atomic host: yes"
@@ -2371,7 +2420,7 @@ SCRIPT
     PATH="$fake_bin" \
     OS_RELEASE_FILE="$os_release" \
     OSTREE_BOOTED_FILE="$ostree_booted" \
-    /bin/bash -c '
+    "$BASH_BIN" -c '
         # shellcheck disable=SC1091
         source "$1"
         OS_RELEASE_ID="$(os_release_field ID)"
@@ -2388,7 +2437,7 @@ SCRIPT
     PATH="$fake_bin" \
     OS_RELEASE_FILE="$os_release" \
     OSTREE_BOOTED_FILE="$ostree_booted" \
-    /bin/bash -c '
+    "$BASH_BIN" -c '
         # shellcheck disable=SC1091
         source "$1"
         OS_RELEASE_ID="$(os_release_field ID)"
@@ -2405,7 +2454,7 @@ SCRIPT
     PATH="$fake_bin" \
     OS_RELEASE_FILE="$os_release" \
     OSTREE_BOOTED_FILE="$ostree_booted" \
-    /bin/bash -c '
+    "$BASH_BIN" -c '
         # shellcheck disable=SC1091
         source "$1"
         OS_RELEASE_ID="$(os_release_field ID)"
@@ -3377,13 +3426,13 @@ test_port_validation_rejects_oversized_numeric_values() {
     [ "$(cat "$canonical_stdout")" = "80" ] || fail "Expected installer validation to canonicalize leading-zero CODEX_WEBVIEW_PORT"
     [ ! -s "$canonical_stderr" ] || fail "Expected installer leading-zero canonicalization to be quiet, got: $(cat "$canonical_stderr")"
 
-    cat > "$start_script" <<'SCRIPT'
-#!/bin/bash
-set -euo pipefail
-CODEX_LINUX_APP_ID=codex-desktop
-CODEX_LINUX_APP_DISPLAY_NAME=Codex
-CODEX_LINUX_WEBVIEW_PORT=${CODEX_WEBVIEW_PORT:-5175}
-SCRIPT
+    printf '%s\n' \
+        "#!$BASH_BIN" \
+        'set -euo pipefail' \
+        'CODEX_LINUX_APP_ID=codex-desktop' \
+        'CODEX_LINUX_APP_DISPLAY_NAME=Codex' \
+        'CODEX_LINUX_WEBVIEW_PORT=${CODEX_WEBVIEW_PORT:-5175}' \
+        > "$start_script"
     cat "$REPO_DIR/launcher/start.sh.template" >> "$start_script"
     chmod +x "$start_script"
 
@@ -3399,11 +3448,11 @@ SCRIPT
     assert_contains "$launcher_stdout" "electron-flags.conf"
     assert_file_not_exists "$workspace/help-config/codex-desktop/electron-flags.conf"
 
-    cat > "$launcher_probe_script" <<'SCRIPT'
-#!/bin/bash
-set -euo pipefail
-CODEX_LINUX_WEBVIEW_PORT=${CODEX_WEBVIEW_PORT:-5175}
-SCRIPT
+    printf '%s\n' \
+        "#!$BASH_BIN" \
+        'set -euo pipefail' \
+        'CODEX_LINUX_WEBVIEW_PORT=${CODEX_WEBVIEW_PORT:-5175}' \
+        > "$launcher_probe_script"
     awk '
         /^normalize_tcp_port\(\) \{/ { emit = 1 }
         /^launcher_port_is_open\(\) \{/ { exit }
@@ -3875,6 +3924,7 @@ test_launcher_managed_node_handles_unset_path() {
 set -u
 SCRIPT_DIR=$(printf '%q' "$workspace")
 MANAGED_NODE_BIN_DIR=$(printf '%q' "$managed_node_bin_dir")
+BASH_BIN=$(printf '%q' "$BASH_BIN")
 EOF
     awk '
         /^path_without_entry\(\) \{/ { capture = 1 }
@@ -3908,10 +3958,10 @@ PATH="$MANAGED_NODE_BIN_DIR:/usr/bin"
 CODEX_LINUX_USER_PATH=":/tmp/tools::$MANAGED_NODE_BIN_DIR:/usr/bin:"
 prepend_managed_node_runtime_to_path
 [ "$CODEX_LINUX_USER_PATH" = ":/tmp/tools::/usr/bin:" ] || exit 8
-/usr/bin/bash -c '[ "$CODEX_LINUX_USER_PATH" = ":/tmp/tools::/usr/bin:" ]' || exit 9
+"$BASH_BIN" -c '[ "$CODEX_LINUX_USER_PATH" = ":/tmp/tools::/usr/bin:" ]' || exit 9
 EOF
 
-    /usr/bin/bash "$probe" || fail "Expected managed Node PATH setup to tolerate an unset PATH"
+    "$BASH_BIN" "$probe" || fail "Expected managed Node PATH setup to tolerate an unset PATH"
 }
 
 test_packaged_runtime_keeps_managed_node_out_of_user_service_path() {
@@ -3927,8 +3977,8 @@ test_packaged_runtime_keeps_managed_node_out_of_user_service_path() {
     local -a captures
 
     mkdir -p "$fake_bin" "$runtime_dir" "$managed_node_bin"
-    cat > "$fake_bin/systemctl" <<'EOF'
-#!/bin/bash
+    printf '%s\n' "#!$BASH_BIN" > "$fake_bin/systemctl"
+    cat >> "$fake_bin/systemctl" <<'EOF'
 case "$*" in
     "--user show-environment") exit 0 ;;
     "--user import-environment "*) printf 'systemctl|%s|%s\n' "${PATH-}" "$*" >> "$CAPTURE_LOG"; exit 0 ;;
@@ -3936,8 +3986,8 @@ case "$*" in
     *) exit 0 ;;
 esac
 EOF
-    cat > "$fake_bin/dbus-update-activation-environment" <<'EOF'
-#!/bin/bash
+    printf '%s\n' "#!$BASH_BIN" > "$fake_bin/dbus-update-activation-environment"
+    cat >> "$fake_bin/dbus-update-activation-environment" <<'EOF'
 printf 'dbus|%s|%s\n' "${PATH-}" "$*" >> "$CAPTURE_LOG"
 EOF
     chmod +x "$fake_bin/systemctl" "$fake_bin/dbus-update-activation-environment"
@@ -4023,10 +4073,10 @@ SCRIPT
 
     set +e
     timeout 20 env -i \
-        PATH="/usr/bin:/bin:/usr/local/bin" \
+        PATH="$HOST_TOOL_PATH" \
         HOME="$home_dir" \
         XDG_RUNTIME_DIR="$runtime_dir" \
-        CODEX_CLI_PATH=/bin/true \
+        CODEX_CLI_PATH="$TRUE_BIN" \
         CODEX_WEBVIEW_PORT=45675 \
         ELECTRON_RENDERER_URL="http://127.0.0.1:9999/" \
         ELECTRON_MARKER="$electron_marker" \
@@ -4042,10 +4092,10 @@ SCRIPT
     rm -f "$electron_marker"
     set +e
     timeout 20 env -i \
-        PATH="/usr/bin:/bin:/usr/local/bin" \
+        PATH="$HOST_TOOL_PATH" \
         HOME="$home_dir" \
         XDG_RUNTIME_DIR="$runtime_dir" \
-        CODEX_CLI_PATH=/bin/true \
+        CODEX_CLI_PATH="$TRUE_BIN" \
         CODEX_WEBVIEW_PORT=45675 \
         CODEX_LINUX_ALLOW_RENDERER_URL_OVERRIDE=1 \
         ELECTRON_RENDERER_URL="http://127.0.0.1:9999/" \
@@ -5226,14 +5276,14 @@ PY
     printf '#!/usr/bin/env bash\nprintf "codex-cli 9.999.0\\n"\n' > "$fake_home/.npm-global/bin/codex"
     chmod +x "$path_cli_bin/codex" "$fake_home/.npm-global/bin/codex"
 
-    selected_cli="$(env -i PATH="$path_cli_bin:/usr/bin:/bin" HOME="$fake_home" "$launcher_probe" find)"
+    selected_cli="$(env -i PATH="$path_cli_bin:$HOST_TOOL_PATH" HOME="$fake_home" "$launcher_probe" find)"
     [ "$selected_cli" = "$path_cli_bin/codex" ] || fail "CLI lookup must keep the first PATH hit, got $selected_cli"
 
     local override_cli="$workspace/override-codex"
     local log_output
     printf '#!/usr/bin/env bash\nprintf "codex-cli 0.42.0\\n"\n' > "$override_cli"
     chmod +x "$override_cli"
-    log_output="$(env -i PATH="$path_cli_bin:/usr/bin:/bin" HOME="$fake_home" "$launcher_probe" log "$override_cli")"
+    log_output="$(env -i PATH="$path_cli_bin:$HOST_TOOL_PATH" HOME="$fake_home" "$launcher_probe" log "$override_cli")"
     [[ "$log_output" == "Using CODEX_CLI_PATH=$override_cli (version 0.42.0)" ]] || fail "CODEX_CLI_PATH must remain an explicit override with version logging: $log_output"
 
     local dash_version_cli="$workspace/dash-version-codex"
@@ -5243,9 +5293,9 @@ PY
     printf '#!/usr/bin/env bash\nif [ "${1:-}" = "--version" ]; then exit 2; fi\n[ "${1:-}" = "version" ] || exit 2\nprintf "codex-cli v0.151.0\\n"\n' > "$fallback_version_cli"
     chmod +x "$dash_version_cli" "$fallback_version_cli"
 
-    version_output="$(env -i PATH="/usr/bin:/bin" HOME="$fake_home" "$launcher_probe" version "$dash_version_cli")"
+    version_output="$(env -i PATH="$HOST_TOOL_PATH" HOME="$fake_home" "$launcher_probe" version "$dash_version_cli")"
     [ "$version_output" = "0.150.0" ] || fail "CLI version probe must read --version output, got $version_output"
-    version_output="$(env -i PATH="/usr/bin:/bin" HOME="$fake_home" "$launcher_probe" version "$fallback_version_cli")"
+    version_output="$(env -i PATH="$HOST_TOOL_PATH" HOME="$fake_home" "$launcher_probe" version "$fallback_version_cli")"
     [ "$version_output" = "0.151.0" ] || fail "CLI version probe must fall back to version output, got $version_output"
 
     # The version probe result is read through command substitution on the
@@ -5254,7 +5304,7 @@ PY
     # watchdog second waiting for pipe EOF.
     local fast_probe_start_ns fast_probe_end_ns fast_probe_elapsed_ms
     fast_probe_start_ns="$(date +%s%N)"
-    version_output="$(env -i PATH="/usr/bin:/bin" HOME="$fake_home" "$launcher_probe" version "$dash_version_cli")"
+    version_output="$(env -i PATH="$HOST_TOOL_PATH" HOME="$fake_home" "$launcher_probe" version "$dash_version_cli")"
     fast_probe_end_ns="$(date +%s%N)"
     fast_probe_elapsed_ms=$(( (10#$fast_probe_end_ns - 10#$fast_probe_start_ns) / 1000000 ))
     [ "$version_output" = "0.150.0" ] || fail "fast CLI version probe must still parse --version output, got $version_output"
@@ -5263,7 +5313,7 @@ PY
     local unknown_cli="$workspace/unknown-version-codex"
     printf '#!/usr/bin/env bash\nprintf "codex-cli dev build\\n"\n' > "$unknown_cli"
     chmod +x "$unknown_cli"
-    log_output="$(env -i PATH="/usr/bin:/bin" HOME="$fake_home" "$launcher_probe" log "$unknown_cli")"
+    log_output="$(env -i PATH="$HOST_TOOL_PATH" HOME="$fake_home" "$launcher_probe" log "$unknown_cli")"
     [[ "$log_output" == "Using CODEX_CLI_PATH=$unknown_cli (version unknown; set CODEX_CLI_PATH=/path/to/codex to pin a known CLI)" ]] || fail "CLI diagnostics must explain unknown versions and explicit pinning: $log_output"
 
     local fd_probe_cli="$workspace/fd-probe-codex"
@@ -5276,7 +5326,7 @@ PY
     chmod +x "$fd_probe_cli"
     version_output="$(
         exec 9>"$workspace/launcher.lock"
-        env -i PATH="/usr/bin:/bin" HOME="$fake_home" "$launcher_probe" version "$fd_probe_cli"
+        env -i PATH="$HOST_TOOL_PATH" HOME="$fake_home" "$launcher_probe" version "$fd_probe_cli"
     )"
     [ "$version_output" = "0.200.0" ] || fail "fd-guarded CLI probe must still read versions, got $version_output"
     [ "$(cat "$fd_state")" = "closed" ] || fail "CLI version probe child must not inherit launcher lock fd 9"
@@ -5291,7 +5341,7 @@ PY
     } > "$hanging_cli"
     chmod +x "$hanging_cli"
 
-    version_output="$(env -i PATH="/usr/bin:/bin" HOME="$fake_home" TMPDIR="$workspace" "$launcher_probe" version "$hanging_cli" || true)"
+    version_output="$(env -i PATH="$HOST_TOOL_PATH" HOME="$fake_home" TMPDIR="$workspace" "$launcher_probe" version "$hanging_cli" || true)"
     [ -z "$version_output" ] || fail "hanging CLI probe must ignore partial version output, got $version_output"
     assert_file_exists "$hanging_pid_file"
     local hanging_pid
@@ -5314,7 +5364,7 @@ PY
     } > "$hanging_log_cli"
     chmod +x "$hanging_log_cli"
 
-    log_output="$(env -i PATH="/usr/bin:/bin" HOME="$fake_home" TMPDIR="$workspace" "$launcher_probe" log "$hanging_log_cli")"
+    log_output="$(env -i PATH="$HOST_TOOL_PATH" HOME="$fake_home" TMPDIR="$workspace" "$launcher_probe" log "$hanging_log_cli")"
     [[ "$log_output" == "Using CODEX_CLI_PATH=$hanging_log_cli (version unknown; set CODEX_CLI_PATH=/path/to/codex to pin a known CLI)" ]] || fail "log path must time out hung CLI version probes under command substitution: $log_output"
     assert_file_exists "$hanging_log_pid_file"
     local hanging_log_pid
@@ -7433,7 +7483,7 @@ test_linux_computer_use_ui_opt_in_smoke() {
     local main_bundle="$extracted/.vite/build/main-test.js"
     local renderer_asset="$extracted/webview/assets/computer-use-settings-renderer-test.js"
     local current_renderer_asset="$extracted/webview/assets/computer-use-settings-current-test.js"
-    local install_flow_asset="$extracted/webview/assets/app-initial~app-main~pull-request-code-review~onboarding-page~hotkey-window-thread-page~cha~b76hmflu-test.js"
+    local install_flow_asset="$extracted/webview/assets/app-initial~app-main~onboarding-page~hotkey-window-thread-page~quick-chat-window-page~chatg~gwqc41kz-test.js"
     local native_apps_asset="$extracted/webview/assets/computer-use-settings-native-apps-test.js"
     local bundle_body
     local renderer_body

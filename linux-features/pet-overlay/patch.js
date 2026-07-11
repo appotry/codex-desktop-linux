@@ -2,6 +2,7 @@
 
 const VALID_GRAVITIES = new Set(["bottom-right", "bottom-left", "top-right", "top-left"]);
 const DESCRIPTOR_ID = "pet-overlay-main";
+const AVATAR_SELECTION_REFRESH_MARKER = "codexPetOverlayRefreshAvatarWindows";
 
 function findMatchingBrace(source, openIndex) {
   let depth = 0;
@@ -158,7 +159,7 @@ function buildPetOverlayMethods(settings) {
     "codexPetOverlayTrayAboveLeft(e){if(process.platform!==`linux`||e==null||e.windowBounds==null||e.mascot==null||e.tray==null)return e;let t=Number(e.windowBounds.width),n=Number(e.windowBounds.height),r=Number(e.mascot.width),i=Number(e.mascot.height),a=Number(e.tray.width),o=Number(e.tray.height);if(![t,n,r,i,a,o].every(Number.isFinite)||t<=0||n<=0||r<=0||i<=0||a<=0||o<=0)return e;let s=Math.max(0,Math.round(t-r)),c=Math.max(0,Math.round(n-i)),l=Math.max(0,Math.min(Math.round(t-a),Math.round(s+r-a))),u=Math.max(0,Math.min(Math.round(n-o),Math.round(c-o-4))),d=e.anchor??{x:Number(e.windowBounds.x)+(Number(e.mascot.left)||0),y:Number(e.windowBounds.y)+(Number(e.mascot.top)||0),width:r,height:i},p={...e.windowBounds,x:Math.round(Number(d.x)-s),y:Math.round(Number(d.y)-c)},h={...d,x:Math.round(Number(d.x)),y:Math.round(Number(d.y)),width:d.width??r,height:d.height??i};return{...e,anchor:h,mascot:{...e.mascot,left:s,top:c,width:r,height:i},tray:{...e.tray,left:l,top:u,width:a,height:o},placement:`top-end`,windowBounds:p}}",
     "codexPetOverlayRememberLayout(e){let t=this.codexPetOverlayRect(e?.windowBounds);if(t!=null){let n={x:Math.round(t.x),y:Math.round(t.y),width:Math.round(t.width),height:Math.round(t.height)},r=this.codexPetOverlayDesiredWindowBounds,i=r==null||r.x!==n.x||r.y!==n.y||r.width!==n.width||r.height!==n.height;this.codexPetOverlayDesiredWindowBounds=n;if(i&&this.codexPetOverlaySettings().lockPosition===!0&&this.window!=null)try{this.codexPetOverlayScheduleHyprlandHints(this.window)}catch{}}return e}",
     "codexPetOverlayLayoutForDisplay(e,t,n){if(process.platform!==`linux`||t==null||t.windowBounds==null)return this.codexPetOverlayRememberLayout(this.codexPetOverlayTrayAboveLeft(t));let r=this.codexPetOverlayDisplayRect(e),i=this.codexPetOverlaySettings(),a=t;if(i.lockPosition===!0&&r!=null){let e=this.codexPetOverlayGravityBounds(r,a,i);e!=null&&(a=this.codexPetOverlayLayoutAtWindowPosition(e,a))}else if(this.dragState==null){let e=this.codexPetOverlayWindowBounds(n),o=!1;try{o=n?.isVisible?.()===!0}catch{}e!=null&&r!=null&&this.codexPetOverlayBoundsNearDisplay(e,r)&&(o||this.codexPetOverlayInitialPositionDone===!0||this.codexPetOverlayManualPosition===!0)?(this.codexPetOverlayInitialPositionDone=!0,this.codexPetOverlayMoved(e,a.windowBounds)&&(this.codexPetOverlayManualPosition=!0),a=this.codexPetOverlayLayoutAtWindowPosition(e,a)):this.codexPetOverlayInitialPositionDone=!0}return this.codexPetOverlayRememberLayout(this.codexPetOverlayTrayAboveLeft(a))}",
-    "codexPetOverlayInstallTransparentRenderer(e){try{if(e.__codexPetOverlayTransparentRendererInstalled)return;e.__codexPetOverlayTransparentRendererInstalled=!0;let t=`html,body,#root,main,[data-avatar-overlay-content-frame=\"true\"]{background:transparent!important;background-color:transparent!important;}[data-codex-window-type=\"electron\"].electron-opaque,[data-codex-window-type=\"electron\"].electron-opaque body{background:transparent!important;background-color:transparent!important;background-image:none!important;}`;e.webContents?.insertCSS?.(t,{cssOrigin:`author`});e.webContents?.executeJavaScript?.(`try{document.documentElement.style.background=\"transparent\";document.body&&(document.body.style.background=\"transparent\")}catch{}`,!0)}catch{}}",
+    "codexPetOverlayInstallTransparentRenderer(e){try{if(e.__codexPetOverlayTransparentRendererInstalled)return;e.__codexPetOverlayTransparentRendererInstalled=!0;let t=e.webContents,n=()=>{try{t==null||t.isDestroyed?.()||t.insertCSS?.(`html,body,#root,main,[data-avatar-overlay-content-frame=\"true\"]{background:transparent!important;background-color:transparent!important;}[data-codex-window-type=\"electron\"].electron-opaque,[data-codex-window-type=\"electron\"].electron-opaque body{background:transparent!important;background-color:transparent!important;background-image:none!important;}`,{cssOrigin:`author`}),t==null||t.isDestroyed?.()||t.executeJavaScript?.(`try{document.documentElement.style.background=\"transparent\";document.body&&(document.body.style.background=\"transparent\")}catch{}`,!0)}catch{}};t?.on?.(`did-finish-load`,n),n()}catch{}}",
     "codexPetOverlaySyncWindow(e){if(process.platform!==`linux`||e==null||e.isDestroyed?.())return;let t=this.codexPetOverlaySettings();try{e.setTitle?.(`Codex Pet Overlay`)}catch{}try{e.setFocusable?.(t.mode!==`passive`)}catch{}try{e.setSkipTaskbar?.(!!t.skipTaskbar)}catch{}try{e.setAlwaysOnTop?.(!!t.alwaysOnTop)}catch{}try{e.setBackgroundColor?.(`#00000000`)}catch{}try{this.codexPetOverlayInstallTransparentRenderer(e)}catch{}try{e.setOpacity?.(1)}catch{}try{e.setVisibleOnAllWorkspaces?.(!!t.allWorkspaces,{visibleOnFullScreen:!!t.allWorkspaces})}catch{try{e.setVisibleOnAllWorkspaces?.(!!t.allWorkspaces)}catch{}}try{t.alwaysOnTop&&e.moveTop?.()}catch{}try{this.codexPetOverlayScheduleHyprlandHints(e)}catch{}}",
     "codexPetOverlayHyprlandSession(){if(process.platform!==`linux`)return!1;let e=[process.env.HYPRLAND_INSTANCE_SIGNATURE,process.env.XDG_CURRENT_DESKTOP,process.env.DESKTOP_SESSION].filter(Boolean).join(`:`).toLowerCase();return e.includes(`hyprland`)}",
     "codexPetOverlayShouldUseHyprland(){return process.platform===`linux`&&this.codexPetOverlaySettings().hyprland===!0&&this.codexPetOverlayHyprlandSession()}",
@@ -270,7 +271,25 @@ function patchPassiveCreateWindow(source, settings) {
     .join("appearance:`avatarOverlay`,alwaysOnTop:process.platform===`linux`,skipTaskbar:process.platform===`linux`,focusable:!1");
 }
 
-function hasCompletePetOverlayPatch(source, settings) {
+function patchAvatarSelectionRefresh(source) {
+  if (source.includes(`function ${AVATAR_SELECTION_REFRESH_MARKER}(`)) {
+    return source;
+  }
+
+  const handlerRegex = /"set-setting":async\(\{key:([A-Za-z_$][\w$]*),value:([A-Za-z_$][\w$]*)\}\)=>\(this\.setSettingValue\(\1,\2\),\{success:!0\}\)/;
+  const match = source.match(handlerRegex);
+  if (match == null) {
+    console.warn("WARN: Could not find desktop set-setting handler - skipping pet selection refresh");
+    return source;
+  }
+
+  const [handler, keyVar, valueVar] = match;
+  const helper = `function ${AVATAR_SELECTION_REFRESH_MARKER}(){try{setTimeout(()=>{for(let e of require(\`electron\`).BrowserWindow.getAllWindows()){if(e?.isDestroyed?.()||String(e?.getTitle?.()??\`\`)!==\`Codex Pet Overlay\`)continue;let t=e.webContents;t==null||t.isDestroyed?.()||t.reload?.()}},0)}catch{}}`;
+  const replacement = `"set-setting":async({key:${keyVar},value:${valueVar}})=>(this.setSettingValue(${keyVar},${valueVar}),${keyVar}===\`selected-avatar-id\`&&${AVATAR_SELECTION_REFRESH_MARKER}(),{success:!0})`;
+  return helper + source.replace(handler, replacement);
+}
+
+function hasCompletePetOverlayPatch(source, settings, avatarSelectionRefreshExpected) {
   const requiredMarkers = [
     source.includes("codexPetOverlaySettings(){"),
     /let [A-Za-z_$][\w$]*=this\.codexPetOverlayLayoutForDisplay\([A-Za-z_$][\w$]*,this\.getLayoutForDisplay\([A-Za-z_$][\w$]*\),[A-Za-z_$][\w$]*\);/.test(source),
@@ -278,6 +297,12 @@ function hasCompletePetOverlayPatch(source, settings) {
     source.includes("if(this.codexPetOverlayShouldLockPosition())return;"),
     source.includes("===`avatarOverlay`?{backgroundColor:`#00000000`,backgroundMaterial:null}:"),
   ];
+  if (avatarSelectionRefreshExpected) {
+    requiredMarkers.push(
+      source.includes(`function ${AVATAR_SELECTION_REFRESH_MARKER}(`),
+      source.includes("===`selected-avatar-id`&&codexPetOverlayRefreshAvatarWindows()"),
+    );
+  }
   if (settings.mode === "passive") {
     requiredMarkers.push(
       source.includes("appearance:`avatarOverlay`,alwaysOnTop:process.platform===`linux`,skipTaskbar:process.platform===`linux`,focusable:!1"),
@@ -311,13 +336,17 @@ function applyPetOverlayPatch(source, context) {
     return source;
   }
   const settings = mergedPetOverlaySettings(context);
+  const avatarSelectionRefreshExpected = source.includes('"set-setting":async');
   let patched = patchAvatarTransparentBackground(source);
   patched = patchApplyLayout(patched);
   patched = patchShowWindow(patched);
   patched = patchLockedDrag(patched);
   patched = ensurePetOverlayMethods(patched, settings);
   patched = patchPassiveCreateWindow(patched, settings);
-  if (!hasCompletePetOverlayPatch(patched, settings)) {
+  if (avatarSelectionRefreshExpected) {
+    patched = patchAvatarSelectionRefresh(patched);
+  }
+  if (!hasCompletePetOverlayPatch(patched, settings, avatarSelectionRefreshExpected)) {
     console.warn("WARN: Pet overlay patch is incomplete - discarding all pet overlay changes");
     return source;
   }

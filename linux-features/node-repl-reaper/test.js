@@ -11,6 +11,21 @@ const test = require("node:test");
 const REAPER = path.join(__dirname, "reaper.sh");
 const LONG_RUNNING_NODE_ARGS = ["-e", "setInterval(() => {}, 1000)"];
 
+function commandPath(name) {
+  for (const directory of (process.env.PATH || "").split(path.delimiter)) {
+    if (!directory || !path.isAbsolute(directory)) continue;
+    const candidate = path.join(directory, name);
+    try {
+      fs.accessSync(candidate, fs.constants.X_OK);
+      if (!fs.statSync(candidate).isFile()) continue;
+      return candidate;
+    } catch {}
+  }
+  throw new Error(`could not resolve executable from PATH: ${name}`);
+}
+
+const BASH = commandPath("bash");
+
 function makeFakeApp() {
   const appDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-node-repl-reaper-test-"));
   fs.mkdirSync(path.join(appDir, "resources"));
@@ -34,7 +49,7 @@ function pidAlive(pid) {
 }
 
 function runReaperOnce(appDir) {
-  const result = spawnSync("bash", [REAPER, appDir, "once"], {
+  const result = spawnSync(BASH, [REAPER, appDir, "once"], {
     encoding: "utf8",
     env: { ...process.env, CODEX_NODE_REPL_REAPER_KILL_GRACE: "1" },
   });
@@ -96,7 +111,7 @@ test("leaves a node_repl with a live codex app-server parent alone", async () =>
   const fakeCodex = path.join(appDir, "codex");
   fs.writeFileSync(
     fakeCodex,
-    `#!/bin/bash\n"${nodeReplBin}" -e 'setInterval(() => {}, 1000)' &\necho "child=$!"\nwait\n`,
+    `#!${BASH}\n"${nodeReplBin}" -e 'setInterval(() => {}, 1000)' &\necho "child=$!"\nwait\n`,
   );
   fs.chmodSync(fakeCodex, 0o755);
   const appServer = spawn(fakeCodex, ["app-server"], { stdio: ["ignore", "pipe", "ignore"] });
@@ -133,7 +148,7 @@ test("leaves a node_repl with a live codex resume parent alone", async () => {
   const fakeCodex = path.join(appDir, "codex");
   fs.writeFileSync(
     fakeCodex,
-    `#!/bin/bash\n"${nodeReplBin}" -e 'setInterval(() => {}, 1000)' &\necho "child=$!"\nwait\n`,
+    `#!${BASH}\n"${nodeReplBin}" -e 'setInterval(() => {}, 1000)' &\necho "child=$!"\nwait\n`,
   );
   fs.chmodSync(fakeCodex, 0o755);
   const cliSession = spawn(fakeCodex, ["resume"], { stdio: ["ignore", "pipe", "ignore"] });

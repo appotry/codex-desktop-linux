@@ -2,7 +2,7 @@
 "use strict";
 
 const assert = require("node:assert/strict");
-const { execFileSync } = require("node:child_process");
+const { execFileSync, spawnSync } = require("node:child_process");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
@@ -141,12 +141,12 @@ test("appshots availability descriptor matches the current bundle", () => {
   assert.equal(descriptor.pattern.test("appshot-availability-BoK-Z77O.js"), false);
   assert.ok(
     descriptor.pattern.test(
-      "app-initial~app-main~new-thread-panel-page~appgen-library-page~hotkey-window-thread-page~ho~iufn7mg3-MXsOJYYa.js",
+      "app-initial~app-main~page-hSvsQcNf.js",
     ),
   );
   assert.equal(
     descriptor.pattern.test(
-      "app-initial~app-main~new-thread-panel-page~appgen-library-page~hotkey-window-thread-page~ho~glxlkd48-Bty5T9_s.js",
+      "app-initial~app-main~new-thread-panel-page~appgen-library-page~hotkey-window-thread-page~ho~iufn7mg3-MXsOJYYa.js",
     ),
     false,
   );
@@ -175,28 +175,98 @@ test("stages the Linux bare modifier monitor helper and Wayland portal hook", ()
     },
   });
   assert.equal(electronArgsSource.trim(), "--enable-features=GlobalShortcutsPortal");
-  assert.match(helperSource, /xinput test "\$device_id"/);
+  assert.match(helperSource, /xinput test-xi2 --root/);
   assert.match(helperSource, /stdbuf -oL/);
   assert.doesNotMatch(helperSource, /\bmktemp\s+-u\b/);
-  assert.match(
-    helperSource,
-    /event_dir="\$\(mktemp -d "\$\{TMPDIR:-\/tmp\}\/codex-bare-modifier\.XXXXXX"\)"/,
-  );
-  assert.match(helperSource, /event_fifo="\$event_dir\/events"/);
-  assert.match(helperSource, /mkfifo "\$event_fifo"/);
-  assert.match(helperSource, /rmdir "\$event_dir" 2>\/dev\/null \|\| true/);
-  assert.match(helperSource, /exec 4<>"\$event_fifo"/);
-  assert.match(helperSource, /pkill -TERM -P "\$pid"/);
-  assert.match(helperSource, /while read -r pending code <&3; do/);
-  assert.match(helperSource, /\) >"\$event_fifo" 2>\/dev\/null &/);
+  assert.doesNotMatch(helperSource, /xinput list --short/);
+  assert.doesNotMatch(helperSource, /xinput test "\$device_id"/);
+  assert.doesNotMatch(helperSource, /mkfifo/);
+  assert.match(helperSource, /parent_pid="\$PPID"/);
+  assert.match(helperSource, /kill -0 "\$parent_pid"/);
+  assert.match(helperSource, /read -r -t 1 -u "\$event_fd" line/);
+  assert.match(helperSource, /kill "\$monitor_pid"/);
   assert.match(helperSource, /doublealt\|doubleoption\|alt\+alt/);
   assert.match(helperSource, /doubleshift\|shift\+shift\|leftshift\+rightshift/);
   assert.match(helperSource, /Shift_L Shift_R/);
   assert.match(helperSource, /last_tap_code=""/);
   assert.match(helperSource, /\[ "\$code" != "\$last_tap_code" \]/);
   assert.doesNotMatch(helperSource, /while IFS= read -r pending code/);
-  assert.doesNotMatch(helperSource, /test-xi2 --root/);
   execFileSync("bash", ["-n", path.join(__dirname, "bin", "bare-modifier-monitor")]);
+});
+
+test("bare modifier monitor emits one transition from one XInput2 stream", () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "appshots-xinput2-"));
+  const binDir = path.join(tempDir, "bin");
+  const helper = path.join(__dirname, "bin", "bare-modifier-monitor");
+  fs.mkdirSync(binDir);
+  fs.writeFileSync(
+    path.join(binDir, "xmodmap"),
+    "#!/bin/sh\nprintf '%s\\n' 'keycode 50 = Shift_L' 'keycode 62 = Shift_R'\n",
+    { mode: 0o755 },
+  );
+  fs.writeFileSync(
+    path.join(binDir, "xinput"),
+    [
+      "#!/bin/sh",
+      "[ \"$1 $2\" = \"test-xi2 --root\" ] || exit 2",
+      "printf '%s\\n' \\",
+      "  'EVENT type 13 (RawKeyPress)' '    detail: 50' \\",
+      "  'EVENT type 14 (RawKeyRelease)' '    detail: 50' \\",
+      "  'EVENT type 13 (RawKeyPress)' '    detail: 62' \\",
+      "  'EVENT type 14 (RawKeyRelease)' '    detail: 62'",
+      "sleep 0.25",
+    ].join("\n"),
+    { mode: 0o755 },
+  );
+
+  try {
+    const result = spawnSync(helper, ["--key", "DoubleShift", "--immediate"], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        DISPLAY: ":99",
+        PATH: `${binDir}:${process.env.PATH}`,
+      },
+      timeout: 2_000,
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(result.stdout.trim().split("\n"), ["ready", "down", "up"]);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("bare modifier monitor fails before ready when XInput2 exits during startup", () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "appshots-xinput2-startup-"));
+  const binDir = path.join(tempDir, "bin");
+  const helper = path.join(__dirname, "bin", "bare-modifier-monitor");
+  fs.mkdirSync(binDir);
+  fs.writeFileSync(
+    path.join(binDir, "xmodmap"),
+    "#!/bin/sh\nprintf '%s\\n' 'keycode 50 = Shift_L' 'keycode 62 = Shift_R'\n",
+    { mode: 0o755 },
+  );
+  fs.writeFileSync(
+    path.join(binDir, "xinput"),
+    "#!/bin/sh\n[ \"$1 $2\" = \"test-xi2 --root\" ] || exit 2\nexit 2\n",
+    { mode: 0o755 },
+  );
+
+  try {
+    const result = spawnSync(helper, ["--key", "DoubleShift", "--immediate"], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        DISPLAY: ":99",
+        PATH: `${binDir}:${process.env.PATH}`,
+      },
+      timeout: 2_000,
+    });
+    assert.notEqual(result.status, 0, result.stderr);
+    assert.equal(result.stdout, "permission-denied\n");
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
 });
 
 test("enables AppShots availability atom on Linux", () => {

@@ -57,7 +57,7 @@ module.exports = [
     phase: "webview-asset",
     order: 1050,
     ciPolicy: "optional",
-    pattern: /^app-initial~app-main~hotkey-window-thread-page~thread-app-shell-chrome~header~remote-conver~.*\.js$/,
+    pattern: /^app-initial~app-main~onboarding-page~hotkey-window-thread-page~quick-chat-window-page~chatg~[^.]+\.js$/,
     missingDescription: "tooltip bundle",
     skipDescription: "Linux tooltip titlebar collision patch",
     apply: applyLinuxTooltipWindowControlsCollisionPatch,

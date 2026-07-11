@@ -105,6 +105,7 @@ node --test linux-features/pet-overlay/test.js
 For a manual check, enable the feature, rebuild, and launch the app:
 
 - The pet overlay should remain transparent.
+- Selecting a different pet should update the open overlay without restarting Codex.
 - On Hyprland, the pet should have no visible compositor border or shadow.
 - The pet should remain above normal windows and visible across workspaces where
   the compositor honors those hints.

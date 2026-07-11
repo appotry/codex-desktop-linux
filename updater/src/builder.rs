@@ -525,6 +525,7 @@ mod tests {
     use super::*;
     use crate::config::RuntimePaths;
     use anyhow::Result;
+    use std::os::unix::fs::PermissionsExt;
     use tempfile::tempdir;
 
     enum FakePackageOutput {
@@ -545,25 +546,38 @@ mod tests {
         "scripts/patches/core/all-linux/webview/theme-and-sunset/patch.js",
     ];
 
+    fn host_tool(name: &str) -> Result<PathBuf> {
+        std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+            .filter(|directory| directory.is_absolute())
+            .map(|directory| directory.join(name))
+            .find(|candidate| {
+                fs::metadata(candidate).is_ok_and(|metadata| {
+                    metadata.is_file() && metadata.permissions().mode() & 0o111 != 0
+                })
+            })
+            .with_context(|| format!("host tool {name} not found in PATH"))
+    }
+
+    fn host_bash_script(body: &str) -> Result<String> {
+        Ok(format!("#!{}\n{body}", host_tool("bash")?.display()))
+    }
+
     fn write_fake_build_script(path: &Path, output: FakePackageOutput) -> Result<()> {
         let script_body = match output {
             FakePackageOutput::Deb => {
-                r#"#!/bin/bash
-set -euo pipefail
+                r#"set -euo pipefail
 mkdir -p "${DIST_DIR_OVERRIDE}"
 touch "${DIST_DIR_OVERRIDE}/codex-desktop_${PACKAGE_VERSION}_amd64.deb"
 "#
             }
             FakePackageOutput::Rpm => {
-                r#"#!/bin/bash
-set -euo pipefail
+                r#"set -euo pipefail
 mkdir -p "${DIST_DIR_OVERRIDE}"
 touch "${DIST_DIR_OVERRIDE}/codex-desktop-${PACKAGE_VERSION}.x86_64.rpm"
 "#
             }
             FakePackageOutput::Pacman => {
-                r#"#!/bin/bash
-set -euo pipefail
+                r#"set -euo pipefail
 VER="${PACKAGE_VERSION%%+*}"
 mkdir -p "${DIST_DIR_OVERRIDE}"
 touch "${DIST_DIR_OVERRIDE}/codex-desktop-${VER}-1-x86_64.pkg.tar.zst"
@@ -571,7 +585,7 @@ touch "${DIST_DIR_OVERRIDE}/codex-desktop-${VER}-1-x86_64.pkg.tar.zst"
             }
         };
 
-        fs::write(path, script_body)?;
+        fs::write(path, host_bash_script(script_body)?)?;
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -681,8 +695,10 @@ touch "${DIST_DIR_OVERRIDE}/codex-desktop-${VER}-1-x86_64.pkg.tar.zst"
         );
     }
 
-    #[tokio::test]
-    async fn builds_update_with_fake_bundle() -> Result<()> {
+    #[test]
+    fn builds_update_with_fake_bundle() -> Result<()> {
+        let _env_guard = crate::test_util::env_lock();
+        let runtime = tokio::runtime::Runtime::new()?;
         let temp = tempdir()?;
         let bundle_root = temp.path().join("bundle");
         let state_root = temp.path().join("state");
@@ -756,8 +772,8 @@ touch "${DIST_DIR_OVERRIDE}/codex-desktop-${VER}-1-x86_64.pkg.tar.zst"
         )?;
         fs::write(
             bundle_root.join("install.sh"),
-            r#"#!/bin/bash
-set -euo pipefail
+            host_bash_script(
+                r#"set -euo pipefail
 mkdir -p "${CODEX_INSTALL_DIR}"
 echo launcher > "${CODEX_INSTALL_DIR}/start.sh"
 chmod +x "${CODEX_INSTALL_DIR}/start.sh"
@@ -770,6 +786,7 @@ if [ -n "${CODEX_REBUILD_REPORT_JSON:-}" ]; then
   printf '{"appDir":"%s"}\n' "${CODEX_INSTALL_DIR}" > "${CODEX_REBUILD_REPORT_JSON}"
 fi
 "#,
+            )?,
         )?;
         #[cfg(unix)]
         {
@@ -808,7 +825,6 @@ fi
             bundle_root.join("scripts/lib/node-runtime.sh"),
             b"#!/bin/bash\n",
         )?;
-
         let paths = RuntimePaths {
             config_file: temp.path().join("config/config.toml"),
             state_file: state_root.join("state.json"),
@@ -837,14 +853,13 @@ fi
         fs::write(&dmg_path, b"dmg")?;
 
         let mut state = PersistedState::new(true);
-        let artifacts = build_update(
+        let artifacts = runtime.block_on(build_update(
             &config,
             &mut state,
             &paths,
             "2026.03.24+abcd1234",
             &dmg_path,
-        )
-        .await?;
+        ))?;
         assert_eq!(state.status, UpdateStatus::ReadyToInstall);
         assert!(artifacts.workspace_dir.exists());
         assert!(artifacts.package_path.exists());
@@ -952,6 +967,7 @@ fi
         assert!(destination_root.join("launcher/webview-server.py").exists());
         assert_fresh_patch_bundle(&destination_root);
         assert!(destination_root.join("computer-use-linux").exists());
+        assert!(!destination_root.join("global-dictation-linux").exists());
         assert!(destination_root.join("read-aloud-linux").exists());
         assert!(destination_root.join("record-replay-linux").exists());
         assert!(destination_root.join("updater").exists());

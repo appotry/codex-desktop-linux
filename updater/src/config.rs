@@ -1,11 +1,19 @@
 //! Runtime configuration loading and XDG path discovery for the updater.
 
 use anyhow::{Context, Result};
+use chrono::Duration as ChronoDuration;
 use directories::BaseDirs;
 use serde::{Deserialize, Serialize};
-use std::{fs, path::PathBuf};
+use std::{
+    fs,
+    path::PathBuf,
+    time::{Duration, Instant},
+};
+use tracing::warn;
 
 const SERVICE_NAME: &str = "codex-update-manager";
+const SECONDS_PER_HOUR: u64 = 60 * 60;
+const DEFAULT_CHECK_INTERVAL_HOURS: u64 = 6;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 /// Optional cleanup for generated wrapper checkout artifacts such as `dist/`
@@ -140,10 +148,10 @@ impl RuntimeConfig {
                 .to_path_buf()
         };
 
-        Self {
+        let config = Self {
             dmg_url: "https://persistent.oaistatic.com/codex-app-prod/ChatGPT.dmg".to_string(),
             initial_check_delay_seconds: 30,
-            check_interval_hours: 6,
+            check_interval_hours: DEFAULT_CHECK_INTERVAL_HOURS,
             auto_install_on_app_exit: true,
             notifications: true,
             workspace_root: paths.cache_dir.clone(),
@@ -153,7 +161,11 @@ impl RuntimeConfig {
             wrapper_remote: String::new(),
             wrapper_branch: default_wrapper_branch(),
             generated_artifact_cleanup: GeneratedArtifactCleanupConfig::default(),
-        }
+        };
+        config
+            .validate()
+            .expect("default runtime configuration must be valid");
+        config
     }
 
     /// Loads the runtime configuration from disk, or returns defaults if missing.
@@ -164,9 +176,50 @@ impl RuntimeConfig {
 
         let content = fs::read_to_string(&paths.config_file)
             .with_context(|| format!("Failed to read {}", paths.config_file.display()))?;
-        let config = toml::from_str::<Self>(&content)
+        let mut config = toml::from_str::<Self>(&content)
             .with_context(|| format!("Failed to parse {}", paths.config_file.display()))?;
+        if config.check_interval_hours == 0 {
+            warn!(
+                config_path = %paths.config_file.display(),
+                configured_hours = 0,
+                default_hours = DEFAULT_CHECK_INTERVAL_HOURS,
+                "invalid check_interval_hours; using default"
+            );
+            config.check_interval_hours = DEFAULT_CHECK_INTERVAL_HOURS;
+        }
+        config
+            .validate()
+            .with_context(|| format!("Invalid configuration {}", paths.config_file.display()))?;
         Ok(config)
+    }
+
+    fn validate(&self) -> Result<()> {
+        let interval = self.check_interval_duration()?;
+        self.check_interval_chrono_duration()?;
+        Instant::now()
+            .checked_add(interval)
+            .context("check_interval_hours exceeds the platform timer range")?;
+        let _ = self.initial_check_delay_duration();
+        Ok(())
+    }
+
+    pub(crate) fn initial_check_delay_duration(&self) -> Duration {
+        Duration::from_secs(self.initial_check_delay_seconds)
+    }
+
+    pub(crate) fn check_interval_duration(&self) -> Result<Duration> {
+        let seconds = self
+            .check_interval_hours
+            .checked_mul(SECONDS_PER_HOUR)
+            .context("check_interval_hours overflows seconds")?;
+        Ok(Duration::from_secs(seconds))
+    }
+
+    pub(crate) fn check_interval_chrono_duration(&self) -> Result<ChronoDuration> {
+        let hours = i64::try_from(self.check_interval_hours)
+            .context("check_interval_hours exceeds the Chrono hour range")?;
+        ChronoDuration::try_hours(hours)
+            .context("check_interval_hours exceeds the Chrono duration range")
     }
 }
 
@@ -340,7 +393,34 @@ fn write_settings_bool(key: &str, value: bool) -> Result<()> {
 mod tests {
     use super::*;
     use anyhow::Result;
+    use std::path::Path;
     use tempfile::tempdir;
+
+    fn test_paths(root: &Path) -> RuntimePaths {
+        RuntimePaths {
+            config_file: root.join("config/config.toml"),
+            state_file: root.join("state/state.json"),
+            log_file: root.join("state/service.log"),
+            cache_dir: root.join("cache"),
+            state_dir: root.join("state"),
+            config_dir: root.join("config"),
+        }
+    }
+
+    fn runtime_config_toml(initial_delay: u64, check_interval: u64) -> String {
+        format!(
+            r#"
+dmg_url = "https://example.com/Codex.dmg"
+initial_check_delay_seconds = {initial_delay}
+check_interval_hours = {check_interval}
+auto_install_on_app_exit = false
+notifications = false
+workspace_root = "/tmp/codex-workspaces"
+builder_bundle_root = "/tmp/codex-builder"
+app_executable_path = "/opt/codex-desktop/electron"
+"#
+        )
+    }
 
     /// Writes `settings.json` content to a tempfile, points
     /// `CODEX_LINUX_SETTINGS_FILE` at it, and returns the override result.
@@ -558,6 +638,18 @@ entries = ["dist", "target", "Codex.dmg"]
         assert_eq!(config.dmg_url, "https://example.com/Codex.dmg");
         assert_eq!(config.initial_check_delay_seconds, 5);
         assert_eq!(config.check_interval_hours, 12);
+        assert_eq!(
+            config.initial_check_delay_duration(),
+            Duration::from_secs(5)
+        );
+        assert_eq!(
+            config.check_interval_duration()?,
+            Duration::from_secs(12 * SECONDS_PER_HOUR)
+        );
+        assert_eq!(
+            config.check_interval_chrono_duration()?,
+            ChronoDuration::hours(12)
+        );
         assert!(!config.auto_install_on_app_exit);
         assert!(!config.notifications);
         assert_eq!(
@@ -585,6 +677,117 @@ entries = ["dist", "target", "Codex.dmg"]
                 PathBuf::from("target"),
                 PathBuf::from("Codex.dmg"),
             ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn zero_check_interval_warns_and_falls_back_to_default() -> Result<()> {
+        let temp = tempdir()?;
+        let paths = test_paths(temp.path());
+        fs::create_dir_all(&paths.config_dir)?;
+        fs::write(&paths.config_file, runtime_config_toml(5, 0))?;
+
+        #[derive(Clone)]
+        struct BufferWriter(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+        impl std::io::Write for BufferWriter {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                self.0
+                    .lock()
+                    .expect("log buffer lock")
+                    .extend_from_slice(bytes);
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+
+        let output = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let writer = BufferWriter(output.clone());
+        let subscriber = tracing_subscriber::fmt()
+            .without_time()
+            .with_ansi(false)
+            .with_writer(move || writer.clone())
+            .finish();
+        let config = tracing::subscriber::with_default(subscriber, || {
+            RuntimeConfig::load_or_default(&paths)
+        })?;
+        let message = String::from_utf8(output.lock().expect("log buffer lock").clone())?;
+
+        assert_eq!(config.check_interval_hours, DEFAULT_CHECK_INTERVAL_HOURS);
+        assert!(message.contains(&paths.config_file.display().to_string()));
+        assert!(message.contains("invalid check_interval_hours; using default"));
+        assert!(message.contains("default_hours=6"));
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_check_interval_that_overflows_seconds() -> Result<()> {
+        let temp = tempdir()?;
+        let paths = test_paths(temp.path());
+        fs::create_dir_all(&paths.config_dir)?;
+        fs::write(
+            &paths.config_file,
+            runtime_config_toml(5, u64::MAX / SECONDS_PER_HOUR + 1),
+        )?;
+
+        let error =
+            RuntimeConfig::load_or_default(&paths).expect_err("overflowing interval should fail");
+        let message = format!("{error:#}");
+
+        assert!(message.contains(&paths.config_file.display().to_string()));
+        assert!(message.contains("check_interval_hours overflows seconds"));
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_check_interval_outside_chrono_range() -> Result<()> {
+        let temp = tempdir()?;
+        let paths = test_paths(temp.path());
+        fs::create_dir_all(&paths.config_dir)?;
+        let chrono_millisecond_overflow_hours = (i64::MAX as u64) / (SECONDS_PER_HOUR * 1000) + 1;
+        fs::write(
+            &paths.config_file,
+            runtime_config_toml(5, chrono_millisecond_overflow_hours),
+        )?;
+
+        let error = RuntimeConfig::load_or_default(&paths)
+            .expect_err("interval outside Chrono range should fail");
+        let message = format!("{error:#}");
+
+        assert!(message.contains(&paths.config_file.display().to_string()));
+        assert!(message.contains("check_interval_hours exceeds the Chrono duration range"));
+        Ok(())
+    }
+
+    #[test]
+    fn parse_errors_include_config_path() -> Result<()> {
+        let temp = tempdir()?;
+        let paths = test_paths(temp.path());
+        fs::create_dir_all(&paths.config_dir)?;
+        fs::write(&paths.config_file, "check_interval_hours = [")?;
+
+        let error = RuntimeConfig::load_or_default(&paths).expect_err("invalid TOML should fail");
+        let message = format!("{error:#}");
+
+        assert!(message.contains("Failed to parse"));
+        assert!(message.contains(&paths.config_file.display().to_string()));
+        Ok(())
+    }
+
+    #[test]
+    fn initial_check_delay_conversion_accepts_extreme_u64() -> Result<()> {
+        let temp = tempdir()?;
+        let paths = test_paths(temp.path());
+        let mut config = RuntimeConfig::default_with_paths(&paths);
+        config.initial_check_delay_seconds = u64::MAX;
+
+        config.validate()?;
+
+        assert_eq!(
+            config.initial_check_delay_duration(),
+            Duration::from_secs(u64::MAX)
         );
         Ok(())
     }

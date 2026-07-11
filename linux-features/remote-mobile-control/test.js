@@ -54,7 +54,7 @@ const LATEST_REMOTE_CONVERSATION_ASSET =
 const CURRENT_PROJECTLESS_REMOTE_TASK_ASSET =
   "app-initial~app-main~new-thread-panel-page~appgen-library-page~hotkey-window-thread-page~ho~iufn7mg3-test.js";
 const UNIFIED_REMOTE_CONVERSATION_ASSET =
-  "app-initial~app-main~pull-request-code-review~onboarding-page~hotkey-window-thread-page~cha~b76hmflu-test.js";
+  "app-initial~app-main~onboarding-page~hotkey-window-thread-page~quick-chat-window-page~chatg~gwqc41kz-test.js";
 
 function syntheticMainBundle() {
   return [

@@ -1612,18 +1612,16 @@ mod tests {
     }
 
     fn link_test_system_tool(tool_bin: &Path, name: &str) -> Result<()> {
-        let target = [
-            PathBuf::from("/bin").join(name),
-            PathBuf::from("/usr/bin").join(name),
-        ]
-        .into_iter()
-        .find(|candidate| candidate.is_file())
-        .ok_or_else(|| {
-            std::io::Error::new(
-                std::io::ErrorKind::NotFound,
-                format!("system tool {name} not found"),
-            )
-        })?;
+        let target = std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+            .filter(|directory| directory.is_absolute())
+            .map(|directory| directory.join(name))
+            .find(|candidate| is_executable(candidate))
+            .ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    format!("system tool {name} not found"),
+                )
+            })?;
         let link_path = tool_bin.join(name);
         if !link_path.exists() {
             std::os::unix::fs::symlink(target, link_path)?;

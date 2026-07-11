@@ -140,87 +140,83 @@ last_tap_ms=0
 last_tap_code=""
 active=0
 
-keyboard_ids="$(
-    xinput list --short |
-        awk '
-            /\[slave[[:space:]]+keyboard/ {
-                if (match($0, /id=[0-9]+/)) {
-                    print substr($0, RSTART + 3, RLENGTH - 3)
-                }
-            }
-        '
-)"
-
-if [ -z "$keyboard_ids" ]; then
-    echo "permission-denied"
-    exit 1
-fi
-
-event_dir="$(mktemp -d "${TMPDIR:-/tmp}/codex-bare-modifier.XXXXXX")"
-event_fifo="$event_dir/events"
-monitor_pids=()
+parent_pid="$PPID"
+monitor_pid=""
+event_fd=""
+cleanup_started=0
 
 cleanup() {
-    for pid in "${monitor_pids[@]:-}"; do
-        if command -v pkill >/dev/null 2>&1; then
-            pkill -TERM -P "$pid" >/dev/null 2>&1 || true
-        fi
-        kill "$pid" >/dev/null 2>&1 || true
-    done
+    [ "$cleanup_started" -eq 0 ] || return
+    cleanup_started=1
+
+    [ -n "$monitor_pid" ] || return
+    kill "$monitor_pid" >/dev/null 2>&1 || true
     sleep 0.05
-    for pid in "${monitor_pids[@]:-}"; do
-        if command -v pkill >/dev/null 2>&1; then
-            pkill -KILL -P "$pid" >/dev/null 2>&1 || true
-        fi
-        kill -KILL "$pid" >/dev/null 2>&1 || true
-    done
-    wait "${monitor_pids[@]:-}" >/dev/null 2>&1 || true
-    rm -f "$event_fifo"
-    rmdir "$event_dir" 2>/dev/null || true
+    kill -KILL "$monitor_pid" >/dev/null 2>&1 || true
+    wait "$monitor_pid" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
-trap 'cleanup; exit 143' INT TERM
+trap 'exit 143' INT TERM
 
-mkfifo "$event_fifo"
-exec 4<>"$event_fifo"
+if command -v stdbuf >/dev/null 2>&1; then
+    coproc APPSHOT_XINPUT { exec stdbuf -oL xinput test-xi2 --root 2>/dev/null; }
+else
+    coproc APPSHOT_XINPUT { exec xinput test-xi2 --root 2>/dev/null; }
+fi
+monitor_pid="$APPSHOT_XINPUT_PID"
+event_fd="${APPSHOT_XINPUT[0]}"
 
-for device_id in $keyboard_ids; do
-    (
-        xinput_cmd=(xinput test "$device_id")
-        if command -v stdbuf >/dev/null 2>&1; then
-            xinput_cmd=(stdbuf -oL "${xinput_cmd[@]}")
-        fi
+sleep 0.1
+if ! kill -0 "$monitor_pid" >/dev/null 2>&1; then
+    monitor_status=0
+    wait "$monitor_pid" || monitor_status=$?
+    monitor_pid=""
+    [ "$monitor_status" -ne 0 ] || monitor_status=1
+    echo "permission-denied"
+    exit "$monitor_status"
+fi
 
-        "${xinput_cmd[@]}" 2>/dev/null |
-            while IFS= read -r line; do
-                set -- $line
-                [ "${1:-}" = "key" ] || continue
-                case "${2:-}" in
-                    press|release)
-                        printf '%s %s\n' "$2" "${3:-}"
-                        ;;
-                esac
-            done
-    ) >"$event_fifo" 2>/dev/null &
-    monitor_pids+=("$!")
-done
-
-exec 3<"$event_fifo"
 echo "ready"
 
-while read -r pending code <&3; do
+pending=""
+while kill -0 "$parent_pid" >/dev/null 2>&1 && kill -0 "$monitor_pid" >/dev/null 2>&1; do
+    if ! IFS= read -r -t 1 -u "$event_fd" line; then
+        continue
+    fi
+
+    case "$line" in
+        *"(RawKeyPress)")
+            pending="press"
+            continue
+            ;;
+        *"(RawKeyRelease)")
+            pending="release"
+            continue
+            ;;
+        EVENT\ type*)
+            pending=""
+            continue
+            ;;
+    esac
+
+    [ -n "$pending" ] || continue
+    set -- $line
+    [ "${1:-}" = "detail:" ] || continue
+    code="${2:-}"
+    action="$pending"
+    pending=""
     code="${code//[[:space:]]/}"
     [ -n "$code" ] || continue
 
     if ! is_target_keycode "$code"; then
-        if [ "$pending" = "press" ]; then
+        if [ "$action" = "press" ]; then
             last_tap_ms=0
             last_tap_code=""
         fi
         continue
     fi
 
-    if [ "$pending" = "press" ]; then
+    if [ "$action" = "press" ]; then
         current_ms="$(now_ms)"
         elapsed_ms=$((current_ms - last_tap_ms))
         if [ "$last_tap_ms" -gt 0 ] && [ "$elapsed_ms" -le "$double_tap_ms" ] && [ "$code" != "$last_tap_code" ]; then
@@ -237,7 +233,7 @@ while read -r pending code <&3; do
         continue
     fi
 
-    if [ "$pending" = "release" ] && [ "$active" -eq 1 ]; then
+    if [ "$action" = "release" ] && [ "$active" -eq 1 ]; then
         if [ "$trigger_mode" = "release" ]; then
             echo "down"
         fi

@@ -161,6 +161,38 @@
           '';
         };
 
+        codexMcpHelperReaper = pkgs.rustPlatform.buildRustPackage {
+          pname = "codex-mcp-helper-reaper";
+          version = "0.1.0";
+          src = ./linux-features/mcp-helper-reaper/reaper;
+
+          cargoLock = {
+            lockFile = ./linux-features/mcp-helper-reaper/reaper/Cargo.lock;
+          };
+        };
+
+        codexGlobalDictationBinary = pkgs.rustPlatform.buildRustPackage {
+          pname = "codex-global-dictation-linux";
+          version = "0.1.0";
+          src = ./global-dictation-linux;
+
+          cargoLock = {
+            lockFile = ./global-dictation-linux/Cargo.lock;
+          };
+
+          doCheck = false;
+
+          installPhase = ''
+            runHook preInstall
+            release_dir="target/''${CARGO_BUILD_TARGET:-${pkgs.stdenv.hostPlatform.rust.rustcTarget}}/release"
+            if [ ! -d "$release_dir" ]; then
+              release_dir="target/release"
+            fi
+            install -Dm0755 "$release_dir/codex-global-dictation-linux" "$out/bin/codex-global-dictation-linux"
+            runHook postInstall
+          '';
+        };
+
         nativeModulesNodeModules = pkgs.importNpmLock.buildNodeModules {
           npmRoot = ./nix/native-modules;
           inherit (pkgs) nodejs;
@@ -286,6 +318,11 @@
           python3
           systemd
           xdg-utils
+        ]);
+        globalDictationRuntimePath = pkgs.lib.makeBinPath (with pkgs; [
+          xdotool
+          xinput
+          xmodmap
         ]);
 
         patchNixInstalledApp = installDir: ''
@@ -457,6 +494,12 @@ PY
             export CODEX_LINUX_COMPUTER_USE_BACKEND_SOURCE="${codexComputerUseBinaries}/bin/codex-computer-use-linux"
             export CODEX_LINUX_COMPUTER_USE_COSMIC_SOURCE="${codexComputerUseBinaries}/bin/codex-computer-use-cosmic"
             export CODEX_CHROME_EXTENSION_HOST_SOURCE="${codexComputerUseBinaries}/bin/codex-chrome-extension-host"
+            ${pkgs.lib.optionalString (builtins.elem "mcp-helper-reaper" linuxFeatureIds) ''
+            export CODEX_MCP_HELPER_REAPER_SOURCE="${codexMcpHelperReaper}/bin/codex-mcp-helper-reaper"
+            ''}
+            ${pkgs.lib.optionalString (builtins.elem "global-dictation" linuxFeatureIds) ''
+            export CODEX_GLOBAL_DICTATION_LINUX_SOURCE="${codexGlobalDictationBinary}/bin/codex-global-dictation-linux"
+            ''}
             mkdir -p "$HOME" "$npm_config_cache" "$CARGO_HOME"
 
             source_dir="$TMPDIR/codex-source"
@@ -495,6 +538,9 @@ PY
             inherit enableComputerUseUi;
             linuxFeatureIds = normalizedLinuxFeatureIds;
           };
+          payloadLauncherPath = launcherPath + pkgs.lib.optionalString
+            (builtins.elem "global-dictation" normalizedLinuxFeatureIds)
+            ":${globalDictationRuntimePath}";
         in
         pkgs.stdenv.mkDerivation {
           pname = "codex-desktop${packageSuffix featureArgs}";
@@ -530,10 +576,30 @@ PY
               --unpack "{*.node,*.so,*.dylib}"
             rm -rf "$resources_dir/app-extracted"
 
-            if [ -f "$resources_dir/node_repl" ]; then
-              patchelf --set-interpreter "$(cat ${pkgs.stdenv.cc}/nix-support/dynamic-linker)" \
-                --set-rpath "${pkgs.lib.makeLibraryPath [ pkgs.stdenv.cc.cc.lib pkgs.glibc ]}" \
-                "$resources_dir/node_repl"
+            for node_repl_binary in \
+              "$resources_dir/node_repl" \
+              "$resources_dir/node_repl.codex-linux-original"; do
+              if [ -f "$node_repl_binary" ] \
+                  && [ "$(dd if="$node_repl_binary" bs=1 count=4 2>/dev/null | od -An -tx1 | tr -d ' \n')" = "7f454c46" ]; then
+                patchelf --set-interpreter "$(cat ${pkgs.stdenv.cc}/nix-support/dynamic-linker)" \
+                  --set-rpath "${pkgs.lib.makeLibraryPath [ pkgs.stdenv.cc.cc.lib pkgs.glibc ]}" \
+                  "$node_repl_binary"
+              fi
+            done
+
+            if [ -f "$resources_dir/node_repl.codex-linux-original" ]; then
+              node_repl_interpreter="$(patchelf --print-interpreter \
+                "$resources_dir/node_repl.codex-linux-original")"
+              node_repl_rpath="$(patchelf --print-rpath \
+                "$resources_dir/node_repl.codex-linux-original")"
+              case "$node_repl_interpreter" in
+                /nix/store/*) ;;
+                *) echo "node_repl backup has non-Nix interpreter: $node_repl_interpreter" >&2; exit 1 ;;
+              esac
+              case "$node_repl_rpath" in
+                *"/nix/store/"*) ;;
+                *) echo "node_repl backup has non-Nix RPATH: $node_repl_rpath" >&2; exit 1 ;;
+              esac
             fi
 
             ${patchNixInstalledApp "$out/opt/codex-desktop"}
@@ -548,7 +614,7 @@ PY
               --replace-fail "/usr/share/applications/codex-desktop.desktop" "$out/share/applications/codex-desktop.desktop"
 
             makeWrapper "$out/opt/codex-desktop/start.sh" "$out/bin/codex-desktop" \
-              --prefix PATH : "${launcherPath}" \
+              --prefix PATH : "${payloadLauncherPath}" \
               --prefix LD_LIBRARY_PATH : "${electronLibPath}" \
               --prefix LD_LIBRARY_PATH : "${runtimeLibPath}" \
               --prefix PATH : "/run/current-system/sw/bin" \
@@ -591,6 +657,8 @@ PY
         codexDesktopNixFeatureCheck = codexDesktop.override {
           linuxFeatureIds = [
             "appshots"
+            "global-dictation"
+            "mcp-helper-reaper"
             "node-repl-reaper"
             "open-target-discovery"
             "persistent-status-panel"

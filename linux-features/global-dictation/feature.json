@@ -1,0 +1,17 @@
+{
+  "id": "global-dictation",
+  "title": "Global Dictation",
+  "description": "Opt-in global dictation hotkeys for Linux using X11 and XDG desktop portal backends.",
+  "defaultEnabled": false,
+  "entrypoints": {
+    "patchDescriptors": "./patch.js",
+    "stageHook": "./stage.sh"
+  },
+  "resources": [
+    {
+      "source": "bin/global-dictation-release-monitor",
+      "target": "resources/native/global-dictation-release-monitor",
+      "mode": "0755"
+    }
+  ]
+}

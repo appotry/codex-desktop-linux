@@ -27,6 +27,21 @@ const {
 const FEATURE_DIR = __dirname;
 const REPO_ROOT = path.resolve(FEATURE_DIR, "..", "..");
 
+function commandPath(name) {
+  for (const directory of (process.env.PATH || "").split(path.delimiter)) {
+    if (!directory || !path.isAbsolute(directory)) continue;
+    const candidate = path.join(directory, name);
+    try {
+      fs.accessSync(candidate, fs.constants.X_OK);
+      if (!fs.statSync(candidate).isFile()) continue;
+      return candidate;
+    } catch {}
+  }
+  throw new Error(`could not resolve executable from PATH: ${name}`);
+}
+
+const BASH = commandPath("bash");
+
 function withFeatureConfig(enabled, fn) {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-omarchy-theme-config-"));
   const originalConfig = process.env.CODEX_LINUX_FEATURES_CONFIG;
@@ -342,18 +357,18 @@ test("prelaunch hook installs the template, refreshes missing CSS, and preserves
     const fakeOmarchy = path.join(binDir, "omarchy");
     fs.writeFileSync(
       fakeOmarchy,
-      `#!/usr/bin/env bash\nset -e\nprintf '%s\\n' "$*" >> "$OMARCHY_TEST_LOG"\nmkdir -p "$HOME/.config/omarchy/current/theme"\nprintf 'generated' > "$HOME/.config/omarchy/current/theme/codex-desktop.css"\n`,
+      `#!${BASH}\nset -e\nprintf '%s\\n' "$*" >> "$OMARCHY_TEST_LOG"\nmkdir -p "$HOME/.config/omarchy/current/theme"\nprintf 'generated' > "$HOME/.config/omarchy/current/theme/codex-desktop.css"\n`,
     );
     fs.chmodSync(fakeOmarchy, 0o755);
 
     const env = {
       ...process.env,
       HOME: home,
-      PATH: `${binDir}:/usr/bin:/bin`,
+      PATH: `${binDir}${path.delimiter}${process.env.PATH || ""}`,
       CODEX_LINUX_FEATURES_DIR: featuresDir,
       OMARCHY_TEST_LOG: callLog,
     };
-    const first = spawnSync("bash", [path.join(FEATURE_DIR, "install-template.sh")], {
+    const first = spawnSync(BASH, [path.join(FEATURE_DIR, "install-template.sh")], {
       env,
       encoding: "utf8",
     });
@@ -364,7 +379,7 @@ test("prelaunch hook installs the template, refreshes missing CSS, and preserves
 
     fs.writeFileSync(target, "/* local customization */\n");
     fs.rmSync(generated);
-    const second = spawnSync("bash", [path.join(FEATURE_DIR, "install-template.sh")], {
+    const second = spawnSync(BASH, [path.join(FEATURE_DIR, "install-template.sh")], {
       env,
       encoding: "utf8",
     });
@@ -377,10 +392,10 @@ test("prelaunch hook installs the template, refreshes missing CSS, and preserves
     fs.rmSync(generated);
     fs.writeFileSync(
       fakeOmarchy,
-      "#!/usr/bin/env bash\nsleep 30\n",
+      `#!${BASH}\nsleep 30\n`,
     );
     const startedAt = Date.now();
-    const hanging = spawnSync("bash", [path.join(FEATURE_DIR, "install-template.sh")], {
+    const hanging = spawnSync(BASH, [path.join(FEATURE_DIR, "install-template.sh")], {
       env: {
         ...env,
         CODEX_OMARCHY_THEME_REFRESH_TIMEOUT_SECONDS: "1",
@@ -395,10 +410,10 @@ test("prelaunch hook installs the template, refreshes missing CSS, and preserves
     const timeoutLog = path.join(tempDir, "timeout.log");
     fs.writeFileSync(
       path.join(binDir, "timeout"),
-      `#!/usr/bin/env bash\nprintf '%s\\n' "$*" > "$OMARCHY_TEST_TIMEOUT_LOG"\nexit 124\n`,
+      `#!${BASH}\nprintf '%s\\n' "$*" > "$OMARCHY_TEST_TIMEOUT_LOG"\nexit 124\n`,
     );
     fs.chmodSync(path.join(binDir, "timeout"), 0o755);
-    const oversizedTimeout = spawnSync("bash", [path.join(FEATURE_DIR, "install-template.sh")], {
+    const oversizedTimeout = spawnSync(BASH, [path.join(FEATURE_DIR, "install-template.sh")], {
       env: {
         ...env,
         CODEX_OMARCHY_THEME_REFRESH_TIMEOUT_SECONDS: "999999999999999999999",

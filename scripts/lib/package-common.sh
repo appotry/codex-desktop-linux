@@ -54,6 +54,20 @@ package_node_binary() {
     command -v node
 }
 
+linux_feature_enabled() {
+    local feature_id="$1"
+    local helper="$REPO_DIR/scripts/lib/linux-features.js"
+    local node_bin
+    local enabled_output
+
+    [ -f "$helper" ] || error "Missing Linux features helper: $helper"
+    node_bin="$(package_node_binary)"
+    if ! enabled_output="$("$node_bin" "$helper" --enabled)"; then
+        error "Failed to discover enabled Linux features"
+    fi
+    grep -Fxq "$feature_id" <<<"$enabled_output"
+}
+
 stage_update_builder_linux_features_config() {
     local update_builder_root="$1"
     local helper="$REPO_DIR/scripts/lib/linux-features.js"
@@ -80,6 +94,17 @@ if (config.enabled.length === 0) {
 fs.mkdirSync(path.dirname(targetPath), { recursive: true });
 fs.writeFileSync(targetPath, `${JSON.stringify(config, null, 2)}\n`);
 NODE
+}
+
+stage_update_builder_global_dictation_source() {
+    local update_builder_root="$1"
+    local source_root="$REPO_DIR/global-dictation-linux"
+    local target_root="$update_builder_root/global-dictation-linux"
+
+    mkdir -p "$target_root/src"
+    cp "$source_root/Cargo.toml" "$target_root/Cargo.toml"
+    cp "$source_root/Cargo.lock" "$target_root/Cargo.lock"
+    cp -R "$source_root/src/." "$target_root/src/"
 }
 
 linux_features_root_path() {
@@ -833,6 +858,9 @@ stage_update_builder_bundle() {
     cp "$REPO_DIR/packaging/linux/codex-update-manager.prerm" "$update_builder_root/packaging/linux/codex-update-manager.prerm"
     stage_update_builder_linux_features_tree "$update_builder_root"
     stage_update_builder_linux_features_config "$update_builder_root"
+    if linux_feature_enabled "global-dictation"; then
+        stage_update_builder_global_dictation_source "$update_builder_root"
+    fi
     cp "$REPO_DIR/packaging/linux/codex-update-manager.postrm" "$update_builder_root/packaging/linux/codex-update-manager.postrm"
     cp "$REPO_DIR/assets/codex.png" "$update_builder_root/assets/codex.png"
     cp "$REPO_DIR/assets/codex-linux.png" "$update_builder_root/assets/codex-linux.png"

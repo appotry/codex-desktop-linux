@@ -432,7 +432,7 @@ const tryExecCases = [
   [false, "sh -c '! command -v cursor >/dev/null 2>&1'", ["sh", "cursor"]],
   [false, "sh -c 'which /bin/ls >/dev/null 2>&1'", ["sh"]],
   [false, "bash", []],
-  [true, "sh -c 'exec /bin/true && false'", ["sh"]],
+  [true, "sh -c 'exec true && false'", ["sh", "true"]],
   [false, "sh -c 'exec /missing/cursor || true'", ["sh"]],
   [false, "missing-wrapper bash -lc 'command -v cursor >/dev/null 2>&1'", ["bash", "cursor"]],
   [false, "fish -C 'hash cursor >/dev/null 2>&1'", ["fish", "cursor"]],
@@ -643,6 +643,8 @@ test("open-target discovery sanitizes desktop launch environment", async () => {
         PATH: `${binDir}:${path.dirname(editorCommand)}`,
         XDG_DATA_HOME: dataHome,
         XDG_DATA_DIRS: path.join(tmp, "empty"),
+        LD_LIBRARY_PATH: "/codex/electron/lib",
+        LD_PRELOAD: "/codex/electron/lib/libhook.so",
         CHROME_DESKTOP: "codex-open-target-launchers.desktop",
         ELECTRON_RENDERER_URL: "http://127.0.0.1:5203/",
         CODEX_ELECTRON_USER_DATA_DIR: path.join(
@@ -662,6 +664,8 @@ test("open-target discovery sanitizes desktop launch environment", async () => {
 
     assert.equal(spawnRecorder.calls[0].command, gio);
     assert.equal(spawnRecorder.calls[0].options.cwd, tmp);
+    assert.equal(spawnRecorder.calls[0].options.env.LD_LIBRARY_PATH, undefined);
+    assert.equal(spawnRecorder.calls[0].options.env.LD_PRELOAD, undefined);
     assert.equal(spawnRecorder.calls[0].options.env.CHROME_DESKTOP, undefined);
     assert.equal(spawnRecorder.calls[0].options.env.ELECTRON_RENDERER_URL, undefined);
     assert.equal(spawnRecorder.calls[0].options.env.CODEX_ELECTRON_USER_DATA_DIR, undefined);
@@ -1210,6 +1214,29 @@ test("open-target discovery inserts shared Linux registry command helper", async
 
   assert.match(patched, /async function codexLinuxOpenTargetRegistryCommand/);
   assert.match(patched, /n\.detect\(FN\)/);
+  assert.equal(command, "/usr/bin/kate");
+});
+
+test("open-target discovery inserts registry helper in the registry module scope", async () => {
+  const source =
+    `function codexLinuxPatchExternalOpen(){async function __codexOpenExternal(){}}` +
+    currentAppOpenTargetPrelude;
+  const patched = applyPatchTwice(applyOpenInTargetRegistryCommandPatch, source);
+  const settingsStore = currentAppSettingsStore([
+    {
+      id: "kate",
+      detect: async () => "/usr/bin/kate",
+    },
+  ]);
+  const command = await new Function(
+    "process",
+    `${patched};return codexLinuxOpenTargetRegistryCommand(arguments[1], 'kate');`,
+  )({ platform: "linux" }, settingsStore);
+
+  assert.match(
+    patched,
+    /async function codexLinuxOpenTargetRegistryCommand[\s\S]*?function QN\(e\)/,
+  );
   assert.equal(command, "/usr/bin/kate");
 });
 

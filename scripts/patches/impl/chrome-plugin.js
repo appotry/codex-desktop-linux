@@ -59,6 +59,13 @@ function applyLinuxChromePluginAutoInstallPatch(currentSource) {
 }
 
 function applyLinuxChromeNativeHostRuntimePatch(currentSource) {
+  if (
+    currentSource.includes("codexLinuxChromePluginAppServerSourcePath") &&
+    currentSource.includes("codexLinuxChromeNativeHostRuntimeFile")
+  ) {
+    return currentSource;
+  }
+
   let helper = "";
   if (!currentSource.includes("codexLinuxChromeNativeHostRuntimeFile")) {
     const fsVar = requireName(currentSource, "node:fs");
@@ -86,6 +93,11 @@ function applyLinuxChromeNativeHostRuntimePatch(currentSource) {
     return true;
   };
 
+  const sourcePathPatched = applyLinuxChromePluginAppServerSourcePathPatch(patchedSource);
+  if (sourcePathPatched !== patchedSource) {
+    patchedSource = sourcePathPatched;
+    changed = true;
+  }
   takePatch(applyModernChromeNativeHostRuntimePatch(patchedSource, helper));
   takePatch(applyChromePluginCodexAppServerRuntimePatch(patchedSource, helper));
   takePatch(applyChromePluginAppServerRuntimePatch(patchedSource, helper));
@@ -161,6 +173,32 @@ function applyLinuxChromeNativeHostRuntimePatch(currentSource) {
     `${helper}function ${resolverName}(${configVar}){let ${codexVar}=${codexResourceFn}(${configVar}.resourcesPath)??codexLinuxChromeNativeHostRuntimeEnv(\`CODEX_CLI_PATH\`)??codexLinuxChromeNativeHostRuntimePath(\`codex\`)??${devRuntimeFn}(${configVar}.devRuntimeRepoRoot,[\`extension\`,\`bin\`,process.platform===\`win32\`?\`codex.exe\`:\`codex\`]),${nodeVar}=${nodeResourceFn}(${configVar}.resourcesPath)??codexLinuxChromeNativeHostRuntimeEnv(\`CODEX_BROWSER_USE_NODE_PATH\`)??codexLinuxChromeNativeHostRuntimeEnv(\`NODE_REPL_NODE_PATH\`)??codexLinuxChromeNativeHostRuntimeFile(${configVar}.resourcesPath,[[\`node-runtime\`,\`bin\`,process.platform===\`win32\`?\`node.exe\`:\`node\`]])??${devRuntimeFn}(${configVar}.devRuntimeRepoRoot,[\`electron\`,\`bin\`,process.platform===\`win32\`?\`node.exe\`:\`node\`]),${nodeReplVar}=${nodeReplResourceFn}(${configVar}.resourcesPath)??codexLinuxChromeNativeHostRuntimeEnv(\`CODEX_NODE_REPL_PATH\`)??codexLinuxChromeNativeHostRuntimeFile(${configVar}.resourcesPath,[[process.platform===\`win32\`?\`node_repl.exe\`:\`node_repl\`]])??${devRuntimeFn}(${configVar}.devRuntimeRepoRoot,[\`electron\`,\`bin\`,process.platform===\`win32\`?\`node_repl.exe\`:\`node_repl\`]),`;
 
   return currentSource.replace(originalPrefix, replacement);
+}
+
+function applyLinuxChromePluginAppServerSourcePathPatch(currentSource) {
+  const marker = "codexLinuxChromePluginAppServerSourcePath";
+  const isolationRoot = currentSource.indexOf(".plugin-appserver");
+  if (currentSource.includes(marker) || isolationRoot === -1) {
+    return currentSource;
+  }
+
+  const isolationSource = currentSource.slice(isolationRoot, isolationRoot + 12_000);
+  const syncFunctionRegex =
+    /async function ([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*)\)\{(?=let [A-Za-z_$][\w$]*=\2\.nativeHostName===)/;
+  const match = isolationSource.match(syncFunctionRegex);
+  if (match == null) {
+    console.warn(
+      "WARN: Could not find Chrome plugin app-server isolation function — Linux CLI path may not be relocatable",
+    );
+    return currentSource;
+  }
+
+  const [functionStart, , configVar] = match;
+  const helper = `function ${marker}(e){return e.codexCliPath}`;
+  const functionIndex = isolationRoot + match.index;
+  return currentSource.slice(0, functionIndex) +
+    `${helper}${functionStart}if(process.platform===\`linux\`)return ${marker}(${configVar});` +
+    currentSource.slice(functionIndex + functionStart.length);
 }
 
 function applyChromePluginCodexAppServerRuntimePatch(currentSource, helper) {

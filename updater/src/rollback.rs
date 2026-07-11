@@ -67,11 +67,7 @@ async fn trigger_rollback(
     paths: &RuntimePaths,
     package_path: &Path,
 ) -> Result<()> {
-    let blocked_candidate = if state.installed_version == "unknown" {
-        state.candidate_version.clone()
-    } else {
-        Some(state.installed_version.clone())
-    };
+    let (blocked_candidate, blocked_dmg_sha256) = rollback_block_identifiers(state);
 
     state.status = UpdateStatus::Installing;
     state.error_message = None;
@@ -94,6 +90,7 @@ async fn trigger_rollback(
             install::installed_package_version(),
             package_path,
             blocked_candidate,
+            blocked_dmg_sha256,
         );
         state.save(&paths.state_file)?;
         let _ = cache_cleanup::prune_unreferenced_workspaces(&config.workspace_root, state);
@@ -128,6 +125,15 @@ async fn trigger_rollback(
     Err(anyhow::anyhow!(message))
 }
 
+fn rollback_block_identifiers(state: &PersistedState) -> (Option<String>, Option<String>) {
+    let blocked_candidate = if state.installed_version == "unknown" {
+        state.candidate_version.clone()
+    } else {
+        Some(state.installed_version.clone())
+    };
+    (blocked_candidate, state.dmg_sha256.clone())
+}
+
 fn summarize_command_output(output: &[u8]) -> Option<String> {
     let text = String::from_utf8_lossy(output).trim().to_string();
     if text.is_empty() {
@@ -142,6 +148,7 @@ fn apply_successful_rollback_state(
     installed_version: String,
     package_path: &Path,
     blocked_candidate: Option<String>,
+    blocked_dmg_sha256: Option<String>,
 ) {
     state.status = UpdateStatus::Installed;
     state.installed_version = installed_version.clone();
@@ -150,6 +157,7 @@ fn apply_successful_rollback_state(
     state.artifact_paths.rollback_package_path = Some(package_path.to_path_buf());
     state.last_known_good_version = Some(installed_version);
     state.rollback_blocked_candidate_version = blocked_candidate;
+    state.rollback_blocked_dmg_sha256 = blocked_dmg_sha256;
     state.error_message = None;
     state.notified_events.clear();
     cache_cleanup::normalize_artifact_workspace_dir(Path::new(""), state);
@@ -230,6 +238,7 @@ mod tests {
         let mut state = PersistedState::new(true);
         state.installed_version = "2026.05.04.131500".to_string();
         state.candidate_version = Some("2026.05.04.131500+badcafe0".to_string());
+        state.dmg_sha256 = Some("bad-dmg-sha256".to_string());
         state.status = UpdateStatus::Installing;
         state.artifact_paths = ArtifactPaths {
             dmg_path: None,
@@ -243,6 +252,7 @@ mod tests {
             "2026.05.02.120000".to_string(),
             &rollback_path,
             Some("2026.05.04.131500".to_string()),
+            Some("bad-dmg-sha256".to_string()),
         );
 
         assert_eq!(state.status, UpdateStatus::Installed);
@@ -264,6 +274,26 @@ mod tests {
             state.rollback_blocked_candidate_version.as_deref(),
             Some("2026.05.04.131500")
         );
+        assert_eq!(
+            state.rollback_blocked_dmg_sha256.as_deref(),
+            Some("bad-dmg-sha256")
+        );
         Ok(())
+    }
+
+    #[test]
+    fn rollback_captures_current_dmg_hash_without_deriving_it_from_version() {
+        let mut state = PersistedState::new(true);
+        state.installed_version = "unknown".to_string();
+        state.candidate_version = Some("2026.05.04.131500+badcafe0".to_string());
+        state.dmg_sha256 = Some("full-recorded-dmg-sha256".to_string());
+
+        let (blocked_version, blocked_sha256) = rollback_block_identifiers(&state);
+
+        assert_eq!(
+            blocked_version.as_deref(),
+            Some("2026.05.04.131500+badcafe0")
+        );
+        assert_eq!(blocked_sha256.as_deref(), Some("full-recorded-dmg-sha256"));
     }
 }

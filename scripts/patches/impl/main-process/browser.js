@@ -4,8 +4,144 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const {
+  escapeRegExp,
   requireName,
 } = require("../../lib/minified-js.js");
+
+function applyLinuxBundledPluginReconcileStaleSnapshotPatch(currentSource) {
+  const marker = "/*codex-linux-skip-stale-bundled-plugin-reconcile*/";
+  if (currentSource.includes(marker)) {
+    return currentSource;
+  }
+
+  const reconcilerStartRegex =
+    /([A-Za-z_$][\w$]*)=\(\{force:([A-Za-z_$][\w$]*),reason:([A-Za-z_$][\w$]*)\}\)=>\{if\(([A-Za-z_$][\w$]*)==null\)return [A-Za-z_$][\w$]*\(\)\.info\(`bundled_plugins_reconcile_skipped_features_unavailable`/;
+  const match = currentSource.match(reconcilerStartRegex);
+  if (match == null || match.index == null) {
+    if (currentSource.includes("bundled_plugins_reconcile_skipped_features_unavailable")) {
+      console.warn(
+        "WARN: Could not find bundled plugin reconcile queue — skipping stale snapshot patch",
+      );
+    }
+    return currentSource;
+  }
+
+  const featureSnapshotVar = match[4];
+  const escapedFeatureSnapshotVar = escapeRegExp(featureSnapshotVar);
+  const reconcilerPrefix = currentSource.slice(match.index);
+  const snapshotMatch = reconcilerPrefix.match(
+    new RegExp(`;let ([A-Za-z_$][\\w$]*)=${escapedFeatureSnapshotVar}(?:,|;)`),
+  );
+  const reconcileLogIndex = reconcilerPrefix.indexOf(
+    "bundled_plugins_reconcile_started",
+  );
+  if (snapshotMatch == null || snapshotMatch.index == null || reconcileLogIndex < 0) {
+    console.warn(
+      "WARN: Could not find bundled plugin reconcile snapshot — skipping stale snapshot patch",
+    );
+    return currentSource;
+  }
+
+  const capturedSnapshotVar = snapshotMatch[1];
+  const hashMatch = reconcilerPrefix.match(
+    new RegExp(
+      `;if\\(!${escapeRegExp(match[2])}&&([A-Za-z_$][\\w$]*)===([A-Za-z_$][\\w$]*)\\)return`,
+    ),
+  );
+  if (hashMatch == null) {
+    console.warn(
+      "WARN: Could not find bundled plugin reconcile semantic hash — skipping stale snapshot patch",
+    );
+    return currentSource;
+  }
+
+  const latestHashVar = hashMatch[1];
+  const capturedHashVar = hashMatch[2];
+  const reconcileCallMatch = reconcilerPrefix.match(
+    new RegExp(
+      `await ([A-Za-z_$][\\w$]*)\\(\\{desktopFeatureAvailability:${escapeRegExp(capturedSnapshotVar)},`,
+    ),
+  );
+  if (reconcileCallMatch == null) {
+    console.warn(
+      "WARN: Could not find bundled plugin reconcile worker — skipping stale snapshot patch",
+    );
+    return currentSource;
+  }
+
+  const reconcileWorkerVar = reconcileCallMatch[1];
+  const workerDefinitionRegex = new RegExp(
+    `${escapeRegExp(reconcileWorkerVar)}=async ([A-Za-z_$][\\w$]*)=>\\{`,
+    "g",
+  );
+  const workerDefinitionMatches = [...reconcilerPrefix.matchAll(workerDefinitionRegex)];
+  if (
+    workerDefinitionMatches.length !== 1 ||
+    workerDefinitionMatches[0].index == null
+  ) {
+    console.warn(
+      "WARN: Expected one bundled plugin reconcile worker definition — skipping stale snapshot patch",
+    );
+    return currentSource;
+  }
+  const workerDefinitionMatch = workerDefinitionMatches[0];
+
+  const workerArgumentVar = workerDefinitionMatch[1];
+  const workerPrefix = reconcilerPrefix.slice(workerDefinitionMatch.index);
+  const destructiveReconcileRegex =
+    /try\{([A-Za-z_$][\w$]*)=await ([A-Za-z_$][\w$]*)\(\{appServerConnection:/;
+  const destructiveReconcileMatch = workerPrefix.match(destructiveReconcileRegex);
+  if (destructiveReconcileMatch == null || destructiveReconcileMatch.index == null) {
+    console.warn(
+      "WARN: Could not find bundled plugin destructive reconcile boundary — skipping stale snapshot patch",
+    );
+    return currentSource;
+  }
+
+  const insertionIndex =
+    match.index +
+    workerDefinitionMatch.index +
+    destructiveReconcileMatch.index +
+    "try{".length;
+  const reconcileCallIndex = match.index + reconcileCallMatch.index;
+  const reconcileCallPrefix = `await ${reconcileWorkerVar}({`;
+  const reconcilePropertyIndex = reconcileCallIndex + reconcileCallPrefix.length;
+  const hashAssignment = `${latestHashVar}=${capturedHashVar};`;
+  const hashAssignmentIndex = reconcilerPrefix.indexOf(hashAssignment);
+  if (hashAssignmentIndex < 0) {
+    console.warn(
+      "WARN: Could not find bundled plugin reconcile hash assignment — skipping stale snapshot patch",
+    );
+    return currentSource;
+  }
+  const globalHashInsertionIndex =
+    match.index + hashAssignmentIndex + hashAssignment.length;
+  if (
+    !(
+      globalHashInsertionIndex < reconcilePropertyIndex &&
+      reconcilePropertyIndex < insertionIndex
+    )
+  ) {
+    console.warn(
+      "WARN: Bundled plugin reconcile insertion order drifted — skipping stale snapshot patch",
+    );
+    return currentSource;
+  }
+
+  const guardedSource =
+    currentSource.slice(0, insertionIndex) +
+    `if(${workerArgumentVar}.codexLinuxReconcileSnapshot!==globalThis.__codexLinuxBundledPluginReconcileSnapshot)return;${marker}` +
+    currentSource.slice(insertionIndex);
+  const propertySource =
+    guardedSource.slice(0, reconcilePropertyIndex) +
+    `codexLinuxReconcileSnapshot:${capturedHashVar},` +
+    guardedSource.slice(reconcilePropertyIndex);
+  return (
+    propertySource.slice(0, globalHashInsertionIndex) +
+    `globalThis.__codexLinuxBundledPluginReconcileSnapshot=${capturedHashVar};` +
+    propertySource.slice(globalHashInsertionIndex)
+  );
+}
 
 function applyBrowserUseNodeReplApprovalPatch(currentSource) {
   let patchedSource = currentSource;
@@ -329,6 +465,7 @@ function applyLinuxExternalOpenEnvPatch(currentSource) {
 module.exports = {
   applyBrowserUseNodeReplApprovalPatch,
   applyBrowserUseNodeReplApprovalAssets,
+  applyLinuxBundledPluginReconcileStaleSnapshotPatch,
   applyLinuxExternalOpenEnvPatch,
   applyLinuxBrowserUseRouteLivenessPatch,
   applyLinuxChromeExtensionStatusPatch,

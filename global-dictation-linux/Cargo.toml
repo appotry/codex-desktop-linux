@@ -1,0 +1,16 @@
+[package]
+name = "codex-global-dictation-linux"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+
+[[bin]]
+name = "codex-global-dictation-linux"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0.102"
+futures-util = "0.3.32"
+tokio = { version = "1.51.1", features = ["io-std", "io-util", "macros", "rt", "signal", "time"] }
+zbus = "5.14.0"

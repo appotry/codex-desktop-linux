@@ -154,7 +154,8 @@ module.exports = {
       id: "settings",
       name: "copilot-reasoning-effort-settings",
       phase: "webview-asset",
-      pattern: /^app-initial~app-main~onboarding-page~hotkey-window-thread-page~quick-chat-window-page~chatg~k0ede4gb-[^.]+\.js$/,
+      // Match app-initial chunks; content-scan fallback ensures correct target
+      pattern: /^app-initial~app-main~.*\.js$/,
       missingDescription: "model settings bundle",
       skipDescription: "Copilot reasoning effort settings patch",
       apply: applyCopilotReasoningEffortSettingsPatch,
@@ -163,7 +164,8 @@ module.exports = {
       id: "model-list",
       name: "copilot-reasoning-effort-model-list",
       phase: "webview-asset",
-      pattern: /^app-initial~app-main~onboarding-page~hotkey-window-thread-page~quick-chat-window-page~chatg~k0ede4gb-[^.]+\.js$/,
+      // Match app-initial chunks; content-scan fallback ensures correct target
+      pattern: /^app-initial~app-main~.*\.js$/,
       missingDescription: "font settings bundle",
       skipDescription: "Copilot reasoning effort model list patch",
       apply: applyCopilotReasoningEffortModelListPatch,
@@ -172,7 +174,8 @@ module.exports = {
       id: "ui",
       name: "copilot-reasoning-effort-ui",
       phase: "webview-asset",
-      pattern: /^app-initial~app-main~new-thread-panel-page~appgen-library-page~hotkey-window-thread-page~ho~iufn7mg3-[^.]+\.js$/,
+      // Match app-initial chunks; content-scan fallback ensures correct target
+      pattern: /^app-initial~app-main~.*\.js$/,
       missingDescription: "webview index bundle",
       skipDescription: "Copilot reasoning effort UI patch",
       apply: applyCopilotReasoningEffortUiPatch,

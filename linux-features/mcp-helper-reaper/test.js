@@ -25,13 +25,15 @@ function writeExecutable(file, body) {
 }
 
 function hostTool(name) {
-  for (const dir of ["/usr/bin", "/bin"]) {
+  for (const dir of (process.env.PATH || "").split(path.delimiter)) {
+    if (!dir || !path.isAbsolute(dir)) continue;
     const candidate = path.join(dir, name);
-    if (fs.existsSync(candidate)) {
-      return candidate;
-    }
+    try {
+      fs.accessSync(candidate, fs.constants.X_OK);
+      if (fs.statSync(candidate).isFile()) return candidate;
+    } catch {}
   }
-  return name;
+  throw new Error(`could not resolve executable from PATH: ${name}`);
 }
 
 function symlinkHostTools(targetDir, names) {

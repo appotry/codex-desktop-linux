@@ -414,8 +414,9 @@ impl RuntimeManager {
         })?)?;
         self.validate_invocation(&constraints)?;
         let client_id = normalized_client_id(params.get("clientId"))?;
-        let entry = select_runtime_entry(&constraints, self.manifest_paths_override.as_deref())?;
-        validate_runtime_entry(&entry)?;
+        let mut entry =
+            select_runtime_entry(&constraints, self.manifest_paths_override.as_deref())?;
+        validate_runtime_entry(&mut entry)?;
         let _lifecycle = self
             .lifecycle
             .lock()
@@ -1187,7 +1188,7 @@ fn manifest_paths() -> Vec<PathBuf> {
     paths
 }
 
-fn validate_runtime_entry(entry: &RuntimeEntry) -> RuntimeResult<()> {
+fn validate_runtime_entry(entry: &mut RuntimeEntry) -> RuntimeResult<()> {
     if entry.entry_id.trim().is_empty()
         || entry.install_id.trim().is_empty()
         || entry.app_version.trim().is_empty()
@@ -1201,7 +1202,7 @@ fn validate_runtime_entry(entry: &RuntimeEntry) -> RuntimeResult<()> {
     }
     validate_owned_dir(&entry.paths.codex_home, true)?;
     validate_owned_dir(&entry.paths.resources_path, false)?;
-    validate_owned_file(&entry.paths.codex_cli_path, true)?;
+    entry.paths.codex_cli_path = validate_owned_file(&entry.paths.codex_cli_path, true)?;
     validate_owned_file(&entry.paths.extension_host_path, true)?;
     validate_owned_file(&entry.paths.node_path, true)?;
     if let Some(path) = &entry.paths.node_repl_path {
@@ -1226,7 +1227,7 @@ fn validate_runtime_entry(entry: &RuntimeEntry) -> RuntimeResult<()> {
     Ok(())
 }
 
-fn validate_owned_file(path: &Path, executable: bool) -> RuntimeResult<()> {
+fn validate_owned_file(path: &Path, executable: bool) -> RuntimeResult<PathBuf> {
     if !path.is_absolute() {
         return Err(required_path_error("file"));
     }
@@ -1243,7 +1244,7 @@ fn validate_owned_file(path: &Path, executable: bool) -> RuntimeResult<()> {
         return Err(required_path_error("executable"));
     }
     validate_trusted_parent_chain(&canonical)?;
-    Ok(())
+    Ok(canonical)
 }
 
 fn validate_owned_dir(path: &Path, require_user_owner: bool) -> RuntimeResult<()> {
@@ -1434,6 +1435,8 @@ fn start_app_server(
 
     let mut command = Command::new(&entry.paths.codex_cli_path);
     command
+        .arg("-c")
+        .arg("features.code_mode_host=true")
         .arg("app-server")
         .arg("--listen")
         .arg(format!("unix://{}", socket_path.display()))
@@ -2846,6 +2849,34 @@ mod tests {
     }
 
     #[test]
+    fn executable_validation_returns_the_canonical_path() {
+        let root = test_root("canonical-executable");
+        let package_dir = root.join("lib/node_modules/@openai/codex/bin");
+        let bin_dir = root.join("bin");
+        fs::create_dir_all(&package_dir).unwrap();
+        fs::create_dir_all(&bin_dir).unwrap();
+        for directory in [
+            root.clone(),
+            root.join("lib"),
+            root.join("lib/node_modules"),
+            root.join("lib/node_modules/@openai"),
+            root.join("lib/node_modules/@openai/codex"),
+            package_dir.clone(),
+            bin_dir.clone(),
+        ] {
+            fs::set_permissions(directory, fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        let executable = package_dir.join("codex.js");
+        fs::write(&executable, "#!/usr/bin/env node\n").unwrap();
+        fs::set_permissions(&executable, fs::Permissions::from_mode(0o700)).unwrap();
+        let launcher = bin_dir.join("codex");
+        std::os::unix::fs::symlink(&executable, &launcher).unwrap();
+
+        assert_eq!(validate_owned_file(&launcher, true).unwrap(), executable);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn executable_validation_rejects_a_group_writable_parent() {
         let root = test_root("group-writable-parent");
         let unsafe_parent = root.join("shared");
@@ -3134,6 +3165,42 @@ while True:
         .unwrap();
         fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();
         path
+    }
+
+    #[test]
+    fn app_server_launch_enables_code_mode_host() {
+        let root = test_root("app-server-code-mode-host");
+        fs::create_dir_all(&root).unwrap();
+        let fake_cli = fake_socket_app_server(&root);
+        let mut entry = test_entry();
+        entry.paths.codex_cli_path = fake_cli;
+        entry.paths.codex_home = root.clone();
+        let runtime_root = root.join("runtime");
+
+        let mut process = start_app_server(
+            &entry,
+            "abcdefghijklmnopabcdefghijklmnop",
+            "sidepanel-code-mode-host",
+            41000,
+            &runtime_root,
+            1,
+            Duration::from_secs(1),
+        )
+        .unwrap();
+        let cmdline = fs::read(format!("/proc/{}/cmdline", process.child.id())).unwrap();
+        let args = cmdline
+            .split(|byte| *byte == 0)
+            .filter(|value| !value.is_empty())
+            .map(|value| String::from_utf8(value.to_vec()).unwrap())
+            .collect::<Vec<_>>();
+        assert!(
+            args.windows(3)
+                .any(|window| window == ["-c", "features.code_mode_host=true", "app-server"]),
+            "app-server command line: {args:?}"
+        );
+
+        stop_managed_process(&mut process);
+        fs::remove_dir_all(root).unwrap();
     }
 
     fn test_process_is_live(pid: libc::pid_t) -> bool {

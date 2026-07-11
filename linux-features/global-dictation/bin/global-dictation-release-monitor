@@ -1,0 +1,469 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+export LC_ALL=C
+
+accelerator=""
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --accelerator)
+            shift
+            accelerator="${1:-}"
+            ;;
+        *)
+            echo "unknown argument: $1" >&2
+            exit 2
+            ;;
+    esac
+    shift
+done
+
+[ -n "$accelerator" ] || {
+    echo "missing --accelerator" >&2
+    exit 2
+}
+[ "${#accelerator}" -le 128 ] || {
+    echo "accelerator is too long" >&2
+    exit 2
+}
+[ -n "${DISPLAY:-}" ] || {
+    echo "X11 display is unavailable" >&2
+    exit 1
+}
+command -v xinput >/dev/null 2>&1 || {
+    echo "xinput is required" >&2
+    exit 1
+}
+command -v xmodmap >/dev/null 2>&1 || {
+    echo "xmodmap is required" >&2
+    exit 1
+}
+
+xmodmap_output="$(xmodmap -pke 2>/dev/null || true)"
+keyboard_ids="$(
+    xinput list --short 2>/dev/null |
+        awk '/\[slave[[:space:]]+keyboard/ && match($0, /id=[0-9]+/) { print substr($0, RSTART + 3, RLENGTH - 3) }'
+)"
+[ -n "$keyboard_ids" ] || {
+    echo "no X11 keyboard is available" >&2
+    exit 1
+}
+
+resolve_codes() {
+    local symbols="$1"
+    local fallback="$2"
+    local codes=""
+    local symbol
+    local code
+    for symbol in $symbols; do
+        code="$(
+            awk -v symbol="$symbol" '$1 == "keycode" { for (i = 4; i <= NF; i++) if ($i == symbol) { print $2; exit } }' <<<"$xmodmap_output"
+        )"
+        [ -z "$code" ] || codes="$codes $code"
+    done
+    [ -n "$codes" ] || codes="$fallback"
+    printf '%s\n' "$codes" | tr ' ' '\n' | awk 'NF && !seen[$1]++' | paste -sd, -
+}
+
+resolve_key_part() {
+    local raw="$1"
+    local normalized
+    local symbols
+    local fallback=""
+    normalized="$(printf '%s' "$raw" | tr '[:upper:]' '[:lower:]' | tr -d ' _-')"
+    case "$normalized" in
+        parenright|rightparen)
+            symbols="parenright"
+            ;;
+        exclam|bang)
+            symbols="exclam"
+            ;;
+        at)
+            symbols="at"
+            ;;
+        numbersign|hash|pound)
+            symbols="numbersign"
+            ;;
+        dollar)
+            symbols="dollar"
+            ;;
+        percent)
+            symbols="percent"
+            ;;
+        asciicircum|caret)
+            symbols="asciicircum"
+            ;;
+        ampersand)
+            symbols="ampersand"
+            ;;
+        asterisk|star)
+            symbols="asterisk"
+            ;;
+        parenleft|leftparen)
+            symbols="parenleft"
+            ;;
+        colon)
+            symbols="colon"
+            ;;
+        semicolon)
+            symbols="semicolon"
+            ;;
+        plus)
+            symbols="plus"
+            ;;
+        equal|equals)
+            symbols="equal"
+            ;;
+        less)
+            symbols="less"
+            ;;
+        comma)
+            symbols="comma"
+            ;;
+        underscore)
+            symbols="underscore"
+            ;;
+        minus|dash)
+            symbols="minus"
+            ;;
+        greater)
+            symbols="greater"
+            ;;
+        period|dot)
+            symbols="period"
+            ;;
+        question)
+            symbols="question"
+            ;;
+        slash)
+            symbols="slash"
+            ;;
+        asciitilde|tilde)
+            symbols="asciitilde"
+            ;;
+        grave|backquote|backtick)
+            symbols="grave"
+            ;;
+        braceleft|leftbrace)
+            symbols="braceleft"
+            ;;
+        bracketright|rightbracket)
+            symbols="bracketright"
+            ;;
+        bracketleft|leftbracket)
+            symbols="bracketleft"
+            ;;
+        bar|pipe)
+            symbols="bar"
+            ;;
+        backslash)
+            symbols="backslash"
+            ;;
+        braceright|rightbrace)
+            symbols="braceright"
+            ;;
+        quotedbl|doublequote)
+            symbols="quotedbl"
+            ;;
+        space)
+            symbols="space"
+            fallback="65"
+            ;;
+        return|enter)
+            symbols="Return KP_Enter"
+            fallback="36 104"
+            ;;
+        tab)
+            symbols="Tab ISO_Left_Tab"
+            fallback="23"
+            ;;
+        esc|escape)
+            symbols="Escape"
+            fallback="9"
+            ;;
+        backspace)
+            symbols="BackSpace"
+            fallback="22"
+            ;;
+        capslock)
+            symbols="Caps_Lock"
+            fallback="66"
+            ;;
+        numlock)
+            symbols="Num_Lock"
+            fallback="77"
+            ;;
+        scrolllock)
+            symbols="Scroll_Lock"
+            ;;
+        delete|del)
+            symbols="Delete KP_Delete"
+            fallback="119 91"
+            ;;
+        insert|ins)
+            symbols="Insert KP_Insert"
+            fallback="118 90"
+            ;;
+        home)
+            symbols="Home KP_Home"
+            fallback="110 79"
+            ;;
+        end)
+            symbols="End KP_End"
+            fallback="115 87"
+            ;;
+        pageup)
+            symbols="Page_Up KP_Page_Up"
+            fallback="112 81"
+            ;;
+        pagedown)
+            symbols="Page_Down KP_Page_Down"
+            fallback="117 89"
+            ;;
+        up)
+            symbols="Up KP_Up"
+            fallback="111 80"
+            ;;
+        down)
+            symbols="Down KP_Down"
+            fallback="116 88"
+            ;;
+        left)
+            symbols="Left KP_Left"
+            fallback="113 83"
+            ;;
+        right)
+            symbols="Right KP_Right"
+            fallback="114 85"
+            ;;
+        leftarrow)
+            symbols="Left KP_Left"
+            fallback="113 83"
+            ;;
+        rightarrow)
+            symbols="Right KP_Right"
+            fallback="114 85"
+            ;;
+        uparrow)
+            symbols="Up KP_Up"
+            fallback="111 80"
+            ;;
+        downarrow)
+            symbols="Down KP_Down"
+            fallback="116 88"
+            ;;
+        volumeup)
+            symbols="XF86AudioRaiseVolume"
+            ;;
+        volumedown)
+            symbols="XF86AudioLowerVolume"
+            ;;
+        volumemute)
+            symbols="XF86AudioMute"
+            ;;
+        medianexttrack)
+            symbols="XF86AudioNext"
+            ;;
+        mediaprevioustrack)
+            symbols="XF86AudioPrev"
+            ;;
+        mediastop)
+            symbols="XF86AudioStop"
+            ;;
+        mediaplaypause)
+            symbols="XF86AudioPlay"
+            ;;
+        printscreen)
+            symbols="Print"
+            fallback="107"
+            ;;
+        num[0-9])
+            symbols="KP_${normalized#num}"
+            ;;
+        numdec)
+            symbols="KP_Decimal"
+            ;;
+        numadd)
+            symbols="KP_Add"
+            ;;
+        numsub)
+            symbols="KP_Subtract"
+            ;;
+        nummult)
+            symbols="KP_Multiply"
+            ;;
+        numdiv)
+            symbols="KP_Divide"
+            ;;
+        f[1-9]|f[1-2][0-9]|f3[0-5])
+            symbols="$(printf '%s' "$normalized" | tr '[:lower:]' '[:upper:]')"
+            ;;
+        [a-z])
+            symbols="$normalized $(printf '%s' "$normalized" | tr '[:lower:]' '[:upper:]')"
+            ;;
+        [0-9])
+            symbols="$normalized"
+            ;;
+        *)
+            symbols="$raw"
+            ;;
+    esac
+    resolve_codes "$symbols" "$fallback"
+}
+
+required_groups=()
+has_modifier=0
+IFS='+' read -r -a parts <<<"$accelerator"
+for part in "${parts[@]}"; do
+    normalized="$(printf '%s' "$part" | tr '[:upper:]' '[:lower:]' | tr -d ' _-')"
+    case "$normalized" in
+        cmdorctrl|commandorcontrol|control|ctrl)
+            required_groups+=("$(resolve_codes 'Control_L Control_R' '37 105')")
+            has_modifier=1
+            ;;
+        command|cmd|super|meta)
+            required_groups+=("$(resolve_codes 'Super_L Super_R Meta_L Meta_R Hyper_L Hyper_R' '133 134')")
+            has_modifier=1
+            ;;
+        alt|option)
+            required_groups+=("$(resolve_codes 'Alt_L Alt_R Meta_L Meta_R ISO_Level3_Shift' '64 108')")
+            has_modifier=1
+            ;;
+        shift)
+            required_groups+=("$(resolve_codes 'Shift_L Shift_R' '50 62')")
+            has_modifier=1
+            ;;
+        "")
+            ;;
+        *)
+            resolved_group="$(resolve_key_part "$part")"
+            [ -n "$resolved_group" ] || {
+                echo "unsupported accelerator key: $part" >&2
+                exit 2
+            }
+            required_groups+=("$resolved_group")
+            ;;
+    esac
+done
+
+[ "$has_modifier" -eq 1 ] || {
+    echo "accelerator has no supported modifier" >&2
+    exit 2
+}
+
+parent_pid="$PPID"
+max_seconds="${CODEX_GLOBAL_DICTATION_MAX_HOLD_SECONDS:-1800}"
+[[ "$max_seconds" =~ ^[1-9][0-9]*$ ]] || max_seconds=1800
+event_dir="$(mktemp -d "${TMPDIR:-/tmp}/codex-global-dictation.XXXXXX")"
+event_fifo="$event_dir/events"
+monitor_pids=()
+
+# shellcheck disable=SC2317 # Invoked through the EXIT trap.
+cleanup() {
+    local pid
+    for pid in "${monitor_pids[@]:-}"; do
+        if command -v pkill >/dev/null 2>&1; then
+            pkill -TERM -P "$pid" >/dev/null 2>&1 || true
+        fi
+        kill "$pid" >/dev/null 2>&1 || true
+    done
+    wait "${monitor_pids[@]:-}" >/dev/null 2>&1 || true
+    rm -f "$event_fifo"
+    rmdir "$event_dir" 2>/dev/null || true
+}
+trap cleanup EXIT
+trap 'exit 143' INT TERM
+
+mkfifo "$event_fifo"
+exec 4<>"$event_fifo"
+
+for device_id in $keyboard_ids; do
+    (
+        xinput_cmd=(xinput test "$device_id")
+        if command -v stdbuf >/dev/null 2>&1; then
+            xinput_cmd=(stdbuf -oL "${xinput_cmd[@]}")
+        fi
+        {
+            "${xinput_cmd[@]}" 2>/dev/null |
+                while read -r event action code _rest; do
+                    [ "$event" = "key" ] || continue
+                    case "$action" in
+                        press|release) printf '%s %s %s\n' "$device_id" "$action" "$code" ;;
+                    esac
+                done
+        } || true
+        printf '%s monitor-exit 0\n' "$device_id"
+    ) >"$event_fifo" 2>/dev/null &
+    monitor_pids+=("$!")
+done
+
+(
+    sleep "$max_seconds"
+    printf 'watchdog stop 0\n'
+) >"$event_fifo" 2>/dev/null &
+monitor_pids+=("$!")
+
+(
+    while kill -0 "$parent_pid" 2>/dev/null; do
+        sleep 1
+    done
+    printf 'parent stop 0\n'
+) >"$event_fifo" 2>/dev/null &
+monitor_pids+=("$!")
+
+declare -A down_keys=()
+for device_id in $keyboard_ids; do
+    while IFS= read -r line; do
+        if [[ "$line" =~ key\[([0-9]+)\]=down ]]; then
+            down_keys["$device_id:${BASH_REMATCH[1]}"]=1
+        fi
+    done < <(xinput query-state "$device_id" 2>/dev/null || true)
+done
+
+all_groups_down() {
+    local group
+    local code
+    local device_id
+    local group_down
+    local -a codes
+    for group in "${required_groups[@]}"; do
+        group_down=0
+        IFS=',' read -r -a codes <<<"$group"
+        for device_id in $keyboard_ids; do
+            for code in "${codes[@]}"; do
+                if [ "${down_keys["$device_id:$code"]:-0}" -eq 1 ]; then
+                    group_down=1
+                    break 2
+                fi
+            done
+        done
+        [ "$group_down" -eq 1 ] || return 1
+    done
+    return 0
+}
+
+all_groups_down || exit 0
+
+exec 3<"$event_fifo"
+exec 4>&-
+while read -r device_id action code <&3; do
+    case "$action" in
+        press)
+            [[ "$device_id" =~ ^[0-9]+$ && "$code" =~ ^[0-9]+$ ]] || continue
+            down_keys["$device_id:$code"]=1
+            ;;
+        release)
+            [[ "$device_id" =~ ^[0-9]+$ && "$code" =~ ^[0-9]+$ ]] || continue
+            unset 'down_keys['"$device_id:$code"']'
+            ;;
+        stop|monitor-exit)
+            exit 0
+            ;;
+        *)
+            continue
+            ;;
+    esac
+    all_groups_down || exit 0
+done
+
+echo "X11 keyboard monitor stopped unexpectedly" >&2
+exit 1

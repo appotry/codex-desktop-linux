@@ -48,6 +48,7 @@ function captureWarnings(callback) {
 function currentAvatarOverlayBundleFixture() {
   return [
     "let a=require(`electron`),f=require(`node:child_process`);",
+    "var settingsHandlers={\"set-setting\":async({key:e,value:t})=>(this.setSettingValue(e,t),{success:!0})};",
     "var rV=`/avatar-overlay`,zB={width:356,height:320},oV={width:112,height:121},k2={width:0,height:0},O2={width:276,height:131};",
     "var h2=class{constructor(e,t,n,r){this.cursorSource=e;this.pointerAnchorX=t;this.pointerAnchorY=n;this.displayBounds=r}};",
     "var fV=class{window=null;rendererReady=!1;layout=null;mascotSize=oV;traySize=null;pointerInteractive=!1;mousePassthroughEnabled=!1;windowStagedForNativePresentation=!1;layoutMode=`native`;compositionHost={setOverlayWindow(){},isNativeMaterialAttached(){return!1},getCursorPosition(){return null},updateMascotRect(){}};nativePositionController={clear(){}};",
@@ -160,7 +161,7 @@ test("pet-overlay is discoverable and disabled until listed in features.json", (
   }
 });
 
-test("ships only overlay behavior, not selector/default/custom pet changes", () => {
+test("does not hard-code a default or custom pet", () => {
   const patchSource = fs.readFileSync(path.join(__dirname, "patch.js"), "utf8");
   const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, "feature.json"), "utf8"));
 
@@ -172,7 +173,7 @@ test("ships only overlay behavior, not selector/default/custom pet changes", () 
     mode: "0755",
   });
   assert.match(fs.readFileSync(path.join(__dirname, "launcher-hook.sh"), "utf8"), /GPU_COMPOSITING/);
-  assert.doesNotMatch(patchSource, /custom:los|DEFAULT_PET|selected-avatar-id|avatarMenuItems|pets\/los/);
+  assert.doesNotMatch(patchSource, /custom:los|DEFAULT_PET|avatarMenuItems|pets\/los/);
 });
 
 test("GPU compositing launcher default preserves an explicit user override", () => {
@@ -206,6 +207,78 @@ test("patches current avatar overlay layout, transparency, and window sync", () 
   assert.match(patched, /setSkipTaskbar/);
   assert.match(patched, /t===`avatarOverlay`\?\{backgroundColor:`#00000000`,backgroundMaterial:null\}/);
   assert.equal((patched.match(/codexPetOverlayLayoutForDisplay/g) ?? []).length, 2);
+});
+
+test("refreshes only the avatar overlay after the selected pet changes", async () => {
+  const patched = applyPatchTwice(currentAvatarOverlayBundleFixture());
+  const reloads = [];
+  const savedSettings = [];
+  const timers = [];
+  const context = {
+    require(moduleName) {
+      if (moduleName === "electron") {
+        return {
+          BrowserWindow: {
+            getAllWindows: () => [
+              {
+                getTitle: () => "Codex Pet Overlay",
+                isDestroyed: () => false,
+                webContents: {
+                  isDestroyed: () => false,
+                  reload: () => reloads.push("overlay"),
+                },
+              },
+              {
+                getTitle: () => "Codex",
+                isDestroyed: () => false,
+                webContents: {
+                  isDestroyed: () => false,
+                  reload: () => reloads.push("main"),
+                },
+              },
+            ],
+          },
+        };
+      }
+      if (moduleName === "node:child_process") {
+        return {};
+      }
+      throw new Error(`Unexpected module: ${moduleName}`);
+    },
+    setTimeout(callback) {
+      timers.push(callback);
+    },
+    setSettingValue(key, value) {
+      savedSettings.push([key, value]);
+    },
+  };
+  vm.runInNewContext(`${patched};globalThis.settingsHandlers=settingsHandlers;`, context);
+
+  await context.settingsHandlers["set-setting"]({ key: "theme", value: "dark" });
+  assert.deepEqual(reloads, []);
+  assert.deepEqual(timers, []);
+
+  await context.settingsHandlers["set-setting"]({ key: "selected-avatar-id", value: "cat" });
+  assert.deepEqual(savedSettings, [
+    ["theme", "dark"],
+    ["selected-avatar-id", "cat"],
+  ]);
+  assert.equal(timers.length, 1);
+  timers[0]();
+  assert.deepEqual(reloads, ["overlay"]);
+  assert.match(patched, /===`selected-avatar-id`&&codexPetOverlayRefreshAvatarWindows\(\)/);
+});
+
+test("discards the feature patch when the current settings handler drifts", () => {
+  const source = currentAvatarOverlayBundleFixture().replace(
+    '"set-setting":async({key:e,value:t})=>(this.setSettingValue(e,t),{success:!0})',
+    '"set-setting":async({key:e,value:t})=>this.setSettingValue(e,t)',
+  );
+  const { result, warnings } = captureWarnings(() => applyPetOverlayPatch(source));
+
+  assert.equal(result, source);
+  assert.match(warnings.join("\n"), /Could not find desktop set-setting handler/);
+  assert.match(warnings.join("\n"), /Pet overlay patch is incomplete/);
 });
 
 test("does not retain an obsolete avatar overlay layout fallback", () => {
@@ -375,6 +448,7 @@ test("unlocked layout does not re-anchor while a drag is active", () => {
 test("syncs overlay window hints without requiring Hyprland", () => {
   const patched = applyPetOverlayPatch(currentAvatarOverlayBundleFixture());
   const calls = [];
+  const handlers = {};
   const { controller } = controllerFromPatchedSource(patched);
   controller.window = { isDestroyed: () => false, isVisible: () => false };
   controller.showWindow({
@@ -391,6 +465,11 @@ test("syncs overlay window hints without requiring Hyprland", () => {
     webContents: {
       executeJavaScript: (script) => calls.push(["js", script]),
       insertCSS: (css, options) => calls.push(["css", css, options]),
+      isDestroyed: () => false,
+      on: (event, handler) => {
+        handlers[event] = handler;
+        calls.push(["on", event]);
+      },
     },
   });
 
@@ -401,12 +480,17 @@ test("syncs overlay window hints without requiring Hyprland", () => {
     ["always", true],
     ["background", "#00000000"],
   ]);
-  assert.equal(calls[5][0], "css");
-  assert.equal(calls[5][2].cssOrigin, "author");
-  assert.equal(calls[6][0], "js");
-  assert.match(calls[5][1], /background:transparent!important/);
-  assert.match(calls[6][1], /document\.documentElement\.style\.background/);
-  assert.deepEqual(calls.slice(7), [["opacity", 1], ["workspaces", true, true], "moveTop", "showInactive"]);
+  assert.deepEqual(calls[5], ["on", "did-finish-load"]);
+  assert.equal(calls[6][0], "css");
+  assert.equal(calls[6][2].cssOrigin, "author");
+  assert.equal(calls[7][0], "js");
+  assert.match(calls[6][1], /background:transparent!important/);
+  assert.match(calls[7][1], /document\.documentElement\.style\.background/);
+  assert.deepEqual(calls.slice(8), [["opacity", 1], ["workspaces", true, true], "moveTop", "showInactive"]);
+
+  handlers["did-finish-load"]();
+  assert.equal(calls.filter(([kind]) => kind === "css").length, 2);
+  assert.equal(calls.filter(([kind]) => kind === "js").length, 2);
 });
 
 test("passive mode makes the overlay non-focusable", () => {

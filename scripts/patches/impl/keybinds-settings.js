@@ -805,6 +805,11 @@ function patchKeybindsSettingsAssets(extractedDir) {
         isSettingsSharedMetadataBundleSource,
         applyLinuxDesktopSettingsSharedPatch,
       ),
+      ...collectOptionalMatchingAssetPatches(
+        extractedDir,
+        isLinuxShortcutPhysicalKeyFallbackBundleSource,
+        applyLinuxShortcutPhysicalKeyFallbackPatch,
+      ),
       ...collectLinuxDesktopRouteAndNavigationPatches(extractedDir),
     ];
 
@@ -821,7 +826,7 @@ function patchKeybindsSettingsAssets(extractedDir) {
     return {
       matched: true,
       changed,
-      reason: "upstream keyboard shortcuts settings are present; added Linux desktop settings",
+      reason: "upstream keyboard shortcuts settings are present; added Linux desktop settings and shortcut layout fallback",
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -971,8 +976,44 @@ function applyLinuxDesktopSettingsSharedPatch(currentSource) {
   return patchedSource;
 }
 
+function applyLinuxShortcutPhysicalKeyFallbackPatch(currentSource) {
+  const patchMarker = "codexLinuxShortcutPhysicalKeyFallbackEvent";
+  if (currentSource.includes(patchMarker)) {
+    return currentSource;
+  }
+
+  const physicalKeyResolverPattern =
+    /function ([A-Za-z_$][\w$]*)\(\{altKey:([A-Za-z_$][\w$]*),code:([A-Za-z_$][\w$]*),key:([A-Za-z_$][\w$]*)\}\)\{return!\2\|\|\3==null\?\4:([^{};]+)\}/;
+  const match = currentSource.match(physicalKeyResolverPattern);
+  if (match == null) {
+    return currentSource;
+  }
+
+  const [
+    matchedSource,
+    functionName,
+    altKeyLocal,
+    codeLocal,
+    keyLocal,
+    physicalFallbackExpression,
+  ] = match;
+  const patchedSource =
+    `function ${functionName}(codexLinuxShortcutPhysicalKeyFallbackEvent){let{altKey:${altKeyLocal},code:${codeLocal},key:${keyLocal},ctrlKey:codexLinuxShortcutPhysicalKeyFallbackCtrl,metaKey:codexLinuxShortcutPhysicalKeyFallbackMeta}=codexLinuxShortcutPhysicalKeyFallbackEvent;return!(${altKeyLocal}||codexLinuxShortcutPhysicalKeyFallbackCtrl||codexLinuxShortcutPhysicalKeyFallbackMeta)||typeof codexLinuxShortcutPhysicalKeyFallbackEvent.getModifierState=="function"&&codexLinuxShortcutPhysicalKeyFallbackEvent.getModifierState("AltGraph")||${codeLocal}==null?${keyLocal}:${physicalFallbackExpression}}`;
+
+  return currentSource.replace(matchedSource, patchedSource);
+}
+
+function isLinuxShortcutPhysicalKeyFallbackBundleSource(currentSource) {
+  return currentSource.includes("altKey:")
+    && currentSource.includes("code:")
+    && currentSource.includes("key:")
+    && currentSource.includes("Key[A-Z]")
+    && currentSource.includes("Digit[0-9]")
+    && /function [A-Za-z_$][\w$]*\(\{altKey:[A-Za-z_$][\w$]*,code:[A-Za-z_$][\w$]*,key:[A-Za-z_$][\w$]*\}\)\{return![A-Za-z_$][\w$]*\|\|[A-Za-z_$][\w$]*==null\?[A-Za-z_$][\w$]*:/.test(currentSource);
+}
+
 function applyLinuxKeybindOverridesRuntimePatch(currentSource) {
-  const runtimePatch = `;function codexLinuxKeybindOverridesRuntime(){try{if(typeof window=="undefined")return;let storageKey=${JSON.stringify(linuxKeybindOverridesKey)},defaultMap=typeof Ct=="object"&&Ct?Ct:{},overrides={};function loadOverrides(){try{let value=JSON.parse(localStorage.getItem(storageKey)||"{}");overrides=value&&typeof value=="object"&&!Array.isArray(value)?value:{}}catch{overrides={}}}function isShortcutCaptureTarget(event){let target=event.target;return target instanceof Element&&target.closest("[data-codex-keybind-input]")!=null}function normalizeKeyName(key){let map={Space:" ",Esc:"Escape",Up:"ArrowUp",Down:"ArrowDown",Left:"ArrowLeft",Right:"ArrowRight",Plus:"+",Comma:",",Period:".",Slash:"/"};return map[key]??(/^.$/.test(key)?key.toUpperCase():key)}function parseAccelerator(accelerator){if(typeof accelerator!="string"||accelerator.trim().length===0)return null;let isMac=/Mac/.test(navigator.platform||""),parts=accelerator.split("+").map(part=>part.trim()).filter(Boolean),parsed={ctrl:false,alt:false,shift:false,meta:false,key:null};for(let part of parts){switch(part){case"CmdOrCtrl":isMac?parsed.meta=true:parsed.ctrl=true;break;case"Command":case"Cmd":case"Meta":case"Super":case"Win":parsed.meta=true;break;case"Control":case"Ctrl":parsed.ctrl=true;break;case"Alt":case"Option":parsed.alt=true;break;case"Shift":parsed.shift=true;break;default:parsed.key=normalizeKeyName(part);break}}return parsed.key?parsed:null}function matches(event,parsed){return event.ctrlKey===parsed.ctrl&&event.altKey===parsed.alt&&event.shiftKey===parsed.shift&&event.metaKey===parsed.meta&&normalizeKeyName(event.key)===parsed.key}function dispatchHost(message){if(typeof E=="object"&&E&&typeof E.dispatchHostMessage=="function"){E.dispatchHostMessage(message);return true}return false}function dispatchElectron(type,params={}){if(typeof E=="object"&&E&&typeof E.dispatchMessage=="function"){E.dispatchMessage(type,params);return true}return false}let hostActionTypes={newThread:"new-chat",quickChat:"new-quick-chat",newThreadAlt:"new-chat",toggleSidebar:"toggle-sidebar",toggleTerminal:"toggle-terminal",toggleBrowserPanel:"toggle-browser-panel",toggleDiffPanel:"toggle-diff-panel",findInThread:"find-in-thread",navigateBack:"navigate-back",navigateForward:"navigate-forward",previousThread:"previous-thread",nextThread:"next-thread",copyConversationPath:"copy-conversation-path",toggleThreadPin:"toggle-thread-pin",renameThread:"rename-thread",archiveThread:"archive-thread",copyWorkingDirectory:"copy-working-directory",copySessionId:"copy-session-id",copyDeeplink:"copy-deeplink",toggleFileTreePanel:"toggle-file-tree-panel"};function runAction(id){if(/^thread[1-9]$/.test(id))return dispatchHost({type:"go-to-thread-index",index:Number(id.slice(6))-1});switch(id){case"openCommandMenu":case"openCommandMenuAlt":return dispatchHost({type:"command-menu",query:""});case"searchChats":return dispatchHost({type:"chat-search-command-menu"});case"searchFiles":return dispatchHost({type:"file-search-command-menu"});case"openFolder":return dispatchElectron("electron-create-new-workspace-root-option",{});case"settings":return dispatchElectron("show-settings",{section:"general-settings"});case"openBrowserTab":return dispatchHost({type:"browser-sidebar-command",command:{type:"new-tab"}});case"reloadBrowserPage":return dispatchHost({type:"browser-sidebar-command",command:{type:"reload"}});case"hardReloadBrowserPage":return dispatchHost({type:"browser-sidebar-command",command:{type:"hard-reload"}});case"dictation":return dispatchElectron("global-dictation-start",{});default:return hostActionTypes[id]?dispatchHost({type:hostActionTypes[id]}):false}}loadOverrides();window.addEventListener("storage",event=>{event.key===storageKey&&loadOverrides()});window.addEventListener("codex-linux-keybind-overrides-changed",loadOverrides);window.addEventListener("keydown",event=>{if(event.defaultPrevented||event.repeat||isShortcutCaptureTarget(event))return;for(let[id,accelerator]of Object.entries(overrides)){if(typeof accelerator!="string"||accelerator.trim().length===0||accelerator.trim()===(defaultMap[id]||""))continue;let parsed=parseAccelerator(accelerator);if(parsed&&matches(event,parsed)&&runAction(id)){event.preventDefault();event.stopPropagation();break}}},true)}catch{}}codexLinuxKeybindOverridesRuntime();`;
+  const runtimePatch = `;function codexLinuxKeybindOverridesRuntime(){try{if(typeof window=="undefined")return;let storageKey=${JSON.stringify(linuxKeybindOverridesKey)},defaultMap=typeof Ct=="object"&&Ct?Ct:{},overrides={};function loadOverrides(){try{let value=JSON.parse(localStorage.getItem(storageKey)||"{}");overrides=value&&typeof value=="object"&&!Array.isArray(value)?value:{}}catch{overrides={}}}function isShortcutCaptureTarget(event){let target=event.target;return target instanceof Element&&target.closest("[data-codex-keybind-input]")!=null}function normalizeKeyName(key){let map={Space:" ",Esc:"Escape",Up:"ArrowUp",Down:"ArrowDown",Left:"ArrowLeft",Right:"ArrowRight",Plus:"+",Comma:",",Period:".",Slash:"/"};return map[key]??(/^.$/.test(key)?key.toUpperCase():key)}function keyNameFromCode(code){if(typeof code!="string")return null;if(/^Key[A-Z]$/.test(code))return code.slice(3);if(/^Digit[0-9]$/.test(code))return code.slice(5);let map={Backquote:"\`",Minus:"-",Equal:"=",BracketLeft:"[",BracketRight:"]",Backslash:"\\\\",Semicolon:";",Quote:"'",Comma:",",Period:".",Slash:"/",IntlBackslash:"\\\\"};return map[code]??null}function parseAccelerator(accelerator){if(typeof accelerator!="string"||accelerator.trim().length===0)return null;let isMac=/Mac/.test(navigator.platform||""),parts=accelerator.split("+").map(part=>part.trim()).filter(Boolean),parsed={ctrl:false,alt:false,shift:false,meta:false,key:null};for(let part of parts){switch(part){case"CmdOrCtrl":isMac?parsed.meta=true:parsed.ctrl=true;break;case"Command":case"Cmd":case"Meta":case"Super":case"Win":parsed.meta=true;break;case"Control":case"Ctrl":parsed.ctrl=true;break;case"Alt":case"Option":parsed.alt=true;break;case"Shift":parsed.shift=true;break;default:parsed.key=normalizeKeyName(part);break}}return parsed.key?parsed:null}function matchKind(event,parsed){if(event.ctrlKey!==parsed.ctrl||event.altKey!==parsed.alt||event.shiftKey!==parsed.shift||event.metaKey!==parsed.meta)return null;if(normalizeKeyName(event.key)===parsed.key)return"logical";if(!(parsed.ctrl||parsed.alt||parsed.meta)||typeof event.getModifierState=="function"&&event.getModifierState("AltGraph"))return null;let codeKey=keyNameFromCode(event.code);return codeKey!=null&&normalizeKeyName(codeKey)===parsed.key?"physical":null}function dispatchHost(message){if(typeof E=="object"&&E&&typeof E.dispatchHostMessage=="function"){E.dispatchHostMessage(message);return true}return false}function dispatchElectron(type,params={}){if(typeof E=="object"&&E&&typeof E.dispatchMessage=="function"){E.dispatchMessage(type,params);return true}return false}let hostActionTypes={newThread:"new-chat",quickChat:"new-quick-chat",newThreadAlt:"new-chat",toggleSidebar:"toggle-sidebar",toggleTerminal:"toggle-terminal",toggleBrowserPanel:"toggle-browser-panel",toggleDiffPanel:"toggle-diff-panel",findInThread:"find-in-thread",navigateBack:"navigate-back",navigateForward:"navigate-forward",previousThread:"previous-thread",nextThread:"next-thread",copyConversationPath:"copy-conversation-path",toggleThreadPin:"toggle-thread-pin",renameThread:"rename-thread",archiveThread:"archive-thread",copyWorkingDirectory:"copy-working-directory",copySessionId:"copy-session-id",copyDeeplink:"copy-deeplink",toggleFileTreePanel:"toggle-file-tree-panel"};function runAction(id){if(/^thread[1-9]$/.test(id))return dispatchHost({type:"go-to-thread-index",index:Number(id.slice(6))-1});switch(id){case"openCommandMenu":case"openCommandMenuAlt":return dispatchHost({type:"command-menu",query:""});case"searchChats":return dispatchHost({type:"chat-search-command-menu"});case"searchFiles":return dispatchHost({type:"file-search-command-menu"});case"openFolder":return dispatchElectron("electron-create-new-workspace-root-option",{});case"settings":return dispatchElectron("show-settings",{section:"general-settings"});case"openBrowserTab":return dispatchHost({type:"browser-sidebar-command",command:{type:"new-tab"}});case"reloadBrowserPage":return dispatchHost({type:"browser-sidebar-command",command:{type:"reload"}});case"hardReloadBrowserPage":return dispatchHost({type:"browser-sidebar-command",command:{type:"hard-reload"}});case"dictation":return dispatchElectron("global-dictation-start",{});default:return hostActionTypes[id]?dispatchHost({type:hostActionTypes[id]}):false}}loadOverrides();window.addEventListener("storage",event=>{event.key===storageKey&&loadOverrides()});window.addEventListener("codex-linux-keybind-overrides-changed",loadOverrides);window.addEventListener("keydown",event=>{if(event.defaultPrevented||event.repeat||isShortcutCaptureTarget(event))return;let accelerators={...defaultMap,...overrides};for(let[id,accelerator]of Object.entries(accelerators)){if(typeof accelerator!="string"||accelerator.trim().length===0)continue;let isDefault=accelerator.trim()===(defaultMap[id]||""),parsed=parseAccelerator(accelerator),kind=parsed?matchKind(event,parsed):null;if(kind&&(kind==="physical"||!isDefault)&&runAction(id)){event.preventDefault();event.stopPropagation();break}}},true)}catch{}}codexLinuxKeybindOverridesRuntime();`;
 
   const runtimeMarker = ";function codexLinuxKeybindOverridesRuntime()";
   const existingRuntimeIndex = currentSource.indexOf(runtimeMarker);
@@ -1192,6 +1233,7 @@ module.exports = {
   applyLinuxDesktopSettingsSectionsPatch,
   applyLinuxDesktopSettingsSharedPatch,
   applyLinuxKeybindOverridesRuntimePatch,
+  applyLinuxShortcutPhysicalKeyFallbackPatch,
   keybindsSettingsAsset,
   linuxDesktopSettingsAsset,
   linuxKeybindOverridesKey,

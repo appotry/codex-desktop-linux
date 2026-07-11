@@ -110,7 +110,8 @@ main() {
 	trap "rm -rf '$build_root'" EXIT
 
 	local staging_root="$build_root/staging"
-	local -a makepkg_env=("PKGDEST=$DIST_DIR")
+	# Pin PKGEXT so Debian/Ubuntu makepkg (defaults to .pkg.tar.gz) produces .zst for the collector
+	local -a makepkg_env=("PKGDEST=$DIST_DIR" "PKGEXT=.pkg.tar.zst")
 
 	if [ "$MAX_BUILD_THREADS" != "0" ]; then
 		local makepkg_config="$build_root/makepkg.conf"

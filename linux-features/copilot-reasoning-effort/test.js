@@ -183,9 +183,9 @@ test("feature descriptor loader exposes the Copilot webview asset patches only w
     );
     assert.ok(descriptors.every((descriptor) => descriptor.ciPolicy === "optional"));
     const currentSettingsChunk =
-      "app-initial~app-main~onboarding-page~hotkey-window-thread-page~quick-chat-window-page~chatg~k0ede4gb-current.js";
+      "app-initial~app-main~new-thread-panel-page~onboarding-page~projects-index-page~appgen-libra~ggy53w99-current.js";
     const currentUiChunk =
-      "app-initial~app-main~new-thread-panel-page~appgen-library-page~hotkey-window-thread-page~ho~iufn7mg3-current.js";
+      "app-initial~app-main~page-current.js";
     assert.match(currentSettingsChunk, descriptors[0].pattern);
     assert.match(currentSettingsChunk, descriptors[1].pattern);
     assert.match(currentUiChunk, descriptors[2].pattern);
@@ -196,9 +196,9 @@ test("feature descriptor loader exposes the Copilot webview asset patches only w
 test("enabled feature descriptors patch the current app settings chunk", () => {
   const featuresRoot = path.resolve(__dirname, "..");
   const currentSettingsChunk =
-    "app-initial~app-main~onboarding-page~hotkey-window-thread-page~quick-chat-window-page~chatg~k0ede4gb-C17KDkOa.js";
+    "app-initial~app-main~new-thread-panel-page~onboarding-page~projects-index-page~appgen-libra~ggy53w99-CqMu8hJo.js";
   const currentUiChunk =
-    "app-initial~app-main~new-thread-panel-page~appgen-library-page~hotkey-window-thread-page~ho~iufn7mg3-Cdmi2Vi6.js";
+    "app-initial~app-main~page-hSvsQcNf.js";
 
   withTempFeatureConfig(["copilot-reasoning-effort"], () => {
     withTempDir((extractedDir) => {
