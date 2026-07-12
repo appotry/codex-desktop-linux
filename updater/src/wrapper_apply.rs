@@ -18,6 +18,7 @@ use serde_json::Value;
 use std::{
     collections::HashSet,
     fs,
+    io::{BufReader, Read},
     os::unix::fs::{self as unix_fs, PermissionsExt},
     path::{Path, PathBuf},
     process::Command,
@@ -97,7 +98,7 @@ pub async fn run_apply_wrapper_update(
         }
     };
 
-    match result {
+    let outcome = match result {
         Ok(()) => {
             state.installed_version = install::installed_package_version();
             state.candidate_version = None;
@@ -119,7 +120,14 @@ pub async fn run_apply_wrapper_update(
             warn!(?error, "wrapper update apply failed");
             Err(error)
         }
+    };
+    if let Err(error) = crate::cache_cleanup::prune_dmg_cache(&config.workspace_root, state) {
+        warn!(
+            ?error,
+            "failed to prune updater DMG cache after wrapper apply"
+        );
     }
+    outcome
 }
 
 fn refresh_installed_wrapper_state(config: &RuntimeConfig, state: &mut PersistedState) {
@@ -132,10 +140,18 @@ fn refresh_installed_wrapper_state(config: &RuntimeConfig, state: &mut Persisted
     }
 }
 
+/// Force safety policy for every automated user-local installer command.
+fn configure_user_local_install_command(command: &mut Command) -> &mut Command {
+    // Automated updates must never inherit developer-only safety overrides.
+    command
+        .env("CODEX_ACCEPTANCE_OVERRIDE", "0")
+        .env("CODEX_INSTALL_ALLOW_RUNNING", "0")
+}
+
 /// User-local apply. Prefers the contrib `codex-desktop-update` helper (managed
 /// checkout pull + in-place `install.sh`) when present; otherwise falls back to
 /// fetching the wrapper source and running its `install.sh` directly against the
-/// running app dir. Runs as the user, no privilege escalation.
+/// installed app dir. Runs as the user, no privilege escalation.
 async fn apply_user_local(
     config: &RuntimeConfig,
     paths: &RuntimePaths,
@@ -146,6 +162,7 @@ async fn apply_user_local(
         info!(helper = %helper.display(), "applying wrapper update via user-local helper");
         let mut cmd = Command::new(&helper);
         cmd.arg("--quiet");
+        configure_user_local_install_command(&mut cmd);
         // The contrib helper honors a caller-set CODEX_LINUX_FEATURES_CONFIG over
         // its repo-local default, so the in-app picker's selection wins.
         if let Some(config_path) = &feature_config {
@@ -179,9 +196,9 @@ async fn apply_user_local(
     info!(app_dir = %app_dir.display(), "rebuilding user-local app in place via install.sh");
     let mut cmd = Command::new(&install_sh);
     cmd.current_dir(&wrapper_src)
-        .env("CODEX_INSTALL_ALLOW_RUNNING", "1")
         .env("CODEX_INSTALL_ROOT", &install_root)
         .env("CODEX_INSTALL_DIR", &app_dir);
+    configure_user_local_install_command(&mut cmd);
     if let Some(config_path) = &feature_config {
         cmd.env("CODEX_LINUX_FEATURES_CONFIG", config_path);
     }
@@ -368,11 +385,12 @@ async fn apply_packaged(
     let wrapper_src = ensure_wrapper_source(config, paths, candidate_commit)?;
     let feature_config = effective_feature_config(config);
     stage_enabled_local_features(config, &wrapper_src, feature_config.as_deref())?;
-    let dmg_path = cached_or_downloaded_dmg(config, state, paths).await?;
+    let cached_dmg = cached_or_downloaded_dmg(config, state, paths).await?;
+    let dmg_path = &cached_dmg.path;
 
     // The package version must remain monotonic (timestamp+dmghash), so derive
     // it from the cached DMG the same way the DMG path does.
-    let candidate_version = derive_package_version(&dmg_path)?;
+    let candidate_version = derive_package_version(dmg_path)?;
 
     let artifacts = builder::build_update_from(
         &wrapper_src,
@@ -380,7 +398,7 @@ async fn apply_packaged(
         state,
         paths,
         &candidate_version,
-        &dmg_path,
+        dmg_path,
     )
     .await
     .context("wrapper package rebuild failed")?;
@@ -478,36 +496,62 @@ fn run_git(args: &[&str]) -> Result<()> {
 }
 
 /// Returns the cached DMG path, downloading it if no usable cache exists.
+struct CachedDmg {
+    path: PathBuf,
+    _lease: crate::cache_cleanup::DmgCacheLease,
+}
+
 async fn cached_or_downloaded_dmg(
     config: &RuntimeConfig,
     state: &mut PersistedState,
     paths: &RuntimePaths,
-) -> Result<PathBuf> {
+) -> Result<CachedDmg> {
     if let Some(dmg) = state.artifact_paths.dmg_path.clone() {
         if dmg.exists() {
-            return Ok(dmg);
+            let downloads_dir = config.workspace_root.join("downloads");
+            let lease = crate::cache_cleanup::acquire_dmg_cache_lease(&downloads_dir).await?;
+            if dmg.exists() {
+                return Ok(CachedDmg {
+                    path: dmg,
+                    _lease: lease,
+                });
+            }
+            drop(lease);
         }
     }
 
-    let client = reqwest::Client::builder().build()?;
+    let client = upstream::http_client()?;
     let downloads_dir = config.workspace_root.join("downloads");
     let downloaded =
         upstream::download_dmg(&client, &config.dmg_url, &downloads_dir, chrono::Utc::now())
             .await
             .context("Failed to download upstream DMG for wrapper rebuild")?;
     state.artifact_paths.dmg_path = Some(downloaded.path.clone());
-    let _ = state.save(&paths.state_file);
-    Ok(downloaded.path)
+    state.save(&paths.state_file)?;
+    Ok(CachedDmg {
+        path: downloaded.path,
+        _lease: downloaded.lease,
+    })
 }
 
 /// Derives a monotonic package version (`YYYY.MM.DD.HHMMSS+<sha8>`) from the DMG
 /// contents, matching the DMG update path's scheme.
 fn derive_package_version(dmg_path: &Path) -> Result<String> {
     use sha2::{Digest, Sha256};
-    let bytes = std::fs::read(dmg_path)
-        .with_context(|| format!("Failed to read {}", dmg_path.display()))?;
+    let file = fs::File::open(dmg_path)
+        .with_context(|| format!("Failed to open {}", dmg_path.display()))?;
+    let mut reader = BufReader::new(file);
     let mut hasher = Sha256::new();
-    hasher.update(&bytes);
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let bytes_read = reader
+            .read(&mut buffer)
+            .with_context(|| format!("Failed to read {}", dmg_path.display()))?;
+        if bytes_read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..bytes_read]);
+    }
     let sha = hasher
         .finalize()
         .iter()
@@ -579,6 +623,43 @@ mod tests {
             wrapper_branch: "main".to_string(),
             generated_artifact_cleanup: Default::default(),
         }
+    }
+
+    #[test]
+    fn automated_user_local_commands_force_safety_overrides_off() {
+        for program in ["codex-desktop-update", "install.sh"] {
+            let mut command = Command::new(program);
+            configure_user_local_install_command(&mut command);
+            let envs = command
+                .get_envs()
+                .map(|(key, value)| (key.to_owned(), value.map(ToOwned::to_owned)))
+                .collect::<std::collections::HashMap<_, _>>();
+
+            assert_eq!(
+                envs.get(std::ffi::OsStr::new("CODEX_INSTALL_ALLOW_RUNNING"))
+                    .and_then(Option::as_deref),
+                Some(std::ffi::OsStr::new("0")),
+                "{program} must not bypass the running-app gate"
+            );
+            assert_eq!(
+                envs.get(std::ffi::OsStr::new("CODEX_ACCEPTANCE_OVERRIDE"))
+                    .and_then(Option::as_deref),
+                Some(std::ffi::OsStr::new("0")),
+                "{program} must not bypass acceptance"
+            );
+        }
+    }
+
+    #[test]
+    fn derives_package_version_with_streamed_dmg_hash() -> Result<()> {
+        let root = tempdir()?;
+        let dmg = root.path().join("Codex.dmg");
+        std::fs::write(&dmg, b"codex-dmg-test-payload")?;
+
+        let version = derive_package_version(&dmg)?;
+
+        assert!(version.ends_with("+678cd508"));
+        Ok(())
     }
 
     fn write_local_feature(root: &Path, id: &str) {

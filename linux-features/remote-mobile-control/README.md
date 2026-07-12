@@ -39,6 +39,10 @@ What it changes:
   desktop can authorize outbound control of another enrolled device.
 - Refreshes the remote Connections settings state every 5 seconds and
   immediately after focus, visibility, online, or resume signals.
+- Recovers a completed remote stream item when its matching started item is
+  missing from the local turn state.
+- Recovers stale remote terminal status when `waitingOnUserInput` remains active
+  after the matching input request has already cleared.
 - Keeps Chrome Browser Use available to remote/mobile controlled sessions when
   the local Chrome plugin and native host are healthy, and adds a diagnostic
   when the native browser bridge is not exposed to the session.

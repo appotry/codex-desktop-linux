@@ -126,7 +126,7 @@ log "Rebuilding wrapper..."
         export CODEX_LINUX_FEATURES_CONFIG="$SOURCE_REPO_DIR/linux-features/features.json"
     fi
     TMPDIR="$STATE_DIR/tmp" \
-    CODEX_INSTALL_ALLOW_RUNNING=1 \
+    CODEX_INSTALL_ALLOW_RUNNING=0 \
         CODEX_INSTALL_ROOT="$OPT_ROOT" \
         CODEX_INSTALL_DIR="$APP_DIR" \
         ./install.sh

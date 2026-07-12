@@ -294,6 +294,7 @@
           libxi
           libxtst
           libxscrnsaver
+          libnotify
           libglvnd
           systemd
           wayland
@@ -459,6 +460,7 @@ PY
             pkgs.patchelf
             pkgs.python3
             pkgs.unzip
+            pkgs.util-linux
           ];
 
           dontConfigure = true;

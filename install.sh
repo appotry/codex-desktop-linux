@@ -39,6 +39,168 @@ LINUX_ICON_SOURCE="${CODEX_LINUX_ICON_SOURCE:-}"
 . "$SCRIPT_DIR/scripts/lib/linux-features.sh"
 . "$SCRIPT_DIR/scripts/lib/rebuild-report.sh"
 . "$SCRIPT_DIR/scripts/lib/build-info.sh"
+. "$SCRIPT_DIR/scripts/lib/candidate-install.sh"
+
+transaction_report_base() {
+    if [ -n "${REBUILD_REPORT_DIR:-}" ]; then
+        printf '%s\n' "$REBUILD_REPORT_DIR"
+    elif [ -n "${CODEX_PATCH_REPORT_JSON:-}" ]; then
+        dirname "$CODEX_PATCH_REPORT_JSON"
+    else
+        printf '%s\n' "$SCRIPT_DIR/dist-next/rebuild"
+    fi
+}
+
+publish_transaction_report() {
+    local source_path="$1"
+    local destination_path="$2"
+    local temporary_path
+    [ -f "$source_path" ] || return 0
+    mkdir -p "$(dirname "$destination_path")"
+    temporary_path="${destination_path}.tmp.$$"
+    cp "$source_path" "$temporary_path"
+    mv -f "$temporary_path" "$destination_path"
+}
+
+write_transaction_dmg_metadata() {
+    local output_path="$1"
+    local dmg_path="$2"
+    local cached_metadata="$3"
+    "${CODEX_ACCEPTANCE_NODE:-node}" - "$output_path" "$dmg_path" "$cached_metadata" "$DMG_URL" <<'NODE'
+const fs = require("node:fs");
+const [outputPath, dmgPath, metadataPath, url] = process.argv.slice(2);
+const metadata = { url, path: dmgPath };
+if (metadataPath && fs.existsSync(metadataPath)) {
+  for (const line of fs.readFileSync(metadataPath, "utf8").split(/\r?\n/)) {
+    const separator = line.indexOf("=");
+    if (separator > 0) metadata[line.slice(0, separator)] = line.slice(separator + 1);
+  }
+}
+fs.mkdirSync(require("node:path").dirname(outputPath), { recursive: true });
+fs.writeFileSync(outputPath, `${JSON.stringify(metadata, null, 2)}\n`);
+NODE
+}
+
+transactional_install() {
+    local -a original_args=("$@")
+    local final_dir="$INSTALL_DIR"
+    local final_parent
+    local final_name
+    local candidate_dir
+    local report_base
+    local report_dir
+    local transaction_id
+    local core_report
+    local published_core_report
+    local rebuild_report
+    local published_rebuild_report
+    local decision_path
+    local published_decision_path
+    local metadata_path
+    local build_info_path
+    local dmg_path
+    local build_status="failure"
+    local verdict
+    local -a acceptance_args=()
+
+    final_parent="$(dirname "$final_dir")"
+    final_name="$(basename "$final_dir")"
+    mkdir -p "$final_parent"
+    # Recover a completed exchange before the standard candidate path can be
+    # reused or cleaned by a new transaction.
+    recover_pending_candidate_promotion "$final_dir"
+    candidate_dir="$final_parent/.${final_name}.candidate-$$"
+    assert_distinct_candidate_paths "$candidate_dir" "$final_dir"
+    remove_tree_safely "$candidate_dir"
+
+    report_base="$(transaction_report_base)"
+    transaction_id="${CODEX_ACCEPTANCE_TRANSACTION_ID:-$(date -u +%Y%m%dT%H%M%S)-$$-${RANDOM:-0}}"
+    report_dir="$report_base/transactions/$transaction_id"
+    mkdir -p "$report_dir"
+    core_report="$report_dir/patch-report.json"
+    published_core_report="${CODEX_PATCH_REPORT_JSON:-$report_base/patch-report.json}"
+    rebuild_report="$report_dir/rebuild-report.json"
+    published_rebuild_report="${CODEX_REBUILD_REPORT_JSON:-$report_base/rebuild-report.json}"
+    decision_path="$report_dir/upstream-dmg-decision.json"
+    published_decision_path="${CODEX_ACCEPTANCE_DECISION_JSON:-$report_base/upstream-dmg-decision.json}"
+    metadata_path="${CODEX_UPSTREAM_DMG_METADATA_JSON:-$report_dir/upstream-dmg-metadata.json}"
+    rm -f "$core_report" "$rebuild_report" "$decision_path"
+
+    info "Building a transactional candidate: $candidate_dir"
+    # Re-enter through the current Bash binary. Nix builds intentionally do not
+    # expose /bin/bash, so executing this script through its shebang is unsafe.
+    if CODEX_INSTALL_TRANSACTION_ACTIVE=1 \
+        CODEX_INSTALL_DIR="$candidate_dir" \
+        CODEX_PATCH_REPORT_JSON="$core_report" \
+        CODEX_REBUILD_REPORT_JSON="$rebuild_report" \
+        "$BASH" "$SCRIPT_DIR/install.sh" "${original_args[@]}"; then
+        build_status="success"
+    fi
+
+    if [ -n "$PROVIDED_DMG_PATH" ]; then
+        dmg_path="$(realpath "$PROVIDED_DMG_PATH")"
+    else
+        dmg_path="$CACHED_DMG_PATH"
+    fi
+    build_info_path="$candidate_dir/.codex-linux/build-info.json"
+
+    if [ -z "${CODEX_UPSTREAM_DMG_METADATA_JSON:-}" ] || [ ! -f "$metadata_path" ]; then
+        write_transaction_dmg_metadata "$metadata_path" "$dmg_path" "$CACHED_DMG_METADATA_PATH"
+    fi
+
+    acceptance_args=(
+        --repo-root "$SCRIPT_DIR"
+        --dmg "$dmg_path"
+        --core-report "$core_report"
+        --build-info "$build_info_path"
+        --metadata "$metadata_path"
+        --build-status "$build_status"
+        --output "$decision_path"
+        --source "${CODEX_ACCEPTANCE_SOURCE:-local}"
+    )
+    [ -n "${GITHUB_STEP_SUMMARY:-}" ] && acceptance_args+=(--summary "$GITHUB_STEP_SUMMARY")
+    [ -n "${GITHUB_RUN_ID:-}" ] && acceptance_args+=(--run-id "$GITHUB_RUN_ID")
+    [ -n "${GITHUB_RUN_ATTEMPT:-}" ] && acceptance_args+=(--run-attempt "$GITHUB_RUN_ATTEMPT")
+    if [ -n "${GITHUB_SERVER_URL:-}" ] && [ -n "${GITHUB_REPOSITORY:-}" ] && [ -n "${GITHUB_RUN_ID:-}" ]; then
+        acceptance_args+=(--run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID")
+    fi
+    "$CODEX_ACCEPTANCE_NODE" "$SCRIPT_DIR/scripts/validate-upstream-dmg.js" "${acceptance_args[@]}"
+
+    publish_transaction_report "$core_report" "$published_core_report"
+    publish_transaction_report "$rebuild_report" "$published_rebuild_report"
+    publish_transaction_report "$decision_path" "$published_decision_path"
+
+    verdict="$("$CODEX_ACCEPTANCE_NODE" -e 'console.log(require(process.argv[1]).verdict)' "$decision_path")"
+    info "Upstream DMG acceptance verdict: $verdict"
+    if [ "$verdict" != "accepted" ] && [ "$verdict" != "accepted_with_warnings" ]; then
+        if [ "${CODEX_ACCEPTANCE_OVERRIDE:-0}" = "1" ] && [ "$build_status" = "success" ]; then
+            warn "CODEX_ACCEPTANCE_OVERRIDE=1 set; promoting a candidate with verdict $verdict"
+        else
+            if [ "${CODEX_KEEP_REJECTED_CANDIDATE:-0}" != "1" ]; then
+                remove_tree_safely "$candidate_dir"
+            else
+                warn "Rejected candidate retained for diagnostics: $candidate_dir"
+            fi
+            error "Candidate was not installed (verdict: $verdict). Decision: $published_decision_path"
+        fi
+    fi
+
+    mkdir -p "$candidate_dir/.codex-linux"
+    cp "$decision_path" "$candidate_dir/.codex-linux/upstream-dmg-decision.json"
+    if ! promote_candidate_install "$candidate_dir" "$final_dir"; then
+        if [ "${CODEX_KEEP_REJECTED_CANDIDATE:-0}" != "1" ]; then
+            remove_tree_safely "$candidate_dir"
+        else
+            warn "Unpromoted candidate retained for diagnostics: $candidate_dir"
+        fi
+        error "Accepted candidate could not be promoted; the existing app was not changed"
+    fi
+    info "Acceptance transaction reports: $report_dir"
+    info "Acceptance decision: $published_decision_path"
+    if [ -n "${PROMOTED_BACKUP_APP_DIR:-}" ]; then
+        info "Previous app backup: $PROMOTED_BACKUP_APP_DIR"
+    fi
+}
 
 # ---- Create start script ----
 create_start_script() {
@@ -139,6 +301,14 @@ main() {
 
     parse_args "$@"
     validate_app_identity
+    if [ "$INSPECT_ONLY" -ne 1 ] && [ "${CODEX_INSTALL_TRANSACTION_ACTIVE:-0}" != "1" ]; then
+        check_deps
+        ensure_managed_node_runtime "$WORK_DIR/node-runtime"
+        CODEX_ACCEPTANCE_NODE="$CODEX_MANAGED_NODE_RUNTIME_DIR/bin/node"
+        export CODEX_ACCEPTANCE_NODE
+        transactional_install "$@"
+        return 0
+    fi
     check_deps
     if [ "$INSPECT_ONLY" -ne 1 ]; then
         assert_install_target_not_running

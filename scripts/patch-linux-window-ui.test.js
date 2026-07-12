@@ -53,6 +53,7 @@ const {
 const {
   applyBrowserUseNodeReplApprovalPatch,
   applyBrowserUseNodeReplApprovalAssets,
+  applyLinuxBundledPluginCopyPermissionsPatch,
   applyLinuxBundledPluginReconcileStaleSnapshotPatch,
   applyLinuxBrowserUseRouteLivenessPatch,
   applyLinuxChromeExtensionStatusPatch,
@@ -94,6 +95,7 @@ const {
   applyLinuxTerminalUserPathPatch,
   applyLinuxWorkerFileManagerPatch,
   applyLinuxXdgDocumentsDirPatch,
+  applyLinuxX11ProjectPickerPatch,
   patchLinuxOwlFeatureBindingFallbackAssets,
 } = require("./patches/impl/main-process/misc.js");
 const {
@@ -155,9 +157,6 @@ const {
   applyLocalEnvironmentActionModalDraftPatch,
   applyPersistentRateLimitFooterPatch,
   applyLinuxAppServerBackfillWaitPatch,
-  applyLinuxAppServerConversationHydrationPatch,
-  applyLinuxCompletedItemRecoveryPatch,
-  applyLinuxRemoteTerminalStatusRecoveryPatch,
   applyLinuxAppServerFeatureEnablementPatch,
   applyAutomationUpdateEagerToolPatch,
   applyLinuxAppSunsetPatch,
@@ -392,7 +391,7 @@ test("Linux safe monospace font stack patch warns when the unsafe stack drifts",
 
 test("Linux settings search hides controls that cannot render", () => {
   const source = [
-    'import{E$ as l}from"./app-current.js";',
+    'import{aG as l}from"./app-current.js";',
     "function qn(e){let t=(0,Zn.c)(17),n=re(),r=Bn(e),{data:i}=_(e),a=i?.isSystemBackdropSupported!==!1,o=i?.platform===`darwin`,{data:s}=T(k,e.selectedHostId),c,l=c;if(a){let e;e=e=>e.sectionSlug===`appearance`&&!a?{...e,messages:e.messages.filter(Jn)}:e.sectionSlug===`agent`?{...e,terms:[]}:e,m=r.map(e)}else m=r;return m}",
     "function Jn(e){return!Qn.includes(e.id)}",
   ].join("");
@@ -407,7 +406,7 @@ test("Linux settings search hides controls that cannot render", () => {
   );
   assert.match(
     patched,
-    /T2 as codexLinuxAccountInfoQuery,j7 as codexLinuxSuggestedPromptsEligible,qk as codexLinuxUseAuthSession/,
+    /oJ as codexLinuxAccountInfoQuery,y1 as codexLinuxSuggestedPromptsEligible,lS as codexLinuxUseAuthSession/,
   );
   assert.match(
     patched,
@@ -535,7 +534,7 @@ test("Linux settings search hides controls that cannot render", () => {
 
 test("Linux settings search visibility patch warns on current-bundle drift", () => {
   const source =
-    'import{E$ as h}from"./app-current.js";function qn(e){return settingsSearchDocuments}';
+    'import{aG as h}from"./app-current.js";function qn(e){return settingsSearchDocuments}';
   const { value, warnings } = captureWarns(() =>
     applyLinuxSettingsSearchVisibilityPatch(source),
   );
@@ -1024,6 +1023,7 @@ test("default core patch descriptors are grouped and unique", () => {
     "linux-chrome-native-host-runtime",
     "browser-use-node-repl-approval",
     "linux-bundled-plugin-reconcile-stale-snapshot",
+    "linux-bundled-plugin-copy-permissions",
     "linux-browser-use-route-liveness",
     "linux-chrome-extension-status",
     "linux-local-app-server-feature-enablement-handler",
@@ -1044,12 +1044,10 @@ test("default core patch descriptors are grouped and unique", () => {
     "linux-app-sunset-gate",
     "linux-app-server-feature-enablement",
     "linux-app-server-backfill-wait",
-    "linux-app-server-conversation-hydration",
-    "linux-completed-item-recovery",
-    "linux-remote-terminal-status-recovery",
     "linux-skills-list-dedupe",
     "linux-config-write-version-conflict",
     "linux-application-menu",
+    "linux-x11-project-picker",
     "opaque-window-default-general-settings",
     "opaque-window-default-webview-index",
     "linux-window-controls-safe-area",
@@ -1091,6 +1089,10 @@ test("default core patch descriptors are grouped and unique", () => {
     descriptors.find(
       (descriptor) => descriptor.id === "linux-bundled-plugin-reconcile-stale-snapshot",
     )?.ciPolicy,
+    "optional",
+  );
+  assert.equal(
+    descriptors.find((descriptor) => descriptor.id === "linux-x11-project-picker")?.ciPolicy,
     "optional",
   );
   assert.equal(
@@ -1313,6 +1315,15 @@ function currentChromePluginGateBundleFixture() {
     "var o={c:`chrome`,s:`chrome-dev`},n={Cs:e=>!0};",
     "var Kr=[{forceReload:!0,name:o.s,syncInstallStateWithChromeExtension:!0,isAvailable:({buildFlavor:e,env:t,features:r})=>Ar(e,t)&&r.externalBrowserUseAllowed},{forceReload:!0,name:o.c,syncInstallStateWithChromeExtension:!0,isAvailable:({buildFlavor:e,features:t})=>t.externalBrowserUseAllowed&&n.Cs(e)}];",
   ].join("");
+}
+
+function currentBundledPluginCopyBundleFixture() {
+  return (
+    "let p=require(`node:path`);" +
+    "let m=require(`node:fs/promises`);m={default:m};" +
+    "let g={default:{platform:process.platform}};" +
+    "async function fl(e,t){if(g.default.platform===`darwin`){return}if(g.default.platform!==`win32`){await m.default.cp(e,t,{recursive:!0,verbatimSymlinks:!0});return}}"
+  );
 }
 
 function chromeNativeHostRuntimeBundleFixture() {
@@ -1817,6 +1828,70 @@ test("adds Linux file manager support without relying on exact minified variable
   assert.match(patched, /n\.shell\.openPath\(__codexOpenTarget\)/);
 });
 
+test("opens the project picker without a parent window on Linux X11", async () => {
+  const source =
+    "class T{async pickLocalWorkspaceRoots(e,t=!1){if(this.host.id!==`local`)throw Error(`local only`);let n=[`openDirectory`,`createDirectory`];t&&n.push(`multiSelections`),await this.shouldShowHiddenFilesInPicker()&&n.push(`showHiddenFiles`);let r={properties:n,title:`Select Project Root`},i=c.BrowserWindow.fromWebContents(e),a=i==null?await c.dialog.showOpenDialog(r):await c.dialog.showOpenDialog(i,r);return a.canceled?[]:(await Promise.all(a.filePaths.map(e=>this.resolveWorkspaceRoot(e)))).filter(e=>e!=null)}}";
+  const patched = applyPatchTwice(applyLinuxX11ProjectPickerPatch, source);
+
+  assert.match(patched, /codexLinuxUseUnparentedX11ProjectPicker/);
+
+  async function run(platform, env) {
+    const calls = [];
+    const context = {
+      process: { platform, env },
+      calls,
+      c: {
+        BrowserWindow: { fromWebContents: () => ({ id: "parent" }) },
+        dialog: {
+          showOpenDialog: async (...args) => {
+            calls.push(args);
+            return { canceled: false, filePaths: ["/tmp/project"] };
+          },
+        },
+      },
+    };
+    vm.runInNewContext(
+      `${patched};manager=new T;manager.host={id:\`local\`};manager.shouldShowHiddenFilesInPicker=async()=>false;manager.resolveWorkspaceRoot=async e=>e`,
+      context,
+    );
+    const roots = await context.manager.pickLocalWorkspaceRoots({});
+    return { argumentCount: calls[0].length, roots: Array.from(roots) };
+  }
+
+  assert.deepEqual(await run("linux", { XDG_SESSION_TYPE: " X11 ", DISPLAY: ":0" }), {
+    argumentCount: 1,
+    roots: ["/tmp/project"],
+  });
+  assert.deepEqual(await run("linux", { DISPLAY: ":0" }), {
+    argumentCount: 1,
+    roots: ["/tmp/project"],
+  });
+  assert.deepEqual(await run("linux", { DISPLAY: ":0", WAYLAND_DISPLAY: "wayland-0" }), {
+    argumentCount: 2,
+    roots: ["/tmp/project"],
+  });
+  assert.deepEqual(await run("linux", { XDG_SESSION_TYPE: "unknown", DISPLAY: ":0" }), {
+    argumentCount: 1,
+    roots: ["/tmp/project"],
+  });
+  assert.deepEqual(
+    await run("linux", { XDG_SESSION_TYPE: "unknown", DISPLAY: ":0", WAYLAND_DISPLAY: "wayland-0" }),
+    { argumentCount: 2, roots: ["/tmp/project"] },
+  );
+  assert.deepEqual(await run("linux", { XDG_SESSION_TYPE: " Wayland ", DISPLAY: ":0" }), {
+    argumentCount: 2,
+    roots: ["/tmp/project"],
+  });
+  assert.deepEqual(
+    await run("linux", { XDG_SESSION_TYPE: "wayland", DISPLAY: ":0", WAYLAND_DISPLAY: "wayland-0" }),
+    { argumentCount: 2, roots: ["/tmp/project"] },
+  );
+  assert.deepEqual(await run("darwin", {}), {
+    argumentCount: 2,
+    roots: ["/tmp/project"],
+  });
+});
+
 test("adds Linux file manager support to the worker open target registry", () => {
   const source = `${workerBundlePrefix}${fileManagerBundle}`;
 
@@ -2133,9 +2208,9 @@ test("adds the Linux quit guard to the current comma-declared Electron prelude",
 
   const patched = applyPatchTwice(applyLinuxQuitGuardPatch, source);
 
-  assert.match(patched, /let codexLinuxQuitInProgress=!1/);
+  assert.match(patched, /codexLinuxQuitInProgress=!1/);
   assert.match(patched, /codexLinuxExplicitQuitApproved=!1/);
-  assert.match(patched, /codexLinuxMarkQuitInProgress=\(\)=>\{codexLinuxQuitInProgress=!0\}/);
+  assert.match(patched, /codexLinuxMarkQuitInProgress=\(\)=>\{codexLinuxQuitInProgress=!0,codexLinuxDestroyTray\(\)\}/);
   assert.match(patched, /codexLinuxPrepareForExplicitQuit=\(\)=>\{codexLinuxExplicitQuitApproved=!0,codexLinuxMarkQuitInProgress\(\)\}/);
   assert.match(patched, /codexLinuxShouldBypassQuitPrompt=\(\)=>codexLinuxExplicitQuitApproved===!0/);
   assert.match(patched, /codexLinuxIsQuitInProgress=\(\)=>codexLinuxQuitInProgress===!0/);
@@ -2146,7 +2221,7 @@ test("keeps the current Linux quit guard module-scoped after helper declarations
 
   const patched = applyPatchTwice(applyLinuxQuitGuardPatch, source);
 
-  assert.match(patched, /p=e\.o\(p\);let codexLinuxQuitInProgress=!1/);
+  assert.match(patched, /p=e\.o\(p\);let codexLinuxTray=null/);
   assert.match(patched, /codexLinuxExplicitQuitApproved=!1/);
   assert.match(patched, /codexLinuxPrepareForExplicitQuit=\(\)=>\{codexLinuxExplicitQuitApproved=!0,codexLinuxMarkQuitInProgress\(\)\}/);
   assert.equal((patched.match(/codexLinuxQuitInProgress=!1/g) ?? []).length, 1);
@@ -2158,10 +2233,36 @@ test("adds the Linux quit guard for the current interleaved bundler prelude", ()
   const patched = applyPatchTwice(applyLinuxQuitGuardPatch, source);
 
   assert.match(patched, /let m=require\(`node:fs\/promises`\);/);
-  assert.match(patched, /p=e\.o\(p\);let codexLinuxQuitInProgress=!1/);
+  assert.match(patched, /p=e\.o\(p\);let codexLinuxTray=null/);
   assert.match(patched, /codexLinuxExplicitQuitApproved=!1/);
   assert.match(patched, /codexLinuxPrepareForExplicitQuit=\(\)=>\{codexLinuxExplicitQuitApproved=!0,codexLinuxMarkQuitInProgress\(\)\}/);
   assert.equal((patched.match(/codexLinuxQuitInProgress=!1/g) ?? []).length, 1);
+});
+
+test("destroys the registered Linux tray before the app exits", () => {
+  const source = `${currentMainBundlePrefix}${trayBundleFixture()}`;
+  const patched = applyPatchTwice(
+    applyLinuxTrayPatch,
+    applyLinuxQuitGuardPatch(source),
+    null,
+  );
+
+  assert.match(patched, /codexLinuxRegisterTray=e=>\(codexLinuxTray=e,e\)/);
+  assert.match(patched, /codexLinuxDestroyTray=\(\)=>\{if\(process\.platform!==`linux`\)return;/);
+  assert.match(patched, /codexLinuxTray=null;try\{e\?\.destroy\(\)\}catch\{\}/);
+  assert.match(patched, /codexLinuxMarkQuitInProgress=\(\)=>\{codexLinuxQuitInProgress=!0,codexLinuxDestroyTray\(\)\}/);
+  assert.match(patched, /c\.app\.on\(`before-quit`,\(\)=>codexLinuxDestroyTray\(\)\)/);
+  assert.match(patched, /i=typeof codexLinuxRegisterTray===`function`\?codexLinuxRegisterTray\(new n\.Tray\(r\.defaultIcon\)\):new n\.Tray\(r\.defaultIcon\)/);
+  assert.doesNotMatch(patched, /codexLinuxTrayQuitDelayMs/);
+
+  const helperStart = patched.indexOf("let codexLinuxTray=null");
+  const helperEnd = patched.indexOf(";c.app.on(`before-quit`", helperStart) + 1;
+  const helperSource = patched.slice(helperStart, helperEnd);
+  const runDestroy = new Function(
+    "process",
+    `${helperSource}let calls=0;codexLinuxRegisterTray({destroy(){calls+=1}});codexLinuxMarkQuitInProgress();codexLinuxMarkQuitInProgress();return calls;`,
+  );
+  assert.equal(runDestroy({ platform: "linux" }), 1);
 });
 
 test("bypasses the upstream before-quit confirmation after a Linux explicit quit", () => {
@@ -4700,7 +4801,11 @@ test("keeps Linux desktop toggles visible with native Keyboard Shortcuts", () =>
     assert.match(linuxDesktopSource, /codex-linux-auto-update-on-exit/);
     assert.match(linuxDesktopSource, /import\{r as SettingsRow\}from"\.\/settings-row-A\.js"/);
     assert.match(linuxDesktopSource, /import\{z as __post\}from"\.\/shared-app-A\.js"/);
-    assert.match(linuxDesktopSource, /import\{t as Toggle\}from"\.\/toggle-A\.js"/);
+    assert.equal(fs.existsSync(path.join(assetsDir, "linux-settings-toggle-linux.js")), true);
+    assert.match(
+      linuxDesktopSource,
+      /import\{t as Toggle\}from"\.\/linux-settings-toggle-linux\.js"/,
+    );
     assert.doesNotMatch(linuxDesktopSource, /React\.use(State|Effect|Callback)/);
     assert.doesNotMatch(linuxDesktopSource, /function useLinuxSetting/);
     assert.match(linuxDesktopSource, /class LinuxToggle extends React\.Component/);
@@ -4871,7 +4976,7 @@ test("ignores settings row and toggle icon decoys from the current DMG", () => {
   }
 });
 
-test("infers the current upstream settings toggle from settings row controls", () => {
+test("does not import an upstream settings toggle with private lazy initialization", () => {
   const { extractedDir, assetsDir } = createModernNativeKeyboardShortcutsSettingsFixture();
   try {
     fs.rmSync(path.join(assetsDir, "toggle-A.js"));
@@ -4886,13 +4991,17 @@ test("infers the current upstream settings toggle from settings row controls", (
 
     assert.equal(result.matched, true);
     assert.deepEqual(warnings, []);
-    assert.equal(fs.existsSync(path.join(assetsDir, "linux-settings-toggle-linux.js")), false);
+    assert.equal(fs.existsSync(path.join(assetsDir, "linux-settings-toggle-linux.js")), true);
 
     const linuxDesktopSource = fs.readFileSync(
       path.join(assetsDir, linuxDesktopSettingsAsset),
       "utf8",
     );
-    assert.match(linuxDesktopSource, /import\{vn as Toggle\}from"\.\/shared-toggle-A\.js"/);
+    assert.match(
+      linuxDesktopSource,
+      /import\{t as Toggle\}from"\.\/linux-settings-toggle-linux\.js"/,
+    );
+    assert.doesNotMatch(linuxDesktopSource, /shared-toggle-A\.js/);
     assert.match(
       linuxDesktopSource,
       /control:\$\.jsx\(Toggle,\{checked:value,disabled:isLoading,onChange:this\.update,ariaLabel:label\}\)/,
@@ -4950,7 +5059,10 @@ test("adds Linux desktop settings when native shortcuts use a consolidated setti
     assert.match(linuxDesktopSource, /href:url/);
     assert.doesNotMatch(linuxDesktopSource, /Source commit URL/);
     assert.match(linuxDesktopSource, /import\{R as __reactFactory,I as __jsxFactory\}from"\.\/shared-runtime-A\.js"/);
-    assert.match(linuxDesktopSource, /import\{t as Toggle\}from"\.\/toggle-A\.js"/);
+    assert.match(
+      linuxDesktopSource,
+      /import\{t as Toggle\}from"\.\/linux-settings-toggle-linux\.js"/,
+    );
     assert.doesNotMatch(linuxDesktopSource, /function LinuxSwitch/);
 
     const settingsPageSource = fs.readFileSync(path.join(assetsDir, "settings-page-A.js"), "utf8");
@@ -4998,7 +5110,10 @@ test("adds Linux desktop settings when the lazy route map is hoisted into a sepa
       path.join(assetsDir, linuxDesktopSettingsAsset),
       "utf8",
     );
-    assert.match(linuxDesktopSource, /import\{t as Toggle\}from"\.\/toggle-A\.js"/);
+    assert.match(
+      linuxDesktopSource,
+      /import\{t as Toggle\}from"\.\/linux-settings-toggle-linux\.js"/,
+    );
     assert.doesNotMatch(linuxDesktopSource, /function LinuxSwitch/);
 
     // The icon/navigation bundle must reuse the general-settings icon for the new
@@ -5537,447 +5652,21 @@ test("keeps current app-server backfill helpers visible outside the Sentry handl
   assert.equal(context.turnTimeout, 3e4);
 });
 
-test("hydrates missing conversations when final app-server events arrive before turn start replay", async () => {
-  const source = [
-    "function Of({conversationId:e,conversations:t,getWorkspaceBrowserRoot:n,getWorkspaceKind:r,hostId:i,setConversation:a,thread:o,threadsById:s,updateConversationState:c}){let h=o.status??null;if(t.has(e)){c(e,e=>{e.resumeState===`needs_resume`&&(e.threadRuntimeStatus=h)});return}}",
-    "class T{onNotification(e,t){let n={method:e,params:t};switch(n.method){case`turn/started`:{let{threadId:e,turn:t}=n.params,r=I(e);if(!this.conversations.get(r)){z.error(`Received turn/started for unknown conversation`,{safe:{conversationId:r},sensitive:{}});break}this.markConversationStreaming(r),this.updateConversationState(r,e=>{});break}case`turn/completed`:{if(this.frameTextDeltaQueue.drainBefore(()=>{this.onNotification(`turn/completed`,n.params)}))break;let{threadId:e,turn:t}=n.params,r=I(e);if(!this.conversations.get(r)){z.error(`Received turn/completed for unknown conversation`,{safe:{conversationId:r},sensitive:{}});break}break}case`item/started`:{let{item:e,threadId:t,turnId:r,startedAtMs:i}=n.params,a=I(t);if(!this.conversations.get(a)){z.error(`Received item/started for unknown conversation`,{safe:{conversationId:a},sensitive:{}});break}this.markConversationStreaming(a),this.updateConversationState(a,t=>{});break}case`item/completed`:{if(this.frameTextDeltaQueue.drainBefore(()=>{this.onNotification(`item/completed`,n.params)}))break;let{item:e,threadId:t,turnId:r,completedAtMs:i}=n.params,a=I(t);if(!this.conversations.get(a)){z.error(`Received item/completed for unknown conversation`,{safe:{conversationId:a},sensitive:{}});break}this.updateConversationState(a,t=>{});break}}}}",
-  ].join("");
-  const patched = applyPatchTwice(applyLinuxAppServerConversationHydrationPatch, source);
+test("keeps remote conversation hydration out of core", () => {
+  const descriptors = corePatchDescriptors();
 
-  assert.match(patched, /codexLinuxRemoteMobileHydrateUnknownTurn/);
-  assert.match(patched, /codexLinuxRemoteMobileHydrateLateEvent/);
-  assert.match(patched, /codexLinuxRemoteMobilePendingNotifications\?\?=new Map/);
-  assert.match(patched, /codexLinuxRemoteMobileInFlightHydrations\?\?=new Set/);
-  assert.match(patched, /Hydrating conversation for turn\/completed/);
-  assert.match(patched, /Hydrating conversation for item\/completed/);
-  assert.match(patched, /Skipping hydration for ambiguous turn\/started/);
-
-  const context = {
-    module: { exports: {} },
-    I: (value) => value,
-    setTimeout,
-    z: { error() {}, warning() {} },
-  };
-  vm.runInNewContext(`${patched};module.exports=T;`, context);
-  const completedTurnManager = new context.module.exports();
-  const completedTurnReads = [];
-  completedTurnManager.conversations = new Map();
-  completedTurnManager.frameTextDeltaQueue = { drainBefore: () => false };
-  completedTurnManager.readThread = async (threadId) => {
-    completedTurnReads.push(threadId);
-    return { thread: { id: threadId }, turns: [{ id: "turn-a" }] };
-  };
-  completedTurnManager.upsertConversationFromThread = (thread) => {
-    completedTurnManager.conversations.set(thread.id, thread);
-  };
-
-  completedTurnManager.onNotification("turn/completed", {
-    threadId: "thread-a",
-    turn: { id: "turn-a", threadId: "thread-a", status: "completed" },
-  });
-  await new Promise((resolve) => setImmediate(resolve));
-
-  assert.deepEqual(completedTurnReads, ["thread-a"]);
-  assert.equal(completedTurnManager.codexLinuxRemoteMobilePendingNotifications?.has("thread-a"), false);
-  assert.equal(completedTurnManager.codexLinuxRemoteMobileInFlightHydrations?.has("thread-a"), false);
-
-  const completedItemManager = new context.module.exports();
-  const completedItemReads = [];
-  const updatedConversations = [];
-  completedItemManager.conversations = new Map();
-  completedItemManager.frameTextDeltaQueue = { drainBefore: () => false };
-  completedItemManager.readThread = async (threadId) => {
-    completedItemReads.push(threadId);
-    return { thread: { id: threadId }, turns: [{ id: "turn-a" }] };
-  };
-  completedItemManager.upsertConversationFromThread = (thread) => {
-    completedItemManager.conversations.set(thread.id, thread);
-  };
-  completedItemManager.updateConversationState = (threadId) => {
-    updatedConversations.push(threadId);
-  };
-
-  completedItemManager.onNotification("item/completed", {
-    item: { id: "item-a", type: "agentMessage" },
-    threadId: "thread-b",
-    turnId: "turn-b",
-    completedAtMs: 1,
-  });
-  await new Promise((resolve) => setImmediate(resolve));
-
-  assert.deepEqual(completedItemReads, ["thread-b"]);
-  assert.deepEqual(updatedConversations, ["thread-b"]);
-  assert.equal(completedItemManager.codexLinuxRemoteMobilePendingNotifications?.has("thread-b"), false);
-  assert.equal(completedItemManager.codexLinuxRemoteMobileInFlightHydrations?.has("thread-b"), false);
-});
-
-test("does not hydrate summary-only app-server conversations without turns", async () => {
-  const source = [
-    "function Of({conversationId:e,conversations:t,getWorkspaceBrowserRoot:n,getWorkspaceKind:r,hostId:i,setConversation:a,thread:o,threadsById:s,updateConversationState:c}){let h=o.status??null;if(t.has(e)){c(e,e=>{e.resumeState===`needs_resume`&&(e.threadRuntimeStatus=h)});return}}",
-    "class T{onNotification(e,t){let n={method:e,params:t};switch(n.method){case`turn/started`:{let{threadId:e,turn:t}=n.params,r=I(e);if(!this.conversations.get(r)){z.error(`Received turn/started for unknown conversation`,{safe:{conversationId:r},sensitive:{}});break}this.markConversationStreaming(r),this.updateConversationState(r,e=>{});break}case`turn/completed`:{if(this.frameTextDeltaQueue.drainBefore(()=>{this.onNotification(`turn/completed`,n.params)}))break;let{threadId:e,turn:t}=n.params,r=I(e);if(!this.conversations.get(r)){z.error(`Received turn/completed for unknown conversation`,{safe:{conversationId:r},sensitive:{}});break}break}case`item/started`:{let{item:e,threadId:t,turnId:r,startedAtMs:i}=n.params,a=I(t);if(!this.conversations.get(a)){z.error(`Received item/started for unknown conversation`,{safe:{conversationId:a},sensitive:{}});break}this.markConversationStreaming(a),this.updateConversationState(a,t=>{});break}case`item/completed`:{if(this.frameTextDeltaQueue.drainBefore(()=>{this.onNotification(`item/completed`,n.params)}))break;let{item:e,threadId:t,turnId:r,completedAtMs:i}=n.params,a=I(t);if(!this.conversations.get(a)){z.error(`Received item/completed for unknown conversation`,{safe:{conversationId:a},sensitive:{}});break}this.updateConversationState(a,t=>{});break}}}}",
-  ].join("");
-  const patched = applyPatchTwice(applyLinuxAppServerConversationHydrationPatch, source);
-  let scheduledRetry = null;
-  const context = {
-    module: { exports: {} },
-    I: (value) => value,
-    setTimeout(callback) {
-      scheduledRetry = callback;
-      return 1;
-    },
-    z: { error() {}, warning() {} },
-  };
-  vm.runInNewContext(`${patched};module.exports=T;`, context);
-  const manager = new context.module.exports();
-  const readThreadIds = [];
-  const upsertedThreads = [];
-
-  manager.conversations = new Map();
-  manager.frameTextDeltaQueue = { drainBefore: () => false };
-  manager.readThread = async (threadId) => {
-    readThreadIds.push(threadId);
-    return { thread: { id: threadId }, turns: [] };
-  };
-  manager.upsertConversationFromThread = (thread) => {
-    upsertedThreads.push(thread.id);
-    manager.conversations.set(thread.id, thread);
-  };
-
-  manager.onNotification("turn/completed", {
-    threadId: "thread-a",
-    turn: { id: "turn-a", threadId: "thread-a", status: "completed" },
-  });
-  await new Promise((resolve) => setImmediate(resolve));
-
-  assert.deepEqual(readThreadIds, ["thread-a"]);
-  assert.deepEqual(upsertedThreads, []);
-  assert.equal(manager.conversations.has("thread-a"), false);
-  assert.equal(manager.codexLinuxRemoteMobilePendingNotifications?.has("thread-a"), true);
-  assert.equal(manager.codexLinuxRemoteMobileInFlightHydrations?.has("thread-a"), true);
-  assert.equal(typeof scheduledRetry, "function");
-});
-
-test("coalesces final app-server events while hydrating a missing conversation", async () => {
-  const source = [
-    "function Of({conversationId:e,conversations:t,getWorkspaceBrowserRoot:n,getWorkspaceKind:r,hostId:i,setConversation:a,thread:o,threadsById:s,updateConversationState:c}){let h=o.status??null;if(t.has(e)){c(e,e=>{e.resumeState===`needs_resume`&&(e.threadRuntimeStatus=h)});return}}",
-    "class T{onNotification(e,t){let n={method:e,params:t};switch(n.method){case`turn/started`:{let{threadId:e,turn:t}=n.params,r=I(e);if(!this.conversations.get(r)){z.error(`Received turn/started for unknown conversation`,{safe:{conversationId:r},sensitive:{}});break}this.markConversationStreaming(r),this.updateConversationState(r,e=>{});break}case`turn/completed`:{if(this.frameTextDeltaQueue.drainBefore(()=>{this.onNotification(`turn/completed`,n.params)}))break;let{threadId:e,turn:t}=n.params,r=I(e);if(!this.conversations.get(r)){z.error(`Received turn/completed for unknown conversation`,{safe:{conversationId:r},sensitive:{}});break}break}case`item/started`:{let{item:e,threadId:t,turnId:r,startedAtMs:i}=n.params,a=I(t);if(!this.conversations.get(a)){z.error(`Received item/started for unknown conversation`,{safe:{conversationId:a},sensitive:{}});break}this.markConversationStreaming(a),this.updateConversationState(a,t=>{});break}case`item/completed`:{if(this.frameTextDeltaQueue.drainBefore(()=>{this.onNotification(`item/completed`,n.params)}))break;let{item:e,threadId:t,turnId:r,completedAtMs:i}=n.params,a=I(t);if(!this.conversations.get(a)){z.error(`Received item/completed for unknown conversation`,{safe:{conversationId:a},sensitive:{}});break}this.updateConversationState(a,t=>{});break}}}}",
-  ].join("");
-  const patched = applyPatchTwice(applyLinuxAppServerConversationHydrationPatch, source);
-  const context = {
-    module: { exports: {} },
-    I: (value) => value,
-    setTimeout,
-    z: { error() {}, warning() {} },
-  };
-  vm.runInNewContext(`${patched};module.exports=T;`, context);
-  const manager = new context.module.exports();
-  const readThreadIds = [];
-  const updatedConversations = [];
-  let resolveRead;
-
-  manager.conversations = new Map();
-  manager.frameTextDeltaQueue = { drainBefore: () => false };
-  manager.readThread = (threadId) => {
-    readThreadIds.push(threadId);
-    return new Promise((resolve) => {
-      resolveRead = () => resolve({ thread: { id: threadId }, turns: [{ id: "turn-a" }] });
-    });
-  };
-  manager.upsertConversationFromThread = (thread) => {
-    manager.conversations.set(thread.id, thread);
-  };
-  manager.updateConversationState = (threadId) => {
-    updatedConversations.push(threadId);
-  };
-
-  manager.onNotification("turn/completed", {
-    threadId: "thread-a",
-    turn: { id: "turn-a", threadId: "thread-a", status: "completed" },
-  });
-  manager.onNotification("item/completed", {
-    item: { id: "item-a", type: "agentMessage" },
-    threadId: "thread-a",
-    turnId: "turn-a",
-    completedAtMs: 1,
-  });
-  await new Promise((resolve) => setImmediate(resolve));
-
-  assert.deepEqual(readThreadIds, ["thread-a"]);
-  assert.equal(manager.codexLinuxRemoteMobilePendingNotifications.get("thread-a").length, 2);
-  assert.equal(manager.codexLinuxRemoteMobileInFlightHydrations.has("thread-a"), true);
-
-  resolveRead();
-  await new Promise((resolve) => setImmediate(resolve));
-
-  assert.equal(manager.codexLinuxRemoteMobilePendingNotifications?.has("thread-a"), false);
-  assert.equal(manager.codexLinuxRemoteMobileInFlightHydrations?.has("thread-a"), false);
-  assert.deepEqual(updatedConversations, ["thread-a"]);
-});
-
-test("restarts late-event hydration when a pending queue exists without an in-flight read", async () => {
-  const source = [
-    "function Of({conversationId:e,conversations:t,getWorkspaceBrowserRoot:n,getWorkspaceKind:r,hostId:i,setConversation:a,thread:o,threadsById:s,updateConversationState:c}){let h=o.status??null;if(t.has(e)){c(e,e=>{e.resumeState===`needs_resume`&&(e.threadRuntimeStatus=h)});return}}",
-    "class T{onNotification(e,t){let n={method:e,params:t};switch(n.method){case`turn/started`:{let{threadId:e,turn:t}=n.params,r=I(e);if(!this.conversations.get(r)){z.error(`Received turn/started for unknown conversation`,{safe:{conversationId:r},sensitive:{}});break}this.markConversationStreaming(r),this.updateConversationState(r,e=>{});break}case`turn/completed`:{if(this.frameTextDeltaQueue.drainBefore(()=>{this.onNotification(`turn/completed`,n.params)}))break;let{threadId:e,turn:t}=n.params,r=I(e);if(!this.conversations.get(r)){z.error(`Received turn/completed for unknown conversation`,{safe:{conversationId:r},sensitive:{}});break}break}case`item/started`:{let{item:e,threadId:t,turnId:r,startedAtMs:i}=n.params,a=I(t);if(!this.conversations.get(a)){z.error(`Received item/started for unknown conversation`,{safe:{conversationId:a},sensitive:{}});break}this.markConversationStreaming(a),this.updateConversationState(a,t=>{});break}case`item/completed`:{if(this.frameTextDeltaQueue.drainBefore(()=>{this.onNotification(`item/completed`,n.params)}))break;let{item:e,threadId:t,turnId:r,completedAtMs:i}=n.params,a=I(t);if(!this.conversations.get(a)){z.error(`Received item/completed for unknown conversation`,{safe:{conversationId:a},sensitive:{}});break}this.updateConversationState(a,t=>{});break}}}}",
-  ].join("");
-  const patched = applyPatchTwice(applyLinuxAppServerConversationHydrationPatch, source);
-  const context = {
-    module: { exports: {} },
-    I: (value) => value,
-    setTimeout,
-    z: { error() {}, warning() {} },
-  };
-  vm.runInNewContext(`${patched};module.exports=T;`, context);
-  const manager = new context.module.exports();
-  const readThreadIds = [];
-  const updatedConversations = [];
-  let resolveRead;
-
-  manager.conversations = new Map();
-  manager.frameTextDeltaQueue = { drainBefore: () => false };
-  manager.codexLinuxRemoteMobilePendingNotifications = new Map([
-    [
-      "thread-a",
-      [
-        {
-          method: "turn/completed",
-          params: { threadId: "thread-a", turn: { id: "turn-a", threadId: "thread-a" } },
-        },
-      ],
-    ],
-  ]);
-  manager.readThread = (threadId) => {
-    readThreadIds.push(threadId);
-    return new Promise((resolve) => {
-      resolveRead = () => resolve({ thread: { id: threadId }, turns: [{ id: "turn-a" }] });
-    });
-  };
-  manager.upsertConversationFromThread = (thread) => {
-    manager.conversations.set(thread.id, thread);
-  };
-  manager.updateConversationState = (threadId) => {
-    updatedConversations.push(threadId);
-  };
-
-  manager.onNotification("item/completed", {
-    item: { id: "item-a", type: "agentMessage" },
-    threadId: "thread-a",
-    turnId: "turn-a",
-    completedAtMs: 1,
-  });
-  await new Promise((resolve) => setImmediate(resolve));
-
-  assert.deepEqual(readThreadIds, ["thread-a"]);
-  assert.equal(manager.codexLinuxRemoteMobilePendingNotifications.get("thread-a").length, 2);
-  assert.equal(manager.codexLinuxRemoteMobileInFlightHydrations.has("thread-a"), true);
-
-  resolveRead();
-  await new Promise((resolve) => setImmediate(resolve));
-
-  assert.equal(manager.codexLinuxRemoteMobilePendingNotifications?.has("thread-a"), false);
-  assert.equal(manager.codexLinuxRemoteMobileInFlightHydrations?.has("thread-a"), false);
-  assert.deepEqual(updatedConversations, ["thread-a"]);
-});
-
-test("discovers current app-server conversation core Linux webview patches", () => {
-  const legacyConversationAsset =
-    "app-initial~app-main~worktree-init-v2-page~remote-conversation-page~new-thread-panel-page~o~bj5tp28r-Dcs9S3fj.js";
-  const legacyLatestConversationAsset =
-    "app-initial~app-main~new-thread-panel-page~appgen-library-page~hotkey-window-thread-page~ho~glxlkd48-Bty5T9_s.js";
-  const currentConversationAsset =
-    "app-initial~app-main~pull-request-code-review~onboarding-page~hotkey-window-thread-page~cha~b76hmflu-y0KJWbm3.js";
-  const oldConversationAsset =
-    "app-initial~app-main~hotkey-window-thread-page~thread-app-shell-chrome~header~remote-conver~h59fr3q5-Cm3GYhJA.js";
-  const projectlessRemoteTaskAsset =
-    "app-initial~app-main~worktree-init-v2-page~remote-conversation-page~pull-requests-page~plug~kmtatxxf-DEE2TwPG.js";
-  const latestProjectlessRemoteTaskAsset =
-    "app-initial~app-main~new-thread-panel-page~appgen-library-page~hotkey-window-thread-page~ho~iufn7mg3-MXsOJYYa.js";
-
-  for (const id of ["linux-app-server-conversation-hydration", "linux-completed-item-recovery"]) {
-    const descriptor = corePatchDescriptors().find((patch) => patch.id === id);
-
-    assert.ok(descriptor);
-    assert.equal(descriptor.phase, "webview-asset");
-    assert.equal(descriptor.ciPolicy, "optional");
+  for (const removedPatchId of [
+    "linux-app-server-conversation-hydration",
+    "linux-completed-resume-recovery",
+    "linux-unowned-turn-claim",
+    "linux-completed-item-recovery",
+    "linux-remote-terminal-status-recovery",
+  ]) {
     assert.equal(
-      descriptor.pattern.test(
-        "app-initial~app-main~onboarding-page~hotkey-window-thread-page~quick-chat-window-page~chatg~gwqc41kz-Bj9ubaFn.js",
-      ),
-      true,
+      descriptors.some((patch) => patch.id === removedPatchId),
+      false,
     );
-    assert.equal(descriptor.pattern.test(currentConversationAsset), false);
-    assert.equal(descriptor.pattern.test(legacyConversationAsset), false);
-    assert.equal(descriptor.pattern.test(legacyLatestConversationAsset), false);
-    assert.equal(descriptor.pattern.test(oldConversationAsset), false);
-    assert.equal(descriptor.pattern.test(projectlessRemoteTaskAsset), false);
-    assert.equal(descriptor.pattern.test(latestProjectlessRemoteTaskAsset), false);
-    assert.equal(descriptor.pattern.test("app-server-manager-signals-test.js"), false);
-    assert.equal(descriptor.pattern.test("remote-connections-settings-fixture.js"), false);
   }
-});
-
-test("recovers completed stream items that arrive after local state lost their started item", () => {
-  const source = [
-    "class T{onNotification(e,t){let n={method:e,params:t};switch(n.method){case`item/completed`:{if(this.frameTextDeltaQueue.drainBefore(()=>{this.onNotification(`item/completed`,n.params)}))break;",
-    "let{item:e,threadId:t,turnId:r,completedAtMs:i}=n.params,a=qf(t);if(!this.conversations.get(a)){$.error(`Received item/completed for unknown conversation`,{safe:{conversationId:a},sensitive:{}});break}",
-    "this.updateConversationState(a,t=>{let n=e.type===`userMessage`?gI(t,r):r==null?uI(t):fI(t,e=>e.turnId===r);if(!n)return;aR(n);",
-    "let a=Jtt({item:e,threadsById:this.threadStore.threadsById,onCollabAgentToolCall:e=>{this.hydrateCollabThreads(e.receiverThreadIds)}}),o=a.type===`contextCompaction`?n.items.find(e=>e.type===`contextCompaction`&&e.id===a.id):null;",
-    "if(a.type===`commandExecution`){let e=a.durationMs==null?null:i-a.durationMs;e!=null&&(n.commandExecutionStartedAtMsById??={},n.commandExecutionStartedAtMsById[a.id]??=e)}",
-    "let s=FF(a.type===`contextCompaction`?{...a,completed:!0,source:o?.type===`contextCompaction`&&`source`in o?o.source:`automatic`}:a);",
-    "if(e.type===`userMessage`){let t=Put(n.items,e.content,n.turnId,n.turnStartedAtMs,!1);if(t!=null){t.status=`accepted`,HI(n,FF({type:`steered`,id:e.id}));return}HI(n,s);return}",
-    "if(e.type===`hookPrompt`){bP(n,s);return}",
-    "yV(e)&&(n.firstTurnWorkItemStartedAtMs=n.firstTurnWorkItemStartedAtMs??Date.now()),!(e.type!==`subAgentActivity`&&!LB(n,e.id,e.type))&&(e.type,bP(n,s))});break}}}}",
-  ].join("");
-
-  const patched = applyPatchTwice(applyLinuxCompletedItemRecoveryPatch, source);
-
-  assert.match(patched, /codexLinuxCompletedItemExists=n\.items\.some\(e=>e\.id===s\.id\)/);
-  assert.match(
-    patched,
-    /if\(e\.type!==`subAgentActivity`&&codexLinuxCompletedItemExists&&!LB\(n,e\.id,e\.type\)\)return;bP\(n,s\)/,
-  );
-  assert.doesNotMatch(
-    patched,
-    /!\(e\.type!==`subAgentActivity`&&!LB\(n,e\.id,e\.type\)\)&&\(e\.type,bP\(n,s\)\)/,
-  );
-
-  const context = {};
-  vm.runInNewContext(
-    [
-      "let errors=[];",
-      "var $={error:(message,details)=>errors.push({message,details})};",
-      "function qf(e){return e}",
-      "function fI(e,t){return e.turns.find(t)}",
-      "function gI(){throw Error(`unexpected userMessage path`)}",
-      "function uI(){throw Error(`unexpected null turn path`)}",
-      "function aR(){}",
-      "function yV(){return true}",
-      "function Jtt({item:e}){return {type:e.type,id:e.id,text:e.text??null}}",
-      "function FF(e){return e}",
-      "function bP(e,t){let n=e.items.findIndex(e=>e.id===t.id);n>=0?e.items[n]=t:e.items.push(t)}",
-      "function LB(e,t,n){let r=e.items.find(e=>e.id===t&&e.type===n);if(r)return r;$.error(`Item not found in turn state`,{safe:{itemId:t},sensitive:{}});return null}",
-      "function Put(){return null}",
-      patched,
-      "function run(items){errors=[];let turn={turnId:`turn-1`,items:items.map(e=>({...e}))},conversation={turns:[turn]},manager=new T;manager.frameTextDeltaQueue={drainBefore:()=>false};manager.conversations=new Map([[`thread-1`,{}]]);manager.threadStore={threadsById:new Map};manager.hydrateCollabThreads=()=>{};manager.updateConversationState=(id,fn)=>fn(conversation);manager.onNotification(`item/completed`,{item:{type:`agentMessage`,id:`assistant-1`,text:`done`},threadId:`thread-1`,turnId:`turn-1`,completedAtMs:100});return {items:turn.items,errors}}",
-      "result={missing:run([]),existing:run([{type:`agentMessage`,id:`assistant-1`,text:`old`}]),wrongType:run([{type:`plan`,id:`assistant-1`,text:`old`}])};",
-    ].join(";"),
-    context,
-  );
-  const behavior = JSON.parse(JSON.stringify(context.result));
-  assert.deepEqual(behavior.missing.items, [
-    { type: "agentMessage", id: "assistant-1", text: "done" },
-  ]);
-  assert.deepEqual(behavior.existing.items, [
-    { type: "agentMessage", id: "assistant-1", text: "done" },
-  ]);
-  assert.deepEqual(behavior.wrongType.items, [
-    { type: "plan", id: "assistant-1", text: "old" },
-  ]);
-  assert.equal(behavior.missing.errors.length, 0);
-  assert.equal(behavior.existing.errors.length, 0);
-  assert.equal(behavior.wrongType.errors.length, 1);
-});
-
-test("treats empty active runtime status as stale once response rendering has completed", () => {
-  const source =
-    "function LQt({hasInProgressSideChat:e,isResponseInProgress:t,latestTurnHasSystemError:n,resumeState:r,threadRuntimeStatus:i}){return e?`loading`:i?.type===`systemError`?`error`:i?.type===`active`?`loading`:r===`needs_resume`?`idle`:n?`error`:t===!0?`loading`:`idle`}function RQt({pendingRequestType:e,requests:t,resumeState:n,threadRuntimeStatus:r}){return t==null||n==null?null:n===`needs_resume`?r?.type===`active`&&r.activeFlags.includes(`waitingOnApproval`)&&yi(t)?`approval`:r?.type===`active`&&r.activeFlags.includes(`waitingOnUserInput`)?`response`:null:Zr(e)?`approval`:e===`userInput`?`response`:null}var IQt,AQt,OQt=e((()=>{G(),Lr(),Tt(),Ni(),kt(),IQt=s(V,(e,{get:t})=>{let n=t(rr,e);return LQt({hasInProgressSideChat:t(Qw,e),isResponseInProgress:t(ki,e),resumeState:t(si,e)??(n==null?null:`needs_resume`),threadRuntimeStatus:t(Or,e)??n?.threadRuntimeStatus??null,latestTurnHasSystemError:t(Ui,e)===!0})}),AQt=s(V,(e,{get:t})=>RQt({pendingRequestType:t(wr,e)?.type??null,requests:t(fi,e),resumeState:t(si,e),threadRuntimeStatus:t(Or,e)}))}))";
-
-  const patched = applyPatchTwice(applyLinuxRemoteTerminalStatusRecoveryPatch, source);
-
-  assert.match(patched, /codexLinuxRemoteTerminalStatusActive=i\?\.type===`active`/);
-  assert.match(
-    patched,
-    /codexLinuxRemoteTerminalStatusWaitingOnUserInput/,
-  );
-  assert.match(patched, /function codexLinuxRemoteHasUserInputRequest/);
-  assert.match(
-    patched,
-    /hasUserInputRequest:codexLinuxRemoteHasUserInputRequest\(t\(fi,e\)\)/,
-  );
-  assert.doesNotMatch(
-    patched,
-    /i\?\.type===`active`\?`loading`:r===`needs_resume`/,
-  );
-
-  const context = {};
-  const runtimeSource = patched.slice(0, patched.indexOf("var IQt"));
-  vm.runInNewContext(
-    `function yi(e){return Array.isArray(e)&&e.some(e=>e.method===\`item/commandExecution/requestApproval\`||e.method===\`item/fileChange/requestApproval\`||e.method===\`item/permissions/requestApproval\`)}
-     function Zr(e){return e===\`approval\`}
-     ${runtimeSource};result={
-      stale:LQt({hasInProgressSideChat:false,isResponseInProgress:false,latestTurnHasSystemError:false,resumeState:null,threadRuntimeStatus:{type:\`active\`,activeFlags:[]}}),
-      nullStatus:LQt({hasInProgressSideChat:false,isResponseInProgress:false,latestTurnHasSystemError:false,resumeState:null,threadRuntimeStatus:null}),
-      streaming:LQt({hasInProgressSideChat:false,isResponseInProgress:true,latestTurnHasSystemError:false,resumeState:null,threadRuntimeStatus:{type:\`active\`,activeFlags:[]}}),
-      waitingStale:LQt({hasInProgressSideChat:false,isResponseInProgress:false,latestTurnHasSystemError:false,resumeState:null,threadRuntimeStatus:{type:\`active\`,activeFlags:[\`waitingOnUserInput\`]},hasUserInputRequest:false}),
-      waitingWithRequest:LQt({hasInProgressSideChat:false,isResponseInProgress:false,latestTurnHasSystemError:false,resumeState:null,threadRuntimeStatus:{type:\`active\`,activeFlags:[\`waitingOnUserInput\`]},hasUserInputRequest:true}),
-      waitingWithoutWiredRequest:LQt({hasInProgressSideChat:false,isResponseInProgress:false,latestTurnHasSystemError:false,resumeState:null,threadRuntimeStatus:{type:\`active\`,activeFlags:[\`waitingOnUserInput\`]}}),
-      unknownShape:LQt({hasInProgressSideChat:false,isResponseInProgress:false,latestTurnHasSystemError:false,resumeState:null,threadRuntimeStatus:{type:\`active\`}}),
-      sideChat:LQt({hasInProgressSideChat:true,isResponseInProgress:false,latestTurnHasSystemError:false,resumeState:null,threadRuntimeStatus:{type:\`active\`,activeFlags:[]}}),
-      systemError:LQt({hasInProgressSideChat:false,isResponseInProgress:false,latestTurnHasSystemError:false,resumeState:null,threadRuntimeStatus:{type:\`systemError\`}}),
-      turnError:LQt({hasInProgressSideChat:false,isResponseInProgress:false,latestTurnHasSystemError:true,resumeState:null,threadRuntimeStatus:{type:\`idle\`}}),
-      needsResume:LQt({hasInProgressSideChat:false,isResponseInProgress:false,latestTurnHasSystemError:false,resumeState:\`needs_resume\`,threadRuntimeStatus:{type:\`idle\`}}),
-      pendingStale:RQt({pendingRequestType:null,requests:[],resumeState:\`needs_resume\`,threadRuntimeStatus:{type:\`active\`,activeFlags:[\`waitingOnUserInput\`]}}),
-      pendingWithRequest:RQt({pendingRequestType:null,requests:[{method:\`item/tool/requestUserInput\`}],resumeState:\`needs_resume\`,threadRuntimeStatus:{type:\`active\`,activeFlags:[\`waitingOnUserInput\`]}}),
-      pendingMalformedActive:RQt({pendingRequestType:null,requests:[{method:\`item/tool/requestUserInput\`}],resumeState:\`needs_resume\`,threadRuntimeStatus:{type:\`active\`}}),
-      pendingApproval:RQt({pendingRequestType:null,requests:[{method:\`item/commandExecution/requestApproval\`}],resumeState:\`needs_resume\`,threadRuntimeStatus:{type:\`active\`,activeFlags:[\`waitingOnApproval\`]}})
-    };`,
-    context,
-  );
-
-  assert.deepEqual(JSON.parse(JSON.stringify(context.result)), {
-    stale: "idle",
-    nullStatus: "idle",
-    streaming: "loading",
-    waitingStale: "idle",
-    waitingWithRequest: "loading",
-    waitingWithoutWiredRequest: "loading",
-    unknownShape: "loading",
-    sideChat: "loading",
-    systemError: "error",
-    turnError: "error",
-    needsResume: "idle",
-    pendingStale: null,
-    pendingWithRequest: "response",
-    pendingMalformedActive: null,
-    pendingApproval: "approval",
-  });
-});
-
-test("upgrades already-patched remote status recovery for stale waiting user input", () => {
-  const source =
-    "function nT({hasInProgressSideChat:e,isResponseInProgress:t,latestTurnHasSystemError:n,resumeState:r,threadRuntimeStatus:i}){let codexLinuxRemoteTerminalStatusActive=i?.type===`active`,codexLinuxRemoteTerminalStatusLoading=codexLinuxRemoteTerminalStatusActive&&(t===!0||!Array.isArray(i.activeFlags)||i.activeFlags.length>0);return e?`loading`:i?.type===`systemError`?`error`:codexLinuxRemoteTerminalStatusLoading?`loading`:r===`needs_resume`?`idle`:n?`error`:t===!0?`loading`:`idle`}function rT({pendingRequestType:e,requests:t,resumeState:n,threadRuntimeStatus:r}){return t==null||n==null?null:n===`needs_resume`?r?.type===`active`&&r.activeFlags.includes(`waitingOnApproval`)&&yi(t)?`approval`:r?.type===`active`&&r.activeFlags.includes(`waitingOnUserInput`)?`response`:null:Zr(e)?`approval`:e===`userInput`?`response`:null}var iT,aT,oT=e((()=>{G(),Lr(),tT(),Ni(),kt(),iT=s(V,(e,{get:t})=>{let n=t(rr,e);return nT({hasInProgressSideChat:t(Qw,e),isResponseInProgress:t(ki,e),resumeState:t(si,e)??(n==null?null:`needs_resume`),threadRuntimeStatus:t(Or,e)??n?.threadRuntimeStatus??null,latestTurnHasSystemError:t(Ui,e)===!0})}),aT=s(V,(e,{get:t})=>rT({pendingRequestType:t(wr,e)?.type??null,requests:t(fi,e),resumeState:t(si,e),threadRuntimeStatus:t(Or,e)}))}))";
-
-  const patched = applyPatchTwice(applyLinuxRemoteTerminalStatusRecoveryPatch, source);
-  assert.match(
-    patched,
-    /hasUserInputRequest:codexLinuxRemoteHasUserInputRequest\(t\(fi,e\)\)/,
-  );
-  assert.doesNotMatch(
-    patched,
-    /codexLinuxRemoteTerminalStatusLoading=codexLinuxRemoteTerminalStatusActive&&\(t===!0\|\|!Array\.isArray\(i\.activeFlags\)\|\|i\.activeFlags\.length>0\)/,
-  );
-
-  const context = {};
-  const runtimeSource = patched.slice(0, patched.indexOf("var iT"));
-  vm.runInNewContext(
-    `function yi(e){return Array.isArray(e)&&e.some(e=>e.method===\`item/commandExecution/requestApproval\`)}
-     function Zr(e){return e===\`approval\`}
-     ${runtimeSource};result={
-      staleStatus:nT({hasInProgressSideChat:false,isResponseInProgress:false,latestTurnHasSystemError:false,resumeState:null,threadRuntimeStatus:{type:\`active\`,activeFlags:[\`waitingOnUserInput\`]},hasUserInputRequest:false}),
-      realStatus:nT({hasInProgressSideChat:false,isResponseInProgress:false,latestTurnHasSystemError:false,resumeState:null,threadRuntimeStatus:{type:\`active\`,activeFlags:[\`waitingOnUserInput\`]},hasUserInputRequest:true}),
-      missingWiringStatus:nT({hasInProgressSideChat:false,isResponseInProgress:false,latestTurnHasSystemError:false,resumeState:null,threadRuntimeStatus:{type:\`active\`,activeFlags:[\`waitingOnUserInput\`]}}),
-      stalePending:rT({pendingRequestType:null,requests:[],resumeState:\`needs_resume\`,threadRuntimeStatus:{type:\`active\`,activeFlags:[\`waitingOnUserInput\`]}}),
-      realPending:rT({pendingRequestType:null,requests:[{method:\`item/tool/requestOptionPicker\`}],resumeState:\`needs_resume\`,threadRuntimeStatus:{type:\`active\`,activeFlags:[\`waitingOnUserInput\`]}})
-     };`,
-    context,
-  );
-
-  assert.deepEqual(JSON.parse(JSON.stringify(context.result)), {
-    staleStatus: "idle",
-    realStatus: "loading",
-    missingWiringStatus: "loading",
-    stalePending: null,
-    realPending: "response",
-  });
 });
 
 test("skips app-server timeout rewrite when the helper insertion anchor drifts", () => {
@@ -6490,6 +6179,50 @@ test("auto-installs the current Chrome plugin gate shape", () => {
   assert.match(patched, /name:o\.s,syncInstallStateWithChromeExtension:!0,isAvailable:\(\{buildFlavor:e,env:t,features:r\}\)=>Ar\(e,t\)&&r\.externalBrowserUseAllowed/);
   assert.equal((patched.match(/installWhenMissing:!0,name:o\.c/g) || []).length, 1);
   assert.equal((patched.match(/installWhenMissing:!0,name:o\.s/g) || []).length, 0);
+});
+
+test("makes Linux bundled plugin staging writable after copying read-only resources", async () => {
+  const patched = applyPatchTwice(
+    applyLinuxBundledPluginCopyPermissionsPatch,
+    currentBundledPluginCopyBundleFixture(),
+  );
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "codex-bundled-plugin-permissions-"));
+  const sourcePlugin = path.join(root, "source-plugin");
+  const sourceManifestDir = path.join(sourcePlugin, ".codex-plugin");
+  const sourceManifest = path.join(sourceManifestDir, "plugin.json");
+  const externalFile = path.join(root, "external-read-only-file");
+  const sourceLink = path.join(sourcePlugin, "external-link");
+  const targetPlugin = path.join(root, "target-plugin");
+  const targetManifest = path.join(targetPlugin, ".codex-plugin", "plugin.json");
+  const targetLink = path.join(targetPlugin, "external-link");
+
+  try {
+    fs.mkdirSync(sourceManifestDir, { recursive: true });
+    fs.writeFileSync(sourceManifest, '{"name":"computer-use"}\n');
+    fs.writeFileSync(externalFile, "external\n");
+    fs.chmodSync(externalFile, 0o444);
+    fs.symlinkSync(externalFile, sourceLink);
+    fs.chmodSync(sourceManifest, 0o444);
+    fs.chmodSync(sourceManifestDir, 0o555);
+    fs.chmodSync(sourcePlugin, 0o555);
+
+    const copyPlugin = new Function("process", "require", `${patched};return fl;`)(
+      { platform: "linux" },
+      require,
+    );
+    await copyPlugin(sourcePlugin, targetPlugin);
+    fs.appendFileSync(targetManifest, "\n");
+
+    assert.match(patched, /async function codexLinuxMakeBundledPluginTreeWritable/);
+    assert.equal(fs.statSync(targetPlugin).mode & 0o200, 0o200);
+    assert.equal(fs.statSync(targetManifest).mode & 0o200, 0o200);
+    assert.equal(fs.lstatSync(targetLink).isSymbolicLink(), true);
+    assert.equal(fs.statSync(externalFile).mode & 0o200, 0);
+  } finally {
+    fs.chmodSync(sourcePlugin, 0o755);
+    fs.chmodSync(sourceManifestDir, 0o755);
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 function bundledPluginReconcileRaceFixture({

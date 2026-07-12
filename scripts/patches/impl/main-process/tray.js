@@ -85,6 +85,56 @@ function addDynamicTraySetupFailureLogging(source, traySetup) {
   return `${source.slice(0, openIndex)}${patchedBody}${source.slice(closeIndex + 1)}`;
 }
 
+function registerDynamicLinuxTrayInstance(source, traySetup) {
+  if (source.includes("codexLinuxRegisterTray(")) {
+    return source;
+  }
+
+  let factoryFn = traySetup?.factoryFn ?? null;
+  if (factoryFn == null) {
+    const factoryNames = [];
+    const functionRegex = /(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\([^)]*\)\{/g;
+    let match;
+    while ((match = functionRegex.exec(source)) != null) {
+      if (isTrayFactoryFunction(source, match[1])) {
+        factoryNames.push(match[1]);
+      }
+    }
+    if (factoryNames.length !== 1) {
+      return source;
+    }
+    [factoryFn] = factoryNames;
+  }
+
+  const functionMatch = source.match(
+    new RegExp(`(?:async\\s+)?function\\s+${escapeRegExp(factoryFn)}\\([^)]*\\)\\{`),
+  );
+  if (functionMatch == null) {
+    return source;
+  }
+
+  const openIndex = functionMatch.index + functionMatch[0].length - 1;
+  const closeIndex = findMatchingBrace(source, openIndex);
+  if (closeIndex === -1) {
+    return source;
+  }
+
+  const body = source.slice(openIndex, closeIndex + 1);
+  const trayConstructorRegex =
+    /([A-Za-z_$][\w$]*)=new ([A-Za-z_$][\w$]*)\.Tray\(([^;]*)\)/;
+  const trayConstructorMatch = body.match(trayConstructorRegex);
+  if (trayConstructorMatch == null) {
+    return source;
+  }
+
+  const [, trayVar, electronVar, constructorArgs] = trayConstructorMatch;
+  const patchedBody = body.replace(
+    trayConstructorRegex,
+    `${trayVar}=typeof codexLinuxRegisterTray===\`function\`?codexLinuxRegisterTray(new ${electronVar}.Tray(${constructorArgs})):new ${electronVar}.Tray(${constructorArgs})`,
+  );
+  return `${source.slice(0, openIndex)}${patchedBody}${source.slice(closeIndex + 1)}`;
+}
+
 function applyLinuxTrayPatch(currentSource, iconPathExpression) {
   let patchedSource = currentSource;
   const electronVar = requireName(currentSource, "electron");
@@ -260,6 +310,20 @@ function applyLinuxTrayPatch(currentSource, iconPathExpression) {
   } else {
     console.warn("WARN: Could not find tray startup call — skipping Linux tray startup patch");
   }
+
+  const traySetupForRegistration = findDynamicTraySetup(patchedSource);
+  const sourceWithTrayRegistration = registerDynamicLinuxTrayInstance(
+    patchedSource,
+    traySetupForRegistration,
+  );
+  if (
+    sourceWithTrayRegistration === patchedSource &&
+    !patchedSource.includes("codexLinuxRegisterTray(") &&
+    (traySetupForRegistration != null || patchedSource.includes(".Tray("))
+  ) {
+    console.warn("WARN: Could not register Linux tray instance — skipping Linux tray teardown patch");
+  }
+  patchedSource = sourceWithTrayRegistration;
 
   const traySetupForDiagnostics = findDynamicTraySetup(patchedSource);
   const sourceWithTrayDiagnostics = addDynamicTraySetupFailureLogging(

@@ -7,16 +7,140 @@ use anyhow::{bail, Context, Result};
 use std::{
     collections::BTreeSet,
     ffi::CString,
-    fs, mem,
+    fs,
+    fs::OpenOptions,
+    mem,
     os::unix::ffi::OsStrExt,
     path::{Component, Path, PathBuf},
 };
 
 const HEAVY_WORKSPACE_DIRS: &[&str] = &["builder", "codex-app", "dist"];
+pub const DMG_CACHE_LOCK_NAME: &str = ".downloads.lock";
+const DMG_DOWNLOAD_TEMP_PREFIX: &str = ".Codex.dmg.download-";
+
+#[derive(Debug)]
+pub struct DmgCacheLease {
+    _file: fs::File,
+}
+
+pub async fn acquire_dmg_cache_lease(downloads_dir: &Path) -> Result<DmgCacheLease> {
+    let downloads_dir = downloads_dir.to_path_buf();
+    tokio::task::spawn_blocking(move || {
+        fs::create_dir_all(&downloads_dir)
+            .with_context(|| format!("Failed to create {}", downloads_dir.display()))?;
+        let lock_path = downloads_dir.join(DMG_CACHE_LOCK_NAME);
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&lock_path)
+            .with_context(|| format!("Failed to open {}", lock_path.display()))?;
+        file.lock_shared()
+            .with_context(|| format!("Failed to lock {}", lock_path.display()))?;
+        Ok(DmgCacheLease { _file: file })
+    })
+    .await
+    .context("DMG cache lock task failed")?
+}
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct CleanupSummary {
     pub pruned_workspaces: usize,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct DmgCacheCleanupSummary {
+    pub pruned_dmgs: usize,
+    pub pruned_temps: usize,
+    pub skipped_locked: bool,
+}
+
+pub fn prune_dmg_cache(
+    workspace_root: &Path,
+    state: &PersistedState,
+) -> Result<DmgCacheCleanupSummary> {
+    let downloads_dir = workspace_root.join("downloads");
+    if !downloads_dir.is_dir() {
+        return Ok(DmgCacheCleanupSummary::default());
+    }
+
+    let lock_path = downloads_dir.join(DMG_CACHE_LOCK_NAME);
+    let lock_file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(&lock_path)
+        .with_context(|| format!("Failed to open {}", lock_path.display()))?;
+    match lock_file.try_lock() {
+        Ok(()) => {}
+        Err(fs::TryLockError::WouldBlock) => {
+            return Ok(DmgCacheCleanupSummary {
+                skipped_locked: true,
+                ..DmgCacheCleanupSummary::default()
+            });
+        }
+        Err(fs::TryLockError::Error(error)) => {
+            return Err(error).with_context(|| format!("Failed to lock {}", lock_path.display()));
+        }
+    }
+
+    let protected_dmg = state.artifact_paths.dmg_path.as_deref();
+    let mut summary = DmgCacheCleanupSummary::default();
+    for entry in fs::read_dir(&downloads_dir)
+        .with_context(|| format!("Failed to read {}", downloads_dir.display()))?
+    {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        if !file_type.is_file() || file_type.is_symlink() {
+            continue;
+        }
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        let path = entry.path();
+        if is_managed_content_dmg(&name) {
+            if protected_dmg == Some(path.as_path()) {
+                continue;
+            }
+            fs::remove_file(&path)
+                .with_context(|| format!("Failed to remove {}", path.display()))?;
+            summary.pruned_dmgs += 1;
+        } else if is_managed_download_temp(&name) {
+            fs::remove_file(&path)
+                .with_context(|| format!("Failed to remove {}", path.display()))?;
+            summary.pruned_temps += 1;
+        }
+    }
+    Ok(summary)
+}
+
+fn is_managed_content_dmg(name: &str) -> bool {
+    let Some(hash) = name
+        .strip_prefix("Codex-")
+        .and_then(|value| value.strip_suffix(".dmg"))
+    else {
+        return false;
+    };
+    hash.len() == 64 && hash.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn is_managed_download_temp(name: &str) -> bool {
+    let Some(identity) = name
+        .strip_prefix(DMG_DOWNLOAD_TEMP_PREFIX)
+        .and_then(|value| value.strip_suffix(".tmp"))
+    else {
+        return false;
+    };
+    let mut components = identity.split('-');
+    matches!(
+        (components.next(), components.next(), components.next()),
+        (Some(pid), Some(counter), None)
+            if !pid.is_empty()
+                && !counter.is_empty()
+                && pid.bytes().all(|byte| byte.is_ascii_digit())
+                && counter.bytes().all(|byte| byte.is_ascii_digit())
+    )
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -284,6 +408,83 @@ mod tests {
     use crate::state::{ArtifactPaths, PersistedState, UpdateStatus};
     use anyhow::Result;
     use std::{fs, path::PathBuf};
+
+    fn managed_dmg(downloads: &Path, byte: char) -> PathBuf {
+        downloads.join(format!("Codex-{}.dmg", byte.to_string().repeat(64)))
+    }
+
+    #[test]
+    fn dmg_cache_prunes_old_content_and_crash_temps_only() -> Result<()> {
+        let temp = tempfile::tempdir()?;
+        let downloads = temp.path().join("downloads");
+        fs::create_dir_all(&downloads)?;
+        let protected = managed_dmg(&downloads, 'a');
+        let old = managed_dmg(&downloads, 'b');
+        let crash_temp = downloads.join(".Codex.dmg.download-123-4.tmp");
+        let unrelated = downloads.join("notes.txt");
+        let malformed = downloads.join("Codex-not-a-hash.dmg");
+        let symlink = downloads.join(format!("Codex-{}.dmg", "c".repeat(64)));
+        fs::write(&protected, b"current")?;
+        fs::write(&old, b"old")?;
+        fs::write(&crash_temp, b"partial")?;
+        fs::write(&unrelated, b"notes")?;
+        fs::write(&malformed, b"unmanaged")?;
+        std::os::unix::fs::symlink(&old, &symlink)?;
+        let mut state = PersistedState::new(true);
+        state.artifact_paths.dmg_path = Some(protected.clone());
+
+        let summary = prune_dmg_cache(temp.path(), &state)?;
+
+        assert_eq!(summary.pruned_dmgs, 1);
+        assert_eq!(summary.pruned_temps, 1);
+        assert!(protected.exists());
+        assert!(!old.exists());
+        assert!(!crash_temp.exists());
+        assert!(unrelated.exists());
+        assert!(malformed.exists());
+        assert!(symlink.symlink_metadata()?.file_type().is_symlink());
+        Ok(())
+    }
+
+    #[test]
+    fn dmg_cache_without_state_prunes_all_managed_dmgs() -> Result<()> {
+        let temp = tempfile::tempdir()?;
+        let downloads = temp.path().join("downloads");
+        fs::create_dir_all(&downloads)?;
+        let first = managed_dmg(&downloads, '1');
+        let second = managed_dmg(&downloads, '2');
+        fs::write(&first, b"first")?;
+        fs::write(&second, b"second")?;
+
+        let summary = prune_dmg_cache(temp.path(), &PersistedState::new(true))?;
+
+        assert_eq!(summary.pruned_dmgs, 2);
+        assert!(!first.exists());
+        assert!(!second.exists());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn active_dmg_lease_blocks_cleanup_until_state_is_persisted() -> Result<()> {
+        let temp = tempfile::tempdir()?;
+        let downloads = temp.path().join("downloads");
+        let current = managed_dmg(&downloads, 'd');
+        let lease = acquire_dmg_cache_lease(&downloads).await?;
+        fs::write(&current, b"current")?;
+
+        let blocked = prune_dmg_cache(temp.path(), &PersistedState::new(true))?;
+        assert!(blocked.skipped_locked);
+        assert!(current.exists());
+
+        let mut state = PersistedState::new(true);
+        state.artifact_paths.dmg_path = Some(current.clone());
+        drop(lease);
+        let completed = prune_dmg_cache(temp.path(), &state)?;
+        assert!(!completed.skipped_locked);
+        assert_eq!(completed.pruned_dmgs, 0);
+        assert!(current.exists());
+        Ok(())
+    }
 
     fn create_workspace(root: &std::path::Path, name: &str) -> Result<PathBuf> {
         let workspace = root.join("workspaces").join(name);

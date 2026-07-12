@@ -1400,12 +1400,12 @@ test("open-target discovery targets only the current native selector bundle", ()
 
   assert.ok(descriptor);
   assert.match(
-    "app-initial~app-main~pull-request-code-review~onboarding-page~hotkey-window-thread-page~cha~b76hmflu-y0KJWbm3.js",
+    "app-initial~app-main~onboarding-page~hotkey-window-thread-page~quick-chat-window-page~chatg~gwqc41kz-Bj9ubaFn.js",
     descriptor.pattern,
   );
   assert.doesNotMatch("open-target-selection-legacy.js", descriptor.pattern);
   assert.doesNotMatch(
-    "app-initial~app-main~onboarding-page~hotkey-window-thread-page~quick-chat-window-page~chatg~k0ede4gb-current.js",
+    "app-initial~app-main~pull-request-code-review~onboarding-page~hotkey-window-thread-page~cha~b76hmflu-y0KJWbm3.js",
     descriptor.pattern,
   );
 });

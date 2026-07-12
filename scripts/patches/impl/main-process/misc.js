@@ -56,6 +56,33 @@ function applyLinuxFileManagerPatch(currentSource) {
   return patchedSource;
 }
 
+function applyLinuxX11ProjectPickerPatch(currentSource) {
+  if (currentSource.includes("codexLinuxUseUnparentedX11ProjectPicker")) {
+    return currentSource;
+  }
+
+  const pickerPattern =
+    /let ([A-Za-z_$][\w$]*)=\{properties:([A-Za-z_$][\w$]*),title:`Select Project Root`\},([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\.BrowserWindow\.fromWebContents\(([A-Za-z_$][\w$]*)\),([A-Za-z_$][\w$]*)=\3==null\?await \4\.dialog\.showOpenDialog\(\1\):await \4\.dialog\.showOpenDialog\(\3,\1\)/u;
+  const match = pickerPattern.exec(currentSource);
+  if (match == null) {
+    if (
+      currentSource.includes("Select Project Root") &&
+      currentSource.includes("showOpenDialog")
+    ) {
+      console.warn(
+        "WARN: Could not find X11 project picker insertion point — skipping unparented X11 project picker patch",
+      );
+    }
+    return currentSource;
+  }
+
+  const [, optionsVar, propertiesVar, parentVar, electronVar, webContentsVar, resultVar] = match;
+  return currentSource.replace(
+    pickerPattern,
+    `let ${optionsVar}={properties:${propertiesVar},title:\`Select Project Root\`},${parentVar}=${electronVar}.BrowserWindow.fromWebContents(${webContentsVar}),codexLinuxSessionType=(process.env.XDG_SESSION_TYPE||\`\`).trim().toLowerCase(),codexLinuxUseUnparentedX11ProjectPicker=process.platform===\`linux\`&&(codexLinuxSessionType===\`x11\`||codexLinuxSessionType!==\`wayland\`&&!process.env.WAYLAND_DISPLAY&&!!process.env.DISPLAY),${resultVar}=codexLinuxUseUnparentedX11ProjectPicker||${parentVar}==null?await ${electronVar}.dialog.showOpenDialog(${optionsVar}):await ${electronVar}.dialog.showOpenDialog(${parentVar},${optionsVar})`,
+  );
+}
+
 function applyLinuxWorkerFileManagerPatch(currentSource) {
   const block = findCallBlock(currentSource, "id:`fileManager`");
   if (block == null) {
@@ -440,6 +467,7 @@ function applyLinuxLocalAppServerFeatureEnablementHandlerPatch(currentSource) {
 
 module.exports = {
   applyLinuxFileManagerPatch,
+  applyLinuxX11ProjectPickerPatch,
   applyLinuxGitOriginsSourceFallbackPatch,
   applyLinuxTerminalUserPathPatch,
   applyLinuxLocalAppServerFeatureEnablementHandlerPatch,

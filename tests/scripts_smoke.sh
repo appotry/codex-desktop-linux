@@ -163,7 +163,7 @@ JSON
 {"name":"browser","version":"0.1.0-alpha2","interface":{"category":"Engineering"}}
 JSON
     cat > "$resources_dir/plugins/openai-bundled/plugins/browser/scripts/browser-client.mjs" <<'JS'
-function lu(e){let t=globalThis.nodeRepl?.env[e];return typeof t=="string"?t:void 0}function th(){let e=import.meta.__codexNativePipe;return e==null||typeof e.createConnection!="function"?null:e}var I2=new Set(["about:blank"]);function Gb(e){if(I2.has(e))return!0;let t;try{t=new URL(e)}catch{return!1}return t.protocol==="http:"||t.protocol==="https:"}class Uf{async fetchBlocked(e){let r=await bS(e.endpoint,{method:"GET"});if(!r.ok)throw new Error(ae(`Browser Use cannot determine if ${e.displayUrl} is allowed. Please try again later or use another source.`));let n=await r.json();return TF(n)}}export function setupAtlasRuntime() {}
+function lu(e){let t=globalThis.nodeRepl?.env[e];return typeof t=="string"?t:void 0}function th(){let e=import.meta.__codexNativePipe;return e==null||typeof e.createConnection!="function"?null:e}var I2=new Set(["about:blank"]);function Gb(e){if(I2.has(e))return!0;let t;try{t=new URL(e)}catch{return!1}return t.protocol==="http:"||t.protocol==="https:"}class Uf{async fetchBlocked(e){let r=await bS(e.endpoint,{method:"GET"});if(!r.ok)throw new Error(ae(`Browser Use cannot determine if ${e.displayUrl} is allowed. Please try again later or use another source.`));let n=await r.json();return TF(n)}}var Cb=kE(hV.platform()),EV=()=>_P()==="win32"?TV():CV(),CV=async()=>(await yP(Cb)).map(e=>wP.resolve(Cb,e)),TV=async()=>[];export function setupAtlasRuntime() {}
 JS
 }
 
@@ -622,8 +622,12 @@ SCRIPT
     assert_file_exists "$pkg_root/DEBIAN/postrm"
     assert_file_exists "$pkg_root/opt/codex-desktop/update-builder/scripts/lib/package-common.sh"
     assert_file_exists "$pkg_root/opt/codex-desktop/update-builder/scripts/lib/patch-chrome-plugin.js"
+    assert_file_exists "$pkg_root/opt/codex-desktop/update-builder/scripts/lib/patch-browser-client-iab-socket-scope.js"
     assert_file_exists "$pkg_root/opt/codex-desktop/update-builder/scripts/lib/node-runtime.sh"
     assert_file_exists "$pkg_root/opt/codex-desktop/update-builder/scripts/lib/upstream-dmg-intel.js"
+    assert_file_exists "$pkg_root/opt/codex-desktop/update-builder/scripts/lib/upstream-dmg-acceptance.js"
+    assert_file_exists "$pkg_root/opt/codex-desktop/update-builder/scripts/lib/candidate-promotion.py"
+    assert_file_exists "$pkg_root/opt/codex-desktop/update-builder/scripts/validate-upstream-dmg.js"
     assert_file_exists "$pkg_root/opt/codex-desktop/update-builder/scripts/lib/linux-update-bridge-patch.js"
     assert_file_exists "$pkg_root/opt/codex-desktop/update-builder/scripts/lib/patch-report.js"
     assert_file_exists "$pkg_root/opt/codex-desktop/update-builder/scripts/lib/rebuild-report.sh"
@@ -1520,11 +1524,13 @@ SCRIPT
     printf '%s\n' '#!/usr/bin/env bash' 'printf "%s\n" "${CODEX_CLI_PATH:-}"' > "$capture_dir/AppDir/opt/codex-desktop/start.sh"
     chmod 0755 "$capture_dir/AppDir/opt/codex-desktop/start.sh"
     local app_run_output
-    app_run_output="$(env -i PATH=/usr/bin:/bin HOME="$workspace/home" APPDIR="$capture_dir/AppDir" "$capture_dir/AppDir/AppRun")"
+    local app_run_path
+    app_run_path="$(dirname "$BASH_BIN")"
+    app_run_output="$(env -i PATH="$app_run_path" HOME="$workspace/home" APPDIR="$capture_dir/AppDir" "$BASH_BIN" "$capture_dir/AppDir/AppRun")"
     [ "$app_run_output" = "$bundled_cli" ] || fail "Expected AppRun to select bundled Codex CLI: $app_run_output"
-    app_run_output="$(env -i PATH=/usr/bin:/bin HOME="$workspace/home" APPDIR="$capture_dir/AppDir" CODEX_CLI_PATH=/custom/codex "$capture_dir/AppDir/AppRun")"
+    app_run_output="$(env -i PATH="$app_run_path" HOME="$workspace/home" APPDIR="$capture_dir/AppDir" CODEX_CLI_PATH=/custom/codex "$BASH_BIN" "$capture_dir/AppDir/AppRun")"
     [ "$app_run_output" = "/custom/codex" ] || fail "Expected explicit CODEX_CLI_PATH to override bundled CLI: $app_run_output"
-    [ "$("$bundled_cli" --version)" = "v22.22.2" ] || fail "Expected bundled CLI wrapper to use the managed Node runtime"
+    [ "$("$BASH_BIN" "$bundled_cli" --version)" = "v22.22.2" ] || fail "Expected bundled CLI wrapper to use the managed Node runtime"
 
     rm -rf "$platform_source" "$capture_dir"
     mkdir -p "$capture_dir"
@@ -1686,7 +1692,6 @@ test_make_build_app_uses_installer_download_flow_by_default() {
     local workspace="$TMP_DIR/make-build-app"
     local install_log="$workspace/install-args.log"
     local first_line
-    local second_line
 
     mkdir -p "$workspace"
 
@@ -2404,19 +2409,346 @@ SCRIPT
     REBUILD_REPORT_DIR="$workspace/report" \
         bash "$repo/scripts/rebuild-candidate.sh" >"$workspace/default.out" 2>&1
     first_line="$(sed -n '1p' "$workspace/default.log")"
-    second_line="$(sed -n '2p' "$workspace/default.log")"
-    [[ "$first_line" != *"Codex.dmg"* ]] || fail "Default inspect should let installer validate the cache: $first_line"
-    [[ "$second_line" == *"<$repo/Codex.dmg>"* ]] || fail "Default build should pin the validated cache: $second_line"
-    assert_contains "$workspace/default.out" "Using validated DMG for build"
+    [ "$first_line" = "CALL:" ] || fail "Default rebuild should let the transactional installer validate its cache: $first_line"
 
     TEST_REBUILD_LOG="$workspace/explicit.log" \
     CODEX_NEXT_APP_DIR="$workspace/next-explicit" \
     REBUILD_REPORT_DIR="$workspace/report-explicit" \
         bash "$repo/scripts/rebuild-candidate.sh" "$explicit_dmg" >"$workspace/explicit.out" 2>&1
     first_line="$(sed -n '1p' "$workspace/explicit.log")"
-    second_line="$(sed -n '2p' "$workspace/explicit.log")"
-    [[ "$first_line" == *"<$explicit_realpath>"* ]] || fail "Explicit inspect should receive explicit DMG: $first_line"
-    [[ "$second_line" == *"<$explicit_realpath>"* ]] || fail "Explicit build should receive explicit DMG: $second_line"
+    [[ "$first_line" == *"<$explicit_realpath>"* ]] || fail "Explicit transactional build should receive explicit DMG: $first_line"
+}
+
+test_candidate_install_is_transactional() {
+    info "Checking atomic candidate promotion, first install, and rollback"
+    local workspace="$TMP_DIR/candidate-install"
+    mkdir -p "$workspace/final" "$workspace/candidate"
+    printf '%s' "old" >"$workspace/final/version"
+    printf '%s' "new" >"$workspace/candidate/version"
+
+    (
+        info() { :; }
+        warn() { :; }
+        error() { echo "$*" >&2; exit 1; }
+        assert_install_target_not_running() { :; }
+        INSTALL_DIR="$workspace/final"
+        # shellcheck source=scripts/lib/candidate-install.sh
+        . "$REPO_DIR/scripts/lib/candidate-install.sh"
+        promote_candidate_install "$workspace/candidate" "$workspace/final"
+        [ "$(cat "$workspace/final/version")" = "new" ] || fail "Expected accepted candidate to be promoted"
+        [ -n "$PROMOTED_BACKUP_APP_DIR" ] || fail "Expected previous app backup"
+        [ "$(cat "$PROMOTED_BACKUP_APP_DIR/version")" = "old" ] || fail "Expected backup to preserve previous app"
+    )
+
+    rm -rf "$workspace/final" "$workspace/candidate" "$workspace"/final.backup-* "$workspace"/.final.promotion.json
+    mkdir -p "$workspace/final" "$workspace/candidate"
+    printf '%s' "old" >"$workspace/final/version"
+    printf '%s' "new" >"$workspace/candidate/version"
+    (
+        info() { :; }
+        warn() { :; }
+        error() { echo "$*" >&2; exit 1; }
+        assert_install_target_not_running() { :; }
+        INSTALL_DIR="$workspace/final"
+        # shellcheck source=scripts/lib/candidate-install.sh
+        . "$REPO_DIR/scripts/lib/candidate-install.sh"
+        if CODEX_PROMOTION_TEST_FAIL_BACKUP_MOVE=1 \
+            promote_candidate_install "$workspace/candidate" "$workspace/final"; then
+            fail "Expected simulated backup move failure"
+        fi
+        [ "$(cat "$workspace/final/version")" = "old" ] || fail "Expected failed backup move to atomically restore previous app"
+        [ "$(cat "$workspace/candidate/version")" = "new" ] || fail "Expected rollback to preserve the accepted candidate"
+        [ ! -e "$workspace/.final.promotion.json" ] || fail "Expected rollback to remove the promotion journal"
+    )
+
+    rm -rf "$workspace/final" "$workspace/candidate" "$workspace"/final.backup-* "$workspace"/.final.promotion.json
+    mkdir -p "$workspace/final" "$workspace/candidate"
+    printf '%s' "old" >"$workspace/final/version"
+    printf '%s' "new" >"$workspace/candidate/version"
+    (
+        info() { :; }
+        warn() { :; }
+        error() { echo "$*" >&2; return 1; }
+        assert_install_target_not_running() { :; }
+        # shellcheck source=scripts/lib/candidate-install.sh
+        . "$REPO_DIR/scripts/lib/candidate-install.sh"
+        if CODEX_PROMOTION_TEST_FAIL_EXCHANGE=1 \
+            promote_candidate_install "$workspace/candidate" "$workspace/final"; then
+            fail "Expected simulated unsupported atomic exchange"
+        fi
+        [ "$(cat "$workspace/final/version")" = "old" ] || fail "Unsupported exchange changed the current app"
+        [ "$(cat "$workspace/candidate/version")" = "new" ] || fail "Unsupported exchange changed the candidate"
+    )
+
+    rm -rf "$workspace/final" "$workspace/candidate" "$workspace"/final.backup-* "$workspace"/.final.promotion.json
+    mkdir -p "$workspace/candidate"
+    printf '%s' "new" >"$workspace/candidate/version"
+    (
+        info() { :; }
+        warn() { :; }
+        error() { echo "$*" >&2; return 1; }
+        assert_install_target_not_running() { :; }
+        # shellcheck source=scripts/lib/candidate-install.sh
+        . "$REPO_DIR/scripts/lib/candidate-install.sh"
+        promote_candidate_install "$workspace/candidate" "$workspace/final"
+        [ "$(cat "$workspace/final/version")" = "new" ] || fail "Expected first install to use an atomic rename"
+        [ -z "$PROMOTED_BACKUP_APP_DIR" ] || fail "First install must not report a backup"
+    )
+}
+
+test_candidate_promotion_refuses_a_running_final_app() {
+    info "Checking user-local promotion cannot replace a running app"
+    local workspace="$TMP_DIR/candidate-running-app"
+    local electron_pid
+    mkdir -p "$workspace/final" "$workspace/candidate"
+    cp "$BASH" "$workspace/final/electron"
+    printf '%s' "old" >"$workspace/final/version"
+    printf '%s' "new" >"$workspace/candidate/version"
+    "$workspace/final/electron" --noprofile --norc -c \
+        'trap "exit 0" TERM INT; while :; do sleep 0.1; done' &
+    electron_pid=$!
+    while [ ! -e "/proc/$electron_pid/exe" ]; do sleep 0.01; done
+
+    (
+        info() { :; }
+        warn() { :; }
+        error() { echo "$*" >&2; return 1; }
+        CODEX_APP_ID="codex-desktop-test"
+        INSTALL_DIR="$workspace/final"
+        # shellcheck source=scripts/lib/process-detection.sh
+        . "$REPO_DIR/scripts/lib/process-detection.sh"
+        # shellcheck source=scripts/lib/candidate-install.sh
+        . "$REPO_DIR/scripts/lib/candidate-install.sh"
+        if promote_candidate_install "$workspace/candidate" "$workspace/final"; then
+            fail "Promotion unexpectedly replaced a running app"
+        fi
+    )
+    [ "$(cat "$workspace/final/version")" = "old" ] || fail "Running app promotion changed the final directory"
+    [ "$(cat "$workspace/candidate/version")" = "new" ] || fail "Running app promotion changed the candidate"
+    [ ! -e "$workspace/.final.promotion.json" ] || fail "Running app refusal must happen before journal creation"
+
+    kill "$electron_pid"
+    wait "$electron_pid" 2>/dev/null || true
+    (
+        info() { :; }
+        warn() { :; }
+        error() { echo "$*" >&2; exit 1; }
+        CODEX_APP_ID="codex-desktop-test"
+        INSTALL_DIR="$workspace/final"
+        . "$REPO_DIR/scripts/lib/process-detection.sh"
+        . "$REPO_DIR/scripts/lib/candidate-install.sh"
+        promote_candidate_install "$workspace/candidate" "$workspace/final"
+    )
+    [ "$(cat "$workspace/final/version")" = "new" ] || fail "Promotion did not succeed after the app exited"
+}
+
+test_candidate_backup_retention_is_bounded() {
+    info "Checking promotion retains only the immediate previous app backup"
+    local workspace="$TMP_DIR/candidate-backup-retention"
+    local managed_count=0
+    local path name suffix
+    mkdir -p "$workspace/final" "$workspace/candidate"
+    printf '%s' "v1" >"$workspace/final/version"
+    printf '%s' "v2" >"$workspace/candidate/version"
+
+    (
+        info() { :; }
+        warn() { :; }
+        error() { echo "$*" >&2; exit 1; }
+        assert_install_target_not_running() { :; }
+        . "$REPO_DIR/scripts/lib/candidate-install.sh"
+        promote_candidate_install "$workspace/candidate" "$workspace/final"
+    )
+
+    mkdir -p "$workspace/final.backup-20200101010101/nested" "$workspace/final.backup-manual"
+    printf '%s' "stale" >"$workspace/final.backup-20200101010101/version"
+    chmod 0555 "$workspace/final.backup-20200101010101" "$workspace/final.backup-20200101010101/nested"
+    printf '%s' "manual" >"$workspace/final.backup-20200101010103"
+    mkdir -p "$workspace/symlink-target"
+    ln -s "$workspace/symlink-target" "$workspace/final.backup-20200101010102"
+    mkdir -p "$workspace/candidate"
+    printf '%s' "v3" >"$workspace/candidate/version"
+
+    (
+        info() { :; }
+        warn() { :; }
+        error() { echo "$*" >&2; exit 1; }
+        assert_install_target_not_running() { :; }
+        . "$REPO_DIR/scripts/lib/candidate-install.sh"
+        promote_candidate_install "$workspace/candidate" "$workspace/final"
+    )
+
+    for path in "$workspace"/final.backup-*; do
+        [ -d "$path" ] || continue
+        [ ! -L "$path" ] || continue
+        name="$(basename "$path")"
+        suffix="${name#final.backup-}"
+        [[ "$suffix" =~ ^[0-9]{14}(-[1-9][0-9]*)?$ ]] || continue
+        managed_count=$((managed_count + 1))
+        [ "$(cat "$path/version")" = "v2" ] || fail "Retention kept a backup other than the immediate previous app"
+    done
+    [ "$managed_count" -eq 1 ] || fail "Expected exactly one managed app backup, found $managed_count"
+    [ -L "$workspace/final.backup-20200101010102" ] || fail "Managed cleanup removed an exact-name symlink"
+    [ -f "$workspace/final.backup-20200101010103" ] || fail "Managed cleanup removed an exact-name file"
+    [ -d "$workspace/final.backup-manual" ] || fail "Managed cleanup removed a manually named directory"
+}
+
+test_candidate_promotion_recovers_after_sigkill() {
+    info "Checking interrupted candidate promotion keeps the app available and recovers its backup"
+    local workspace="$TMP_DIR/candidate-promotion-interruption"
+    local pause_file="$workspace/exchanged"
+    local promotion_pid
+    local recovered_backup
+    mkdir -p "$workspace/final" "$workspace/candidate"
+    mkdir -p "$workspace/final.backup-20200101010101"
+    printf '%s' "stale" >"$workspace/final.backup-20200101010101/version"
+    printf '%s' "old" >"$workspace/final/version"
+    printf '%s' "new" >"$workspace/candidate/version"
+
+    (
+        info() { :; }
+        warn() { :; }
+        error() { echo "$*" >&2; exit 1; }
+        assert_install_target_not_running() { :; }
+        # shellcheck source=scripts/lib/candidate-install.sh
+        . "$REPO_DIR/scripts/lib/candidate-install.sh"
+        CODEX_PROMOTION_TEST_PAUSE_FILE="$pause_file" \
+            promote_candidate_install "$workspace/candidate" "$workspace/final"
+    ) &
+    promotion_pid=$!
+    while [ ! -e "$pause_file" ]; do
+        kill -0 "$promotion_pid" 2>/dev/null || fail "Promotion exited before the post-exchange pause"
+        sleep 0.01
+    done
+
+    [ "$(cat "$workspace/final/version")" = "new" ] || fail "Canonical app path disappeared or did not contain the accepted app"
+    kill -KILL "$promotion_pid"
+    wait "$promotion_pid" 2>/dev/null || true
+    [ "$(cat "$workspace/final/version")" = "new" ] || fail "SIGKILL left the canonical app unavailable"
+    [ -f "$workspace/.final.promotion.json" ] || fail "Expected durable recovery journal after SIGKILL"
+
+    (
+        info() { :; }
+        warn() { :; }
+        error() { echo "$*" >&2; exit 1; }
+        # shellcheck source=scripts/lib/candidate-install.sh
+        . "$REPO_DIR/scripts/lib/candidate-install.sh"
+        recover_pending_candidate_promotion "$workspace/final"
+    )
+    recovered_backup="$(find "$workspace" -maxdepth 1 -type d -name 'final.backup-*' -print -quit)"
+    [ -n "$recovered_backup" ] || fail "Expected interrupted promotion recovery to create the backup"
+    [ "$(cat "$recovered_backup/version")" = "old" ] || fail "Recovered backup did not preserve the previous app"
+    [ ! -e "$workspace/.final.promotion.json" ] || fail "Expected recovery to clear the promotion journal"
+    [ ! -e "$workspace/final/.codex-promotion-transaction" ] || fail "Expected recovery to clear the transaction marker"
+    [ "$(find "$workspace" -maxdepth 1 -type d -name 'final.backup-*' | wc -l)" -eq 1 ] \
+        || fail "Interrupted recovery must retain only the recovered previous app"
+}
+
+test_candidate_backup_cleanup_retries_after_failure() {
+    info "Checking backup cleanup failure is fail-soft and retried"
+    local workspace="$TMP_DIR/candidate-backup-cleanup-retry"
+    mkdir -p "$workspace/final" "$workspace/candidate" "$workspace/final.backup-20200101010101"
+    printf '%s' "v1" >"$workspace/final/version"
+    printf '%s' "v2" >"$workspace/candidate/version"
+    printf '%s' "stale" >"$workspace/final.backup-20200101010101/version"
+
+    (
+        info() { :; }
+        warn() { :; }
+        error() { echo "$*" >&2; exit 1; }
+        assert_install_target_not_running() { :; }
+        . "$REPO_DIR/scripts/lib/candidate-install.sh"
+        CODEX_PROMOTION_TEST_FAIL_BACKUP_CLEANUP=1 \
+            promote_candidate_install "$workspace/candidate" "$workspace/final"
+    )
+    [ "$(cat "$workspace/final/version")" = "v2" ] || fail "Cleanup failure rolled back the accepted app"
+    [ "$(find "$workspace" -maxdepth 1 -type d -name 'final.backup-*' | wc -l)" -gt 1 ] \
+        || fail "Simulated cleanup failure did not leave work for retry"
+
+    (
+        info() { :; }
+        warn() { :; }
+        error() { echo "$*" >&2; exit 1; }
+        . "$REPO_DIR/scripts/lib/candidate-install.sh"
+        recover_pending_candidate_promotion "$workspace/final"
+    )
+    [ "$(find "$workspace" -maxdepth 1 -type d -name 'final.backup-*' | wc -l)" -eq 1 ] \
+        || fail "Next recovery did not retry managed backup cleanup"
+}
+
+test_user_local_updates_preserve_the_running_app_gate() {
+    info "Checking automated user-local updates cannot inherit the running-app override"
+    assert_contains "$REPO_DIR/contrib/user-local-install/files/.local/bin/codex-desktop-update" "CODEX_INSTALL_ALLOW_RUNNING=0"
+    assert_not_contains "$REPO_DIR/contrib/user-local-install/files/.local/bin/codex-desktop-update" "CODEX_INSTALL_ALLOW_RUNNING=1"
+    assert_contains "$REPO_DIR/updater/src/wrapper_apply.rs" '.env("CODEX_INSTALL_ALLOW_RUNNING", "0")'
+    assert_not_contains "$REPO_DIR/updater/src/wrapper_apply.rs" '.env("CODEX_INSTALL_ALLOW_RUNNING", "1")'
+}
+
+test_candidate_promotion_is_serialized() {
+    info "Checking accepted candidate promotion is serialized per target"
+    local workspace="$TMP_DIR/candidate-promotion-lock"
+    local candidate="$workspace/candidate"
+    local final="$workspace/final"
+    local lock_file="$workspace/.final.promotion.lock"
+    local release_fifo="$workspace/release"
+    mkdir -p "$candidate"
+    printf '%s\n' "new" >"$candidate/version"
+    mkfifo "$release_fifo"
+
+    (
+        exec 8>"$lock_file"
+        flock 8
+        touch "$workspace/locked"
+        read -r _ <"$release_fifo"
+    ) &
+    local holder_pid=$!
+    while [ ! -f "$workspace/locked" ]; do sleep 0.01; done
+
+    (
+        error() { echo "[test][ERROR] $*" >&2; return 1; }
+        info() { :; }
+        warn() { :; }
+        assert_install_target_not_running() { :; }
+        # shellcheck source=scripts/lib/candidate-install.sh
+        . "$REPO_DIR/scripts/lib/candidate-install.sh"
+        promote_candidate_install "$candidate" "$final"
+    ) &
+    local promotion_pid=$!
+    sleep 0.1
+    [ -d "$candidate" ] || fail "Promotion advanced while another process held the target lock"
+    printf '%s\n' "release" >"$release_fifo"
+    wait "$holder_pid"
+    wait "$promotion_pid"
+    [ "$(cat "$final/version")" = "new" ] || fail "Serialized promotion did not install the candidate"
+}
+
+test_transactional_install_reenters_with_current_bash() {
+    info "Checking transactional install re-entry uses the active Bash binary"
+    assert_contains "$REPO_DIR/install.sh" '"\$BASH" "\$SCRIPT_DIR/install.sh" "\${original_args\[@\]}"'
+}
+
+test_transactional_install_uses_managed_node_and_isolated_reports() {
+    info "Checking transactional acceptance uses managed Node and isolated reports"
+    assert_contains "$REPO_DIR/install.sh" 'CODEX_ACCEPTANCE_NODE="\$CODEX_MANAGED_NODE_RUNTIME_DIR/bin/node"'
+    assert_contains "$REPO_DIR/install.sh" 'report_dir="\$report_base/transactions/\$transaction_id"'
+    assert_contains "$REPO_DIR/install.sh" '"\$CODEX_ACCEPTANCE_NODE" "\$SCRIPT_DIR/scripts/validate-upstream-dmg.js"'
+}
+
+test_installer_cleanup_handles_readonly_trees() {
+    info "Checking installer cleanup handles immutable-source directory modes"
+    local workspace="$TMP_DIR/readonly-installer-cleanup"
+    local work_dir="$workspace/work"
+    mkdir -p "$work_dir/runtime/lib"
+    printf '%s\n' "runtime" >"$work_dir/runtime/lib/node"
+    chmod 0555 "$work_dir" "$work_dir/runtime" "$work_dir/runtime/lib"
+    (
+        WORK_DIR="$work_dir"
+        # shellcheck source=scripts/lib/install-helpers.sh
+        . "$REPO_DIR/scripts/lib/install-helpers.sh"
+        cleanup
+        trap - EXIT ERR
+    )
+    [ ! -e "$work_dir" ] || fail "Expected cleanup to remove a read-only copied tree"
 }
 
 test_native_shortcut_targets_compose_existing_flows() {
@@ -4394,6 +4726,78 @@ test_launcher_extra_bundled_plugin_cache_concurrent_destination() {
     assert_contains "$backup_plugin/content.txt" "initial"
 }
 
+test_launcher_marketplace_metadata_atomic_staging() (
+    info "Checking atomic bundled marketplace metadata staging"
+    local workspace="$TMP_DIR/launcher-marketplace-metadata"
+    local app_dir="$workspace/app"
+    local codex_home="$workspace/codex-home"
+    local source_marketplace="$app_dir/resources/plugins/openai-bundled/.agents/plugins/marketplace.json"
+    local target_dir="$codex_home/.tmp/bundled-marketplaces/openai-bundled/.agents/plugins"
+    local target_marketplace="$target_dir/marketplace.json"
+    local function_file="$workspace/stage-function.sh"
+    local failing_command
+    local observed_temp
+    local observed_target
+
+    mkdir -p "$(dirname "$source_marketplace")" "$target_dir"
+    printf '%s\n' 'new metadata' > "$source_marketplace"
+    awk '/^stage_bundled_marketplace_metadata\(\) \{/{copy=1} copy{print} copy && /^}/{exit}' \
+        "$REPO_DIR/launcher/start.sh.template" > "$function_file"
+    # shellcheck source=/dev/null
+    source "$function_file"
+    SCRIPT_DIR="$app_dir"
+    CODEX_HOME="$codex_home"
+
+    for failing_command in cp chmod mv; do
+        printf '%s\n' 'existing metadata' > "$target_marketplace"
+        observed_temp=""
+        observed_target=""
+        cp() {
+            observed_temp="$2"
+            [ "$failing_command" != "cp" ] || return 1
+            command cp "$@"
+        }
+        chmod() {
+            [ "$failing_command" != "chmod" ] || return 1
+            command chmod "$@"
+        }
+        mv() {
+            observed_temp="${@: -2:1}"
+            observed_target="${@: -1}"
+            [ "$failing_command" != "mv" ] || return 1
+            command mv "$@"
+        }
+
+        stage_bundled_marketplace_metadata
+
+        assert_contains "$target_marketplace" "existing metadata"
+        [ "$(dirname "$observed_temp")" = "$target_dir" ] \
+            || fail "Marketplace metadata temp must be created beside the destination"
+        [ -z "$(find "$target_dir" -maxdepth 1 -type f -name '.marketplace.json.tmp.*' -print -quit)" ] \
+            || fail "Failed marketplace metadata staging must clean its temporary file"
+        if [ "$failing_command" = "mv" ]; then
+            [ "$observed_target" = "$target_marketplace" ] \
+                || fail "Marketplace metadata staging must atomically replace the final target"
+        fi
+        unset -f cp chmod mv
+    done
+
+    stage_bundled_marketplace_metadata
+    assert_contains "$target_marketplace" "new metadata"
+    [ -z "$(find "$target_dir" -maxdepth 1 -type f -name '.marketplace.json.tmp.*' -print -quit)" ] \
+        || fail "Successful marketplace metadata staging must leave no temporary file"
+
+    rm -f "$target_marketplace"
+    mkdir -p "$workspace/symlink-target"
+    ln -s "$workspace/symlink-target" "$target_marketplace"
+    stage_bundled_marketplace_metadata
+    [ ! -L "$target_marketplace" ] \
+        || fail "Marketplace metadata staging must replace a destination symlink"
+    assert_contains "$target_marketplace" "new metadata"
+    [ -z "$(find "$workspace/symlink-target" -mindepth 1 -print -quit)" ] \
+        || fail "Marketplace metadata staging must not follow a destination directory symlink"
+)
+
 test_launcher_template_sanity() {
     info "Checking launcher template markers"
     assert_contains "$REPO_DIR/install.sh" 'DEFAULT_CODEX_WEBVIEW_PORT=5175'
@@ -4587,15 +4991,20 @@ if "using_second_instance_handoff" not in source or "needs_cold_start" not in so
     raise SystemExit("launcher must have an explicit second-instance handoff mode")
 if "second_instance_handoff_ready" not in runtime_body:
     raise SystemExit("second-instance handoff must skip cold-start setup")
-if "clear_bundled_marketplace_tmp_cache\nmonitor_bundled_marketplace_tmp_permissions\nreconcile_runtime_state" in runtime_body:
+if "clear_bundled_marketplace_tmp_cache\nreconcile_runtime_state" in runtime_body:
     raise SystemExit("warm-start path must not clear bundled marketplace temp cache")
-if not re.search(r'if needs_cold_start; then\s+log_phase "cold_start_cache_sync_start"\s+clear_bundled_marketplace_tmp_cache.*?monitor_bundled_marketplace_tmp_permissions.*?stage_bundled_marketplace_metadata.*?sync_browser_use_bundled_plugin_cache &.*?sync_chrome_bundled_plugin_cache &.*?sync_computer_use_bundled_plugin_cache &.*?sync_read_aloud_bundled_plugin_cache &.*?sync_extra_bundled_plugin_cache &.*?run_cold_start_hooks.*?log_phase "cold_start_hooks_dispatched"\s+await_webview_server_ready\s+fi', runtime_body, re.S):
+if not re.search(r'if needs_cold_start; then\s+log_phase "cold_start_cache_sync_start"\s+clear_bundled_marketplace_tmp_cache.*?stage_bundled_marketplace_metadata.*?sync_browser_use_bundled_plugin_cache &.*?sync_chrome_bundled_plugin_cache &.*?sync_computer_use_bundled_plugin_cache &.*?sync_read_aloud_bundled_plugin_cache &.*?sync_extra_bundled_plugin_cache &.*?run_cold_start_hooks.*?log_phase "cold_start_hooks_dispatched"\s+await_webview_server_ready\s+fi', runtime_body, re.S):
     raise SystemExit("bundled marketplace cleanup, staged metadata, concurrent plugin syncs, cold-start hooks, and the webview readiness wait must run only on cold start")
 # The plugin syncs run concurrently, so the shared marketplace.json is staged
-# exactly once beforehand instead of racing rm+cp per sync, and every sync is
-# awaited before cold-start hooks so the app never sees a partial cache.
-if source.count('rm -f "$marketplace_plugins_dir/marketplace.json"') != 1:
-    raise SystemExit("bundled marketplace metadata must be staged exactly once, not per plugin sync")
+# exactly once beforehand and every sync is awaited before cold-start hooks.
+if source.count('\n    stage_bundled_marketplace_metadata\n') != 1:
+    raise SystemExit("bundled marketplace metadata must be staged exactly once")
+if 'rm -f "$marketplace_plugins_dir/marketplace.json"' in source:
+    raise SystemExit("bundled marketplace metadata must not delete the live target before copying")
+if 'mktemp "$marketplace_plugins_dir/.marketplace.json.tmp.XXXXXX"' not in source:
+    raise SystemExit("bundled marketplace metadata temp must be unique and destination-adjacent")
+if 'mv -fT -- "$marketplace_temp" "$marketplace_target"' not in source:
+    raise SystemExit("bundled marketplace metadata must atomically replace the live target")
 for sync_pid_var in ("SYNC_BROWSER_USE_PID", "SYNC_CHROME_PID", "SYNC_COMPUTER_USE_PID", "SYNC_READ_ALOUD_PID", "SYNC_EXTRA_PID"):
     if 'wait "$' + sync_pid_var + '"' not in runtime_body:
         raise SystemExit(f"cold start must await concurrent plugin sync {sync_pid_var}")
@@ -5245,7 +5654,7 @@ EOF
     assert_contains "$REPO_DIR/launcher/start.sh.template" "sync_read_aloud_bundled_plugin_cache"
     assert_contains "$REPO_DIR/launcher/start.sh.template" "make_tree_owner_writable"
     assert_contains "$REPO_DIR/launcher/start.sh.template" "clear_bundled_marketplace_tmp_cache"
-    assert_contains "$REPO_DIR/launcher/start.sh.template" "monitor_bundled_marketplace_tmp_permissions"
+    assert_not_contains "$REPO_DIR/launcher/start.sh.template" "monitor_bundled_marketplace_tmp_permissions"
     assert_contains "$REPO_DIR/launcher/start.sh.template" "extension-id.json"
     assert_contains "$REPO_DIR/launcher/start.sh.template" ".config/BraveSoftware/Brave-Browser/NativeMessagingHosts"
     assert_contains "$REPO_DIR/launcher/start.sh.template" ".config/chromium/NativeMessagingHosts"
@@ -5876,6 +6285,7 @@ test_browser_plugin_renamed_upstream_staging() {
     assert_not_contains "$browser_dir/scripts/browser-client.mjs" "let e=import.meta.__codexNativePipe;return"
     assert_contains "$browser_dir/scripts/browser-client.mjs" "codexLinuxSiteStatusAllowlistFallback"
     assert_contains "$browser_dir/scripts/browser-client.mjs" "codexLinuxFileUrlPolicy"
+    assert_contains "$browser_dir/scripts/browser-client.mjs" "codexLinuxIabSocketScope"
     assert_contains "$browser_dir/scripts/browser-client.mjs" 'protocol==="file:"'
     assert_not_contains "$browser_dir/scripts/browser-client.mjs" 'protocol==="data:"'
     assert_contains "$marketplace" '"name": "browser"'
@@ -6226,22 +6636,14 @@ JS
     cat > "$chrome_dir/skills/control-chrome/SKILL.md" <<'MD'
 # Chrome
 
-```js
-const { setupBrowserRuntime } = await import("<plugin root>/scripts/browser-client.mjs");
-await setupBrowserRuntime({ globals: globalThis });
-globalThis.browser = await agent.browsers.get("extension");
-nodeRepl.write(await browser.documentation());
-```
-
 Use the browser bound to `browser` for tasks in this skill.
 MD
     cat > "$chrome_dir/scripts/extension-id.json" <<'JSON'
 {"extensionId":"hehggadaopoacecdllhhajmbjkdcmajg","extensionHostName":"com.openai.codexextension"}
 JSON
     cat > "$chrome_dir/scripts/browser-client.mjs" <<'JS'
-import{readdir as ZI}from"node:fs/promises";import L7,{platform as XI}from"node:os";import QI from"node:path";import{readFile as P7}from"fs/promises";import{resolve as D7}from"path";import{resolve as S7}from"path";import{homedir as v7,platform as E7}from"os";var Cd=S7(v7(),E7()==="win32"?"AppData\\Local\\Google\\Chrome\\User Data":"Library/Application Support/Google/Chrome");import{ClassicLevel as C7}from"./node_modules/classic-level.mjs";import{resolve as bg}from"path";import{tmpdir as T7}from"os";import{cp as A7,mkdtemp as I7,rm as HI}from"fs/promises";import{existsSync as k7}from"fs";var VI=async(e,t)=>{let r=bg(Cd,e,"Local Extension Settings",t);if(!k7(r))return null;let n=await I7(bg(R7(),"codex"));await A7(r,n,{recursive:!0}),await HI(bg(n,"LOCK"));let o=new C7(n,{createIfMissing:!1,keyEncoding:"utf8",valueEncoding:"utf8"});try{await o.open();let i=await o.get("extensionInstanceId");if(!i)return null;let s=JSON.parse(i);return typeof s!="string"?null:s}finally{await o.close(),await HI(n,{force:!0,recursive:!0})}},R7=()=>"nodeRepl"in globalThis&&globalThis.nodeRepl?globalThis.nodeRepl.tmpDir:T7();var GI=async e=>{if(e.type!=="extension"||!e.metadata?.extensionInstanceId||!e.metadata.extensionId)return e;let t=await N7(e.metadata.extensionId,e.metadata.extensionInstanceId);return t?{...e,metadata:{...e.metadata,profileName:t.name,profileIsLastUsed:t.isLastUsed.toString(),profileOrdering:t.orderingIndex.toString()}}:e},N7=async(e,t)=>(await O7(e)).find(o=>o.instanceId===t)||null,O7=async e=>{let t=await M7();return await Promise.all(t.map(async r=>({...r,instanceId:await VI(r.id,e).catch(n=>(le(n),null))})))},M7=async()=>{let e=D7(Cd,"Local State"),t=JSON.parse(await P7(e,"utf8"));return t.profile.profiles_order.map((r,n)=>{let o=t.profile.info_cache[r];return o?{id:r,name:o.name,isLastUsed:t.profile.last_used===r,orderingIndex:n,avatarUrl:o.avatar_icon}:null}).filter(r=>!!r)};
-var U7=5e3,_g=__(L7.platform()),j7=async(e,{codexSessionId:t})=>{let r=tl(p_),n=e.filter(i=>i.info.type==="iab"),o=q7(n,t,r);return await Promise.all(n.filter(i=>!o.includes(i)).map(async({api:i})=>i.close())),[...e.filter(i=>i.info.type!=="iab"),...o]},q7=(e,t,r)=>t==null?[]:e.filter(n=>n.info.metadata?.codexSessionId===t&&(r==null||n.info.metadata.codexAppBuildFlavor===r)),ek=async()=>{};
-function og(e){return e}function ig(e){return e==="extension"||e==="iab"||e==="cdp"}function li(e){return e}function KI(e){return e}class Id{async getBrowsers(){return[]}async get(e){return e}}function tI({browserId:e,clientInfo:t,requestedBrowserId:r}){return ig(r)?og(t.type)===r:e===r}function ld(){return null}async function mwe({globals:e}){let r=new Id,n=new Map(),l={browser_id:"extension"};if(ig(l.browser_id)){let _=li(l.browser_id);KI(_)}let p=await r.get(l.browser_id),f=n.get(p.api);return f}
+const browserPreference={};function preferredWindowIdFor(){}function getForUrl(){}const extensionInstanceId=null;
+var Cb=kE(hV.platform()),EV=()=>_P()==="win32"?TV():CV(),CV=async()=>(await yP(Cb)).map(e=>wP.resolve(Cb,e)),TV=async()=>[];
 function lu(e){let t=globalThis.nodeRepl?.env[e];return typeof t=="string"?t:void 0}
 function Me(){let e=globalThis.nodeRepl;return e?.config==null?void 0:e}
 import{platform as yT}from"node:os";function eh(){return"privileged native pipe bridge is not available; browser-client is not trusted"}function th(){let e=globalThis.nodeRepl?.nativePipe;return e==null||typeof e.createConnection!="function"?null:e}var ml=class e{constructor(t){this.socket=t}static async create(t){let r=th();if(r!=null){let n=await r.createConnection(t);return new e(n)}throw new Error(eh())}};
@@ -6419,15 +6821,9 @@ test_chrome_plugin_staging() {
     assert_contains "$chrome_dir/scripts/open-chrome-window.js" "defaultBrowser ==="
     assert_contains "$chrome_dir/scripts/open-chrome-window.js" "resolveChromeProfileDirectoryFromRunningProcess"
     assert_contains "$chrome_dir/scripts/open-chrome-window.js" "defaultLinuxUserDataDirectoryForCommand"
-    assert_contains "$chrome_dir/scripts/browser-client.mjs" "codexLinuxChromeUserDataDirectories"
-    assert_contains "$chrome_dir/scripts/browser-client.mjs" '"BraveSoftware","Brave-Browser"'
-    assert_contains "$chrome_dir/scripts/browser-client.mjs" '".config","chromium"'
-    assert_contains "$chrome_dir/scripts/browser-client.mjs" "instanceId:await VI(o.id,e,r)"
-    assert_contains "$chrome_dir/scripts/browser-client.mjs" "codexLinuxRankBrowserBackends"
-    assert_contains "$chrome_dir/scripts/browser-client.mjs" "codexLinuxFilterBrowserBackends"
-    assert_contains "$chrome_dir/scripts/browser-client.mjs" "codexLinuxCloseDiscardedBrowserBackends"
-    assert_contains "$chrome_dir/scripts/browser-client.mjs" "await codexLinuxFilterBrowserBackends"
-    assert_contains "$chrome_dir/scripts/browser-client.mjs" "getUserTabs()"
+    assert_contains "$chrome_dir/scripts/browser-client.mjs" "browserPreference"
+    assert_contains "$chrome_dir/scripts/browser-client.mjs" "preferredWindowIdFor"
+    assert_contains "$chrome_dir/scripts/browser-client.mjs" "getForUrl"
     assert_contains "$chrome_dir/scripts/browser-client.mjs" 'globalThis.nodeRepl?.env?.\[e\]'
     assert_not_contains "$chrome_dir/scripts/browser-client.mjs" 'globalThis.nodeRepl?.env\[e\]'
     assert_contains "$chrome_dir/scripts/browser-client.mjs" "codexLinuxBrowserUseConfigShim"
@@ -6442,52 +6838,11 @@ test_chrome_plugin_staging() {
     assert_not_contains "$chrome_dir/scripts/browser-client.mjs" "codexLinuxNativePipeFallback"
     assert_not_contains "$chrome_dir/scripts/browser-client.mjs" 'await import("node:net")'
     assert_contains "$chrome_dir/scripts/browser-client.mjs" "codexLinuxSiteStatusAllowlistFallback"
-    assert_contains "$chrome_dir/skills/control-chrome/SKILL.md" "activeSummaries"
-    assert_contains "$chrome_dir/skills/control-chrome/SKILL.md" "No active Chrome user tabs"
+    assert_not_contains "$chrome_dir/scripts/browser-client.mjs" "codexLinuxIabSocketScope"
     assert_contains "$chrome_dir/skills/control-chrome/SKILL.md" "agent.browsers.list()"
     assert_contains "$chrome_dir/skills/control-chrome/SKILL.md" "browser.tabs.new()"
-    assert_contains "$chrome_dir/skills/control-chrome/SKILL.md" "tabs: Array.isArray(tabs) ? tabs : \\[\\]"
-    assert_contains "$chrome_dir/skills/control-chrome/SKILL.md" "...(error ? { error } : {})"
-    assert_contains "$chrome_dir/skills/control-chrome/SKILL.md" "Promise.race"
-    assert_contains "$chrome_dir/skills/control-chrome/SKILL.md" "Chrome profile tab probe timed out"
-    assert_not_contains "$chrome_dir/skills/control-chrome/SKILL.md" "{ error: String(error) }"
-    assert_not_contains "$chrome_dir/skills/control-chrome/SKILL.md" 'globalThis.browser = await agent.browsers.get("extension");'
     assert_contains "$install_dir/resources/plugins/openai-bundled/.agents/plugins/marketplace.json" '"name": "chrome"'
     assert_contains "$output_log" "Chrome plugin staged from upstream DMG"
-}
-
-test_chrome_browser_client_profile_root_variants() {
-    info "Checking current Chrome browser-client profile root patch"
-    local workspace="$TMP_DIR/chrome-browser-client-profile-roots"
-    local chrome_dir="$workspace/chrome"
-    local browser_client="$chrome_dir/scripts/browser-client.mjs"
-    local patch_log="$workspace/current-browser-client.log"
-
-    mkdir -p "$chrome_dir/scripts"
-
-    cat > "$browser_client" <<'JS'
-import{readdir as ZI}from"node:fs/promises";import L7,{platform as XI}from"node:os";import QI from"node:path";import{readFile as P7}from"fs/promises";import{resolve as D7}from"path";import{resolve as S7}from"path";import{homedir as v7,platform as E7}from"os";var Cd=S7(v7(),E7()==="win32"?"AppData\\Local\\Google\\Chrome\\User Data":"Library/Application Support/Google/Chrome");import{ClassicLevel as C7}from"./node_modules/classic-level.mjs";import{resolve as bg}from"path";import{tmpdir as T7}from"os";import{cp as A7,mkdtemp as I7,rm as HI}from"fs/promises";import{existsSync as k7}from"fs";var VI=async(e,t)=>{let r=bg(Cd,e,"Local Extension Settings",t);if(!k7(r))return null;let n=await I7(bg(R7(),"codex"));await A7(r,n,{recursive:!0}),await HI(bg(n,"LOCK"));let o=new C7(n,{createIfMissing:!1,keyEncoding:"utf8",valueEncoding:"utf8"});try{await o.open();let i=await o.get("extensionInstanceId");if(!i)return null;let s=JSON.parse(i);return typeof s!="string"?null:s}finally{await o.close(),await HI(n,{force:!0,recursive:!0})}},R7=()=>"nodeRepl"in globalThis&&globalThis.nodeRepl?globalThis.nodeRepl.tmpDir:T7();var GI=async e=>e,N7=async(e,t)=>(await O7(e)).find(o=>o.instanceId===t)||null,O7=async e=>{let t=await M7();return await Promise.all(t.map(async r=>({...r,instanceId:await VI(r.id,e).catch(n=>(le(n),null))})))},M7=async()=>{let e=D7(Cd,"Local State"),t=JSON.parse(await P7(e,"utf8"));return t.profile.profiles_order.map((r,n)=>{let o=t.profile.info_cache[r];return o?{id:r,name:o.name,isLastUsed:t.profile.last_used===r,orderingIndex:n,avatarUrl:o.avatar_icon}:null}).filter(r=>!!r)};var U7=5e3,_g=__(L7.platform()),j7=async(e,{codexSessionId:t})=>{let r=tl(p_),n=e.filter(i=>i.info.type==="iab"),o=q7(n,t,r);return await Promise.all(n.filter(i=>!o.includes(i)).map(async({api:i})=>i.close())),[...e.filter(i=>i.info.type!=="iab"),...o]},q7=(e,t,r)=>t==null?[]:e.filter(n=>n.info.metadata?.codexSessionId===t&&(r==null||n.info.metadata.codexAppBuildFlavor===r)),ek=async()=>{};function og(e){return e}function ig(e){return e==="extension"||e==="iab"||e==="cdp"}function li(e){return e}function KI(e){return e}class Id{async getBrowsers(){return[]}async get(e){return e}}function tI({browserId:e,clientInfo:t,requestedBrowserId:r}){return ig(r)?og(t.type)===r:e===r}function ld(){return null}async function mwe({globals:e}){let r=new Id,n=new Map(),l={browser_id:"extension"};if(ig(l.browser_id)){let _=li(l.browser_id);KI(_)}let p=await r.get(l.browser_id),f=n.get(p.api);return f}
-JS
-    node "$REPO_DIR/scripts/lib/patch-chrome-plugin.js" "$chrome_dir" >"$patch_log" 2>&1
-    assert_not_contains "$patch_log" "browser-client.mjs missing patch target for Linux Chrome profile roots"
-    assert_not_contains "$patch_log" "browser-client.mjs missing patch target for Linux Chrome profile metadata lookup"
-    assert_not_contains "$patch_log" "browser-client.mjs missing patch target for Linux Chrome profile instance matching"
-    assert_not_contains "$patch_log" "browser-client.mjs missing patch target for Linux Chrome active profile backend ordering"
-    assert_not_contains "$patch_log" "browser-client.mjs missing patch target for Linux idle Chrome profile filtering"
-    assert_not_contains "$patch_log" "browser-client.mjs missing patch target for Linux ambiguous active Chrome extension alias guard"
-    assert_not_contains "$patch_log" "browser-client.mjs missing patch target for Linux ambiguous active Chrome extension alias check"
-    assert_contains "$browser_client" "codexLinuxChromeUserDataDirectories"
-    assert_contains "$browser_client" '"BraveSoftware","Brave-Browser"'
-    assert_contains "$browser_client" '".config","chromium"'
-    assert_contains "$browser_client" 'async(e,t,r=Cd)'
-    assert_contains "$browser_client" "instanceId:await VI(o.id,e,r)"
-    assert_contains "$browser_client" "codexLinuxRankBrowserBackends"
-    assert_contains "$browser_client" "codexLinuxFilterBrowserBackends"
-    assert_contains "$browser_client" "codexLinuxCloseDiscardedBrowserBackends"
-    assert_contains "$browser_client" "await codexLinuxFilterBrowserBackends"
-    assert_contains "$browser_client" "XI()"
-    assert_contains "$browser_client" "codexLinuxRejectAmbiguousBrowserAlias"
-    assert_contains "$browser_client" "codexLinuxRejectAmbiguousBrowserAlias(l.browser_id,await r.getBrowsers())"
 }
 
 test_chrome_marketplace_fallback_synthesis() {
@@ -6826,6 +7181,12 @@ NODE
     assert_occurrence_count "$extracted/.vite/build/main-test.js" 'if(process.platform===`linux`)return;e.once(`menu-will-show`' '1'
     assert_occurrence_count "$extracted/.vite/build/main-test.js" 'process.platform===`linux`&&!(typeof codexLinuxIsQuitInProgress===`function`&&codexLinuxIsQuitInProgress())&&this.setLinuxTrayContextMenu?.()' '1'
     assert_occurrence_count "$extracted/.vite/build/main-test.js" 'process.platform===`linux`&&(typeof codexLinuxIsTrayEnabled!==`function`||codexLinuxIsTrayEnabled()))&&oe' '1'
+    assert_contains "$extracted/.vite/build/main-test.js" 'codexLinuxRegisterTray=e=>(codexLinuxTray=e,e)'
+    assert_contains "$extracted/.vite/build/main-test.js" 'codexLinuxDestroyTray=()=>{if(process.platform!==`linux`)return;'
+    assert_contains "$extracted/.vite/build/main-test.js" 'codexLinuxMarkQuitInProgress=()=>{codexLinuxQuitInProgress=!0,codexLinuxDestroyTray()}'
+    assert_contains "$extracted/.vite/build/main-test.js" 'n.app.on(`before-quit`,()=>codexLinuxDestroyTray())'
+    assert_contains "$extracted/.vite/build/main-test.js" 'i=typeof codexLinuxRegisterTray===`function`?codexLinuxRegisterTray(new n.Tray(r.defaultIcon)):new n.Tray(r.defaultIcon)'
+    assert_not_contains "$extracted/.vite/build/main-test.js" 'codexLinuxTrayQuitDelayMs'
 }
 
 test_linux_explicit_quit_patch_smoke() {
@@ -6866,7 +7227,9 @@ JS
 const fs = require("fs");
 
 const source = fs.readFileSync(process.argv[2], "utf8");
-const helperSnippet = source.match(/let codexLinuxQuitInProgress=!1,[^;]*codexLinuxShouldBypassQuitPrompt=\(\)=>codexLinuxExplicitQuitApproved===!0,[^;]*codexLinuxIsQuitInProgress=\(\)=>codexLinuxQuitInProgress===!0;/)?.[0];
+const helperStart = source.indexOf("let codexLinuxTray=null");
+const helperEnd = source.indexOf(";n.app.on(`before-quit`,()=>codexLinuxDestroyTray())", helperStart) + 1;
+const helperSnippet = helperStart === -1 || helperEnd === 0 ? null : source.slice(helperStart, helperEnd);
 const traySnippet = source.match(/\{label:rB\(this\.appName\),click:\(\)=>\{typeof codexLinuxPrepareForExplicitQuit===`function`\?codexLinuxPrepareForExplicitQuit\(\):typeof codexLinuxMarkQuitInProgress===`function`&&codexLinuxMarkQuitInProgress\(\),n\.app\.quit\(\)\}\}/)?.[0];
 const quitAppSnippet = source.match(/if\(o\.type===`quit-app`\)\{typeof codexLinuxPrepareForExplicitQuit===`function`\?codexLinuxPrepareForExplicitQuit\(\):typeof codexLinuxMarkQuitInProgress===`function`&&codexLinuxMarkQuitInProgress\(\),n\.app\.quit\(\);return\}/)?.[0];
 const beforeQuitSnippet = source.match(/if\(\(typeof codexLinuxShouldBypassQuitPrompt===`function`&&codexLinuxShouldBypassQuitPrompt\(\)\)\|\|e\|\|i\.canQuitWithoutPrompt\(\)\|\|r\|\|!s&&!c\)\{process\.platform===`linux`&&typeof codexLinuxMarkQuitInProgress===`function`&&codexLinuxMarkQuitInProgress\(\),g=!0,a\.markAppQuitting\(\);return\}/)?.[0];
@@ -6985,6 +7348,7 @@ JS
 
     node "$REPO_DIR/scripts/patch-linux-window-ui.js" "$extracted" >"$output_log" 2>&1
     assert_file_exists "$extracted/webview/assets/linux-desktop-settings-linux.js"
+    assert_file_exists "$extracted/webview/assets/linux-settings-toggle-linux.js"
     [ ! -f "$extracted/webview/assets/keybinds-settings-linux.js" ] || fail "Old Keybinds settings asset should not be written for current native Keyboard Shortcuts"
     assert_contains "$extracted/webview/assets/linux-desktop-settings-linux.js" "function LinuxDesktopSettings"
     assert_contains "$extracted/webview/assets/linux-desktop-settings-linux.js" "Linux desktop"
@@ -6994,7 +7358,7 @@ JS
     assert_contains "$extracted/webview/assets/linux-desktop-settings-linux.js" "codex-linux-system-tray-enabled"
     assert_contains "$extracted/webview/assets/linux-desktop-settings-linux.js" "codex-linux-warm-start-enabled"
     assert_contains "$extracted/webview/assets/linux-desktop-settings-linux.js" "codex-linux-prompt-window-enabled"
-    assert_contains "$extracted/webview/assets/linux-desktop-settings-linux.js" ' as Toggle}from"./'
+    assert_contains "$extracted/webview/assets/linux-desktop-settings-linux.js" 'import{t as Toggle}from"./linux-settings-toggle-linux.js"'
     assert_not_contains "$extracted/webview/assets/linux-desktop-settings-linux.js" "function LinuxSwitch"
     assert_not_contains "$extracted/webview/assets/linux-desktop-settings-linux.js" "bg-token-text-primary"
     assert_not_contains "$extracted/webview/assets/linux-desktop-settings-linux.js" "translate-x-4"
@@ -8599,6 +8963,16 @@ main() {
     test_fresh_pinned_dmg_preserves_cached_dmg_metadata
     test_fresh_reuse_dmg_uses_cache_when_metadata_matches
     test_rebuild_candidate_uses_validated_default_dmg
+    test_candidate_install_is_transactional
+    test_candidate_promotion_refuses_a_running_final_app
+    test_candidate_backup_retention_is_bounded
+    test_candidate_promotion_recovers_after_sigkill
+    test_candidate_backup_cleanup_retries_after_failure
+    test_candidate_promotion_is_serialized
+    test_user_local_updates_preserve_the_running_app_gate
+    test_transactional_install_reenters_with_current_bash
+    test_transactional_install_uses_managed_node_and_isolated_reports
+    test_installer_cleanup_handles_readonly_trees
     test_native_shortcut_targets_compose_existing_flows
     test_fedora_dependency_bootstrap_installs_rpmbuild
     test_fedora_atomic_rpm_ostree_target_detection
@@ -8649,7 +9023,6 @@ main() {
     test_browser_use_node_repl_glibc_pidfd_patch_static
     test_browser_use_node_repl_ldd_output_compatibility
     test_chrome_plugin_staging
-    test_chrome_browser_client_profile_root_variants
     test_chrome_marketplace_fallback_synthesis
     test_chrome_native_host_manifest_writer
     test_launcher_managed_node_handles_unset_path
@@ -8657,6 +9030,7 @@ main() {
     test_launcher_extra_bundled_plugin_cache_rollback
     test_launcher_extra_bundled_plugin_cache_concurrent_destination
     test_launcher_rejects_missing_webview_entrypoint
+    test_launcher_marketplace_metadata_atomic_staging
     test_launcher_template_sanity
     test_launcher_cli_resolution_policy
     test_webview_server_cache_policy

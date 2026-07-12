@@ -94,3 +94,5 @@ codex-desktop-version
 - The helper scripts are copied into `~/.local/opt` and do not run from the git checkout directly.
 - The X11/XWayland preference is stored in `~/.config/codex-desktop-linux/user-local.env` and is preserved across updater refreshes.
 - The weekly timer runs `codex-desktop-update --quiet`. It is opt-in: pass `--enable-timer` to `install-user-local.sh` to activate it, or run `systemctl --user enable --now codex-desktop-update.timer` manually after install.
+- Automated rebuilds never bypass the running-app or DMG acceptance gates. They may build a candidate while ChatGPT Desktop is open, but promotion waits for the in-app after-exit flow or fails safely for a manual/timer run. Retry after closing the app.
+- A successful transactional update retains only the immediately previous app backup. Older exact managed backups are pruned; manually named paths, files, and symlinks are left alone.

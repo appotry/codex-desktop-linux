@@ -43,6 +43,14 @@ function optionalDriftFromReport(report) {
     .map(reportEntryFailure);
 }
 
+function enabledFeatureFailuresFromReport(report) {
+  const enabledFeatures = new Set(Array.isArray(report?.enabledFeatures) ? report.enabledFeatures : []);
+  return (report?.patches ?? [])
+    .filter((patch) => patch.sourceKind === "feature" && enabledFeatures.has(patch.featureId))
+    .filter((patch) => !SUCCESS_STATUSES.has(patch.status) && !NOT_APPLICABLE_STATUSES.has(patch.status))
+    .map((patch) => ({ ...reportEntryFailure(patch), featureId: patch.featureId }));
+}
+
 function createPatchReport() {
   return {
     generatedAt: new Date().toISOString(),
@@ -156,6 +164,7 @@ module.exports = {
   captureWarnings,
   createPatchReport,
   criticalFailuresFromReport,
+  enabledFeatureFailuresFromReport,
   isCriticalPolicy,
   optionalDriftFromReport,
   patchStatusFromChange,

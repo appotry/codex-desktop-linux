@@ -1,9 +1,6 @@
 "use strict";
 
 function applyLinuxQuitGuardPatch(currentSource) {
-  const quitGuardSuffix =
-    "let codexLinuxQuitInProgress=!1,codexLinuxExplicitQuitApproved=!1,codexLinuxExplicitQuitDrainTimeoutMs=3e3,codexLinuxMarkQuitInProgress=()=>{codexLinuxQuitInProgress=!0},codexLinuxPrepareForExplicitQuit=()=>{codexLinuxExplicitQuitApproved=!0,codexLinuxMarkQuitInProgress()},codexLinuxShouldBypassQuitPrompt=()=>codexLinuxExplicitQuitApproved===!0,codexLinuxIsQuitInProgress=()=>codexLinuxQuitInProgress===!0;";
-
   if (currentSource.includes("codexLinuxExplicitQuitApproved=!1")) {
     return currentSource;
   }
@@ -13,6 +10,9 @@ function applyLinuxQuitGuardPatch(currentSource) {
   const currentBundlerQuitGuardMatch = currentSource.match(currentBundlerQuitGuardNeedle);
   if (currentBundlerQuitGuardMatch != null) {
     const matchedPrefix = currentBundlerQuitGuardMatch[0];
+    const electronVar = currentBundlerQuitGuardMatch[1];
+    const quitGuardSuffix =
+      `let codexLinuxTray=null,codexLinuxRegisterTray=e=>(codexLinuxTray=e,e),codexLinuxDestroyTray=()=>{if(process.platform!==\`linux\`)return;let e=codexLinuxTray;codexLinuxTray=null;try{e?.destroy()}catch{}},codexLinuxQuitInProgress=!1,codexLinuxExplicitQuitApproved=!1,codexLinuxExplicitQuitDrainTimeoutMs=3e3,codexLinuxMarkQuitInProgress=()=>{codexLinuxQuitInProgress=!0,codexLinuxDestroyTray()},codexLinuxPrepareForExplicitQuit=()=>{codexLinuxExplicitQuitApproved=!0,codexLinuxMarkQuitInProgress()},codexLinuxShouldBypassQuitPrompt=()=>codexLinuxExplicitQuitApproved===!0,codexLinuxIsQuitInProgress=()=>codexLinuxQuitInProgress===!0;${electronVar}.app.on(\`before-quit\`,()=>codexLinuxDestroyTray());`;
     return currentSource.replace(matchedPrefix, `${matchedPrefix}${quitGuardSuffix}`);
   }
 

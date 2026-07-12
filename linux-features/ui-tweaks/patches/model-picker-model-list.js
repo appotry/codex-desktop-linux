@@ -1,9 +1,11 @@
 "use strict";
 
 const MODEL_PICKER_STATE_ASSET_PATTERN =
-  /^app-initial~app-main~new-thread-panel-page~appgen-library-page~hotkey-window-thread-page~ho~iufn7mg3-[^.]+\.js$/;
+  /^app-initial~app-main~page-[^.]+\.js$/;
+const MODEL_PICKER_ALLOWLIST_ASSET_PATTERN =
+  /^app-initial~app-main~new-thread-panel-page~onboarding-page~projects-index-page~appgen-libra~ggy53w99-[^.]+\.js$/;
 const MODEL_PICKER_MENU_ASSET_PATTERN =
-  /^app-initial~app-main~onboarding-page~hotkey-window-thread-page~quick-chat-window-page~chatg~k0ede4gb-[^.]+\.js$/;
+  /^app-initial~app-main~new-thread-panel-page~onboarding-page~projects-index-page~appgen-libra~lpb6mnim-[^.]+\.js$/;
 const SIMPLE_MENU_VIEW_PATTERN =
   /([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\(`composer-model-picker-menu-view-v1`,`simple`\)/;
 const ADVANCED_MENU_VIEW_PATTERN =
@@ -240,8 +242,8 @@ const descriptors = [
     phase: "webview-asset",
     order: 20_795,
     ciPolicy: "optional",
-    pattern: MODEL_PICKER_MENU_ASSET_PATTERN,
-    missingDescription: "composer model picker menu bundle",
+    pattern: MODEL_PICKER_ALLOWLIST_ASSET_PATTERN,
+    missingDescription: "composer model picker allowlist bundle",
     skipDescription: "ui-tweaks GPT-5.6 model allowlist patch",
     apply: (source, context = {}) =>
       applyGpt56AllowlistPatch(source, { ...context, warnOnMissingMarkers: true }),
@@ -280,6 +282,7 @@ module.exports = {
   GPT_56_ALLOWLIST_MARKER,
   INLINE_MODEL_LIST_RUNTIME_MARKER,
   MODEL_ALLOWLIST_MARKER,
+  MODEL_PICKER_ALLOWLIST_ASSET_PATTERN,
   MODEL_PICKER_MENU_ASSET_PATTERN,
   MODEL_PICKER_STATE_ASSET_PATTERN,
   MODEL_ROW_MARKER,

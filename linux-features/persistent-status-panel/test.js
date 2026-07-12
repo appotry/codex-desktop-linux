@@ -10,13 +10,15 @@ const test = require("node:test");
 const {
   loadLinuxFeaturePatchDescriptors,
 } = require("../../scripts/lib/linux-features.js");
+const { patchAssetFiles } = require("../../scripts/patches/lib/assets.js");
 const {
   STORAGE_KEY,
   applyPersistentStatusPanelPatch,
+  descriptors,
 } = require("./patch.js");
 
-const composerSource =
-  "function av(e){let t=(0,$.c)(26),{conversationId:n,threadId:r,rateLimit:i,onOpenChange:o}=e,s=Wt(),[c,l]=(0,Z.useState)(!1),p;t[0]===s&&(p=1);let b,x;t[10]===o?(b=t[11],x=t[12]):(b=async()=>{l(!0),o?.(!0)},x=[o]);let y=s.formatMessage({id:`composer.statusSlashCommand.description`});if(!c)return null;let C;t[18]===o?C=t[19]:(C=()=>{l(!1),o?.(!1)});return C}";
+const currentComposerSource =
+  "function nW(e){let t=(0,iW.c)(26),{conversationId:n,threadId:r,rateLimit:i,onOpenChange:a}=e,o=Wr(),[s,c]=(0,aW.useState)(!1),{activeMode:l}=vm(n),u=l?.settings.model??null,d=Pn(Bc,n),f;t[0]===d?f=t[1]:(f=nR(d),t[0]=d,t[1]=f);let y,b;t[10]===a?(y=t[11],b=t[12]):(y=async()=>{c(!0),a?.(!0)},b=[a],t[10]=a,t[11]=y,t[12]=b);let v=o.formatMessage({id:`composer.statusSlashCommand.description`,defaultMessage:`Show task id, context usage, and rate limits`,description:`Description for the status slash command`}),x={id:`status`,title:`Status`,description:v,requiresEmptyComposer:!1,Icon:rE,onSelect:y,dependencies:b};if(CS(x),!s)return null;let S;t[18]===a?S=t[19]:(S=()=>{c(!1),a?.(!1)},t[18]=a,t[19]=S);return FU({threadId:r,onClose:S})}";
 
 function captureWarns(fn) {
   const originalWarn = console.warn;
@@ -67,19 +69,42 @@ test("feature is disabled until selected", () => {
 });
 
 test("status panel preference survives component remounts", () => {
-  const patched = applyPersistentStatusPanelPatch(composerSource);
+  const patched = applyPersistentStatusPanelPatch(currentComposerSource);
 
-  assert.notEqual(patched, composerSource);
+  assert.notEqual(patched, currentComposerSource);
   assert.match(patched, new RegExp(`localStorage\\.getItem\\(\\\`${STORAGE_KEY}\\\`\\)`));
   assert.match(patched, new RegExp(`localStorage\\.setItem\\(\\\`${STORAGE_KEY}\\\`,\\\`1\\\`\\)`));
   assert.match(patched, new RegExp(`localStorage\\.removeItem\\(\\\`${STORAGE_KEY}\\\`\\)`));
   assert.equal(applyPersistentStatusPanelPatch(patched), patched);
 });
 
+test("descriptor patches the current app-initial composer status bundle", () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "persistent-status-panel-assets-"));
+  try {
+    const assetsDir = path.join(tempDir, "webview", "assets");
+    const assetPath = path.join(
+      assetsDir,
+      "app-initial~app-main~page-hSvsQcNf.js",
+    );
+    fs.mkdirSync(assetsDir, { recursive: true });
+    fs.writeFileSync(assetPath, currentComposerSource);
+
+    const result = patchAssetFiles(tempDir, descriptors[0].pattern, descriptors[0].apply, "missing");
+    const patched = fs.readFileSync(assetPath, "utf8");
+
+    assert.deepEqual(result, { matched: 1, changed: 1 });
+    assert.match(patched, new RegExp(`localStorage\\.getItem\\(\\\`${STORAGE_KEY}\\\`\\)`));
+    assert.match(patched, new RegExp(`localStorage\\.setItem\\(\\\`${STORAGE_KEY}\\\`,\\\`1\\\`\\)`));
+    assert.match(patched, new RegExp(`localStorage\\.removeItem\\(\\\`${STORAGE_KEY}\\\`\\)`));
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("ambiguous status panel handler needles are unchanged", () => {
-  const ambiguousSource = composerSource.replace(
-    "let y=s.formatMessage",
-    "let extraOpen=async()=>{l(!0),o?.(!0)},extraClose=()=>{l(!1),o?.(!1)},y=s.formatMessage",
+  const ambiguousSource = currentComposerSource.replace(
+    "let v=o.formatMessage",
+    "let extraOpen=async()=>{c(!0),a?.(!0)},extraClose=()=>{c(!1),a?.(!1)},v=o.formatMessage",
   );
 
   const { value: patched, warnings } = captureWarns(() =>
@@ -93,9 +118,9 @@ test("ambiguous status panel handler needles are unchanged", () => {
 });
 
 test("composer bundle with changed status state shape is unchanged", () => {
-  const changedStateSource = composerSource.replace(
-    "{conversationId:n,threadId:r,rateLimit:i,onOpenChange:o}=e,s=Wt(),[c,l]=(0,Z.useState)(!1),",
-    "{threadId:r,conversationId:n,rateLimit:i,onOpenChange:o}=e,s=Wt(),[c,l]=Z.useState(!1),",
+  const changedStateSource = currentComposerSource.replace(
+    "{conversationId:n,threadId:r,rateLimit:i,onOpenChange:a}=e,o=Wr(),[s,c]=(0,aW.useState)(!1),",
+    "{threadId:r,conversationId:n,rateLimit:i,onOpenChange:a}=e,o=Wr(),[s,c]=aW.useState(!1),",
   );
 
   const { value: patched, warnings } = captureWarns(() =>
@@ -108,11 +133,13 @@ test("composer bundle with changed status state shape is unchanged", () => {
   ]);
 });
 
-test("unknown composer bundle is unchanged", () => {
+test("target bundle without status marker is unchanged and warns", () => {
   const { value: patched, warnings } = captureWarns(() =>
     applyPersistentStatusPanelPatch("unrelated bundle"),
   );
 
   assert.equal(patched, "unrelated bundle");
-  assert.deepEqual(warnings, []);
+  assert.deepEqual(warnings, [
+    "WARN: Could not find Codex status panel bundle marker - skipping persistent status panel patch",
+  ]);
 });

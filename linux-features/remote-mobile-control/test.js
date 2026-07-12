@@ -33,7 +33,9 @@ const {
   applyLinuxRemoteMobileActiveStatusPatch,
   applyLinuxRemoteMobileAppServerRemoteControlPatch,
   applyLinuxRemoteMobileChromeBridgePatch,
+  applyLinuxRemoteMobileCompletedItemRecoveryPatch,
   applyLinuxRemoteMobileConversationHydrationPatch,
+  applyLinuxRemoteTerminalStatusRecoveryPatch,
   applyLinuxRemoteControlStatusReadGuardPatch,
   applyLinuxRemoteControlStatusWaitPatch,
   applyLinuxRemoteConnectionsRefreshPatch,
@@ -287,6 +289,28 @@ function syntheticAppServerManagerSignalsBundle() {
   ].join("");
 }
 
+function syntheticCompletedItemRecoveryBundle() {
+  return [
+    "class U{onNotification(e,t){let n={method:e,params:t};switch(n.method){case`item/completed`:{if(this.frameTextDeltaQueue.drainBefore(()=>{this.onNotification(`item/completed`,n.params)}))break;",
+    "let{item:e,threadId:t,turnId:r,completedAtMs:i}=n.params,a=qf(t);if(!this.conversations.get(a)){$.error(`Received item/completed for unknown conversation`,{safe:{conversationId:a},sensitive:{}});break}",
+    "this.updateConversationState(a,t=>{let n=e.type===`userMessage`?gI(t,r):r==null?uI(t):fI(t,e=>e.turnId===r);if(!n)return;aR(n);",
+    "let a=Jtt({item:e,threadsById:this.threadStore.threadsById,onCollabAgentToolCall:e=>{this.hydrateCollabThreads(e.receiverThreadIds)}}),o=a.type===`contextCompaction`?n.items.find(e=>e.type===`contextCompaction`&&e.id===a.id):null;",
+    "if(a.type===`commandExecution`){let e=a.durationMs==null?null:i-a.durationMs;e!=null&&(n.commandExecutionStartedAtMsById??={},n.commandExecutionStartedAtMsById[a.id]??=e)}",
+    "let s=FF(a.type===`contextCompaction`?{...a,completed:!0,source:o?.type===`contextCompaction`&&`source`in o?o.source:`automatic`}:a);",
+    "if(e.type===`userMessage`){let t=Put(n.items,e.content,n.turnId,n.turnStartedAtMs,!1);if(t!=null){t.status=`accepted`,HI(n,FF({type:`steered`,id:e.id}));return}HI(n,s);return}",
+    "if(e.type===`hookPrompt`){bP(n,s);return}",
+    "yV(e)&&(n.firstTurnWorkItemStartedAtMs=n.firstTurnWorkItemStartedAtMs??Date.now()),!(e.type!==`subAgentActivity`&&!LB(n,e.id,e.type))&&(e.type,bP(n,s))});break}}}}",
+  ].join("");
+}
+
+function syntheticRemoteTerminalStatusBundle() {
+  return [
+    "function LQt({hasInProgressSideChat:e,isResponseInProgress:t,latestTurnHasSystemError:n,resumeState:r,threadRuntimeStatus:i}){return e?`loading`:i?.type===`systemError`?`error`:i?.type===`active`?`loading`:r===`needs_resume`?`idle`:n?`error`:t===!0?`loading`:`idle`}",
+    "function RQt({pendingRequestType:e,requests:t,resumeState:n,threadRuntimeStatus:r}){return t==null||n==null?null:n===`needs_resume`?r?.type===`active`&&r.activeFlags.includes(`waitingOnApproval`)&&yi(t)?`approval`:r?.type===`active`&&r.activeFlags.includes(`waitingOnUserInput`)?`response`:null:Zr(e)?`approval`:e===`userInput`?`response`:null}",
+    "var IQt,AQt,OQt=e((()=>{G(),Lr(),Tt(),Ni(),kt(),IQt=s(V,(e,{get:t})=>{let n=t(rr,e);return LQt({hasInProgressSideChat:t(Qw,e),isResponseInProgress:t(ki,e),resumeState:t(si,e)??(n==null?null:`needs_resume`),threadRuntimeStatus:t(Or,e)??n?.threadRuntimeStatus??null,latestTurnHasSystemError:t(Ui,e)===!0})}),AQt=s(V,(e,{get:t})=>RQt({pendingRequestType:t(wr,e)?.type??null,requests:t(fi,e),resumeState:t(si,e),threadRuntimeStatus:t(Or,e)}))}))",
+  ].join("");
+}
+
 function syntheticAppServerManagerStatusBundle() {
   return [
     "var z={error(){}};",
@@ -348,6 +372,12 @@ function withTempFeatureRoot(enabled, fn) {
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+}
+
+function applyPatchTwice(patchFn, source, ...args) {
+  const patched = patchFn(source, ...args);
+  assert.equal(patchFn(patched, ...args), patched);
+  return patched;
 }
 
 function withFeatureRootEnv(root, fn) {
@@ -718,6 +748,8 @@ test("remote mobile control feature exposes opt-in main-bundle and webview patch
       "feature:remote-mobile-control:linux-remote-control-client-revoke-setup-reset",
       "feature:remote-mobile-control:linux-remote-connections-refresh",
       "feature:remote-mobile-control:linux-remote-mobile-conversation-hydration",
+      "feature:remote-mobile-control:linux-remote-mobile-completed-item-recovery",
+      "feature:remote-mobile-control:linux-remote-terminal-status-recovery",
       "feature:remote-mobile-control:linux-remote-control-status-read-guard",
       "feature:remote-mobile-control:linux-remote-control-status-wait",
       "feature:remote-mobile-control:linux-remote-control-enable-for-host-params",
@@ -730,6 +762,8 @@ test("remote mobile control feature exposes opt-in main-bundle and webview patch
       "main-bundle",
       "main-bundle",
       "extracted-app:post-webview",
+      "webview-asset",
+      "webview-asset",
       "webview-asset",
       "webview-asset",
       "webview-asset",
@@ -783,6 +817,21 @@ test("remote mobile control feature exposes opt-in main-bundle and webview patch
     assert.equal(hydrationDescriptor.pattern.test("app-server-manager-signals-test.js"), false);
     assert.equal(hydrationDescriptor.pattern.test("remote-connections-settings-fixture.js"), false);
     assert.equal(hydrationDescriptor.pattern.test(CURRENT_PROJECTLESS_REMOTE_TASK_ASSET), false);
+
+    const completedItemDescriptor = descriptors.find((descriptor) =>
+      descriptor.id === "feature:remote-mobile-control:linux-remote-mobile-completed-item-recovery"
+    );
+    assert.ok(completedItemDescriptor);
+    assert.equal(completedItemDescriptor.pattern.test(UNIFIED_REMOTE_CONVERSATION_ASSET), true);
+    assert.equal(completedItemDescriptor.pattern.test(OLD_APP_SERVER_MANAGER_ASSET), false);
+
+    const terminalStatusDescriptor = descriptors.find((descriptor) =>
+      descriptor.id === "feature:remote-mobile-control:linux-remote-terminal-status-recovery"
+    );
+    assert.ok(terminalStatusDescriptor);
+    assert.equal(terminalStatusDescriptor.pattern.test(UNIFIED_REMOTE_CONVERSATION_ASSET), true);
+    assert.equal(terminalStatusDescriptor.pattern.test(OLD_APP_SERVER_MANAGER_ASSET), false);
+    assert.equal(terminalStatusDescriptor.pattern.test("remote-connections-settings-fixture.js"), false);
 
     const loadGateDescriptor = descriptors.find((descriptor) =>
       descriptor.id === "feature:remote-mobile-control:linux-remote-control-load-gate"
@@ -2000,6 +2049,55 @@ test("Linux remote mobile conversation hydration patch warns when only part of t
   assert.ok(warnings.some((warning) => warning.includes("unknown turn/completed needle")));
 });
 
+test("remote mobile completed-item recovery restores a missing started item", () => {
+  const source = syntheticCompletedItemRecoveryBundle();
+  const patched = applyLinuxRemoteMobileCompletedItemRecoveryPatch(source);
+
+  assert.notEqual(patched, source);
+  assert.equal(applyLinuxRemoteMobileCompletedItemRecoveryPatch(patched), patched);
+  assert.match(patched, /codexLinuxCompletedItemExists=n\.items\.some\(e=>e\.id===s\.id\)/);
+  assert.match(
+    patched,
+    /if\(e\.type!==`subAgentActivity`&&codexLinuxCompletedItemExists&&!LB\(n,e\.id,e\.type\)\)return;bP\(n,s\)/,
+  );
+
+  const context = {};
+  vm.runInNewContext(
+    [
+      "let errors=[];",
+      "var $={error:(message,details)=>errors.push({message,details})};",
+      "function qf(e){return e}",
+      "function fI(e,t){return e.turns.find(t)}",
+      "function gI(){throw Error(`unexpected userMessage path`)}",
+      "function uI(){throw Error(`unexpected null turn path`)}",
+      "function aR(){}",
+      "function yV(){return true}",
+      "function Jtt({item:e}){return {type:e.type,id:e.id,text:e.text??null}}",
+      "function FF(e){return e}",
+      "function bP(e,t){let n=e.items.findIndex(e=>e.id===t.id);n>=0?e.items[n]=t:e.items.push(t)}",
+      "function LB(e,t,n){let r=e.items.find(e=>e.id===t&&e.type===n);if(r)return r;$.error(`Item not found in turn state`,{safe:{itemId:t},sensitive:{}});return null}",
+      "function Put(){return null}",
+      patched,
+      "function run(items){errors=[];let turn={turnId:`turn-1`,items:items.map(e=>({...e}))},conversation={turns:[turn]},manager=new U;manager.frameTextDeltaQueue={drainBefore:()=>false};manager.conversations=new Map([[`thread-1`,{}]]);manager.threadStore={threadsById:new Map};manager.hydrateCollabThreads=()=>{};manager.updateConversationState=(id,fn)=>fn(conversation);manager.onNotification(`item/completed`,{item:{type:`agentMessage`,id:`assistant-1`,text:`done`},threadId:`thread-1`,turnId:`turn-1`,completedAtMs:100});return {items:turn.items,errors}}",
+      "result={missing:run([]),existing:run([{type:`agentMessage`,id:`assistant-1`,text:`old`}]),wrongType:run([{type:`plan`,id:`assistant-1`,text:`old`}])};",
+    ].join(";"),
+    context,
+  );
+  const behavior = JSON.parse(JSON.stringify(context.result));
+  assert.deepEqual(behavior.missing.items, [
+    { type: "agentMessage", id: "assistant-1", text: "done" },
+  ]);
+  assert.deepEqual(behavior.existing.items, [
+    { type: "agentMessage", id: "assistant-1", text: "done" },
+  ]);
+  assert.deepEqual(behavior.wrongType.items, [
+    { type: "plan", id: "assistant-1", text: "old" },
+  ]);
+  assert.equal(behavior.missing.errors.length, 0);
+  assert.equal(behavior.existing.errors.length, 0);
+  assert.equal(behavior.wrongType.errors.length, 1);
+});
+
 test("Linux remote-control status guard skips slow remote SSH status reads", async () => {
   const source = syntheticAppServerManagerStatusBundle();
   const patched = applyLinuxRemoteControlStatusReadGuardPatch(source);
@@ -2083,6 +2181,110 @@ test("Linux remote-control status guard skips remote-control environment status 
   assert.equal(codexLinuxRemoteControlShouldReadStatus("local"), true);
 });
 
+test("Linux remote terminal status recovery treats stale waiting input as idle", () => {
+  const source =
+    "function LQt({hasInProgressSideChat:e,isResponseInProgress:t,latestTurnHasSystemError:n,resumeState:r,threadRuntimeStatus:i}){return e?`loading`:i?.type===`systemError`?`error`:i?.type===`active`?`loading`:r===`needs_resume`?`idle`:n?`error`:t===!0?`loading`:`idle`}function RQt({pendingRequestType:e,requests:t,resumeState:n,threadRuntimeStatus:r}){return t==null||n==null?null:n===`needs_resume`?r?.type===`active`&&r.activeFlags.includes(`waitingOnApproval`)&&yi(t)?`approval`:r?.type===`active`&&r.activeFlags.includes(`waitingOnUserInput`)?`response`:null:Zr(e)?`approval`:e===`userInput`?`response`:null}var IQt,AQt,OQt=e((()=>{G(),Lr(),Tt(),Ni(),kt(),IQt=s(V,(e,{get:t})=>{let n=t(rr,e);return LQt({hasInProgressSideChat:t(Qw,e),isResponseInProgress:t(ki,e),resumeState:t(si,e)??(n==null?null:`needs_resume`),threadRuntimeStatus:t(Or,e)??n?.threadRuntimeStatus??null,latestTurnHasSystemError:t(Ui,e)===!0})}),AQt=s(V,(e,{get:t})=>RQt({pendingRequestType:t(wr,e)?.type??null,requests:t(fi,e),resumeState:t(si,e),threadRuntimeStatus:t(Or,e)}))}))";
+
+  const patched = applyPatchTwice(applyLinuxRemoteTerminalStatusRecoveryPatch, source);
+
+  assert.match(patched, /codexLinuxRemoteTerminalStatusActive=i\?\.type===`active`/);
+  assert.match(patched, /codexLinuxRemoteTerminalStatusWaitingOnUserInput/);
+  assert.match(patched, /function codexLinuxRemoteHasUserInputRequest/);
+  assert.match(
+    patched,
+    /hasUserInputRequest:codexLinuxRemoteHasUserInputRequest\(t\(fi,e\)\)/,
+  );
+  assert.doesNotMatch(
+    patched,
+    /i\?\.type===`active`\?`loading`:r===`needs_resume`/,
+  );
+
+  const context = {};
+  const runtimeSource = patched.slice(0, patched.indexOf("var IQt"));
+  vm.runInNewContext(
+    `function yi(e){return Array.isArray(e)&&e.some(e=>e.method===\`item/commandExecution/requestApproval\`||e.method===\`item/fileChange/requestApproval\`||e.method===\`item/permissions/requestApproval\`)}
+     function Zr(e){return e===\`approval\`}
+     ${runtimeSource};result={
+      stale:LQt({hasInProgressSideChat:false,isResponseInProgress:false,latestTurnHasSystemError:false,resumeState:null,threadRuntimeStatus:{type:\`active\`,activeFlags:[]}}),
+      nullStatus:LQt({hasInProgressSideChat:false,isResponseInProgress:false,latestTurnHasSystemError:false,resumeState:null,threadRuntimeStatus:null}),
+      streaming:LQt({hasInProgressSideChat:false,isResponseInProgress:true,latestTurnHasSystemError:false,resumeState:null,threadRuntimeStatus:{type:\`active\`,activeFlags:[]}}),
+      waitingStale:LQt({hasInProgressSideChat:false,isResponseInProgress:false,latestTurnHasSystemError:false,resumeState:null,threadRuntimeStatus:{type:\`active\`,activeFlags:[\`waitingOnUserInput\`]},hasUserInputRequest:false}),
+      waitingWithRequest:LQt({hasInProgressSideChat:false,isResponseInProgress:false,latestTurnHasSystemError:false,resumeState:null,threadRuntimeStatus:{type:\`active\`,activeFlags:[\`waitingOnUserInput\`]},hasUserInputRequest:true}),
+      waitingWithoutWiredRequest:LQt({hasInProgressSideChat:false,isResponseInProgress:false,latestTurnHasSystemError:false,resumeState:null,threadRuntimeStatus:{type:\`active\`,activeFlags:[\`waitingOnUserInput\`]}}),
+      unknownShape:LQt({hasInProgressSideChat:false,isResponseInProgress:false,latestTurnHasSystemError:false,resumeState:null,threadRuntimeStatus:{type:\`active\`}}),
+      sideChat:LQt({hasInProgressSideChat:true,isResponseInProgress:false,latestTurnHasSystemError:false,resumeState:null,threadRuntimeStatus:{type:\`active\`,activeFlags:[]}}),
+      systemError:LQt({hasInProgressSideChat:false,isResponseInProgress:false,latestTurnHasSystemError:false,resumeState:null,threadRuntimeStatus:{type:\`systemError\`}}),
+      turnError:LQt({hasInProgressSideChat:false,isResponseInProgress:false,latestTurnHasSystemError:true,resumeState:null,threadRuntimeStatus:{type:\`idle\`}}),
+      needsResume:LQt({hasInProgressSideChat:false,isResponseInProgress:false,latestTurnHasSystemError:false,resumeState:\`needs_resume\`,threadRuntimeStatus:{type:\`idle\`}}),
+      pendingStale:RQt({pendingRequestType:null,requests:[],resumeState:\`needs_resume\`,threadRuntimeStatus:{type:\`active\`,activeFlags:[\`waitingOnUserInput\`]}}),
+      pendingWithRequest:RQt({pendingRequestType:null,requests:[{method:\`item/tool/requestUserInput\`}],resumeState:\`needs_resume\`,threadRuntimeStatus:{type:\`active\`,activeFlags:[\`waitingOnUserInput\`]}}),
+      pendingMalformedActive:RQt({pendingRequestType:null,requests:[{method:\`item/tool/requestUserInput\`}],resumeState:\`needs_resume\`,threadRuntimeStatus:{type:\`active\`}}),
+      pendingApproval:RQt({pendingRequestType:null,requests:[{method:\`item/commandExecution/requestApproval\`}],resumeState:\`needs_resume\`,threadRuntimeStatus:{type:\`active\`,activeFlags:[\`waitingOnApproval\`]}})
+    };`,
+    context,
+  );
+
+  assert.deepEqual(JSON.parse(JSON.stringify(context.result)), {
+    stale: "idle",
+    nullStatus: "idle",
+    streaming: "loading",
+    waitingStale: "idle",
+    waitingWithRequest: "loading",
+    waitingWithoutWiredRequest: "loading",
+    unknownShape: "loading",
+    sideChat: "loading",
+    systemError: "error",
+    turnError: "error",
+    needsResume: "idle",
+    pendingStale: null,
+    pendingWithRequest: "response",
+    pendingMalformedActive: null,
+    pendingApproval: "approval",
+  });
+});
+
+test("Linux remote terminal status recovery rejects partial current-bundle drift", () => {
+  const source = syntheticRemoteTerminalStatusBundle();
+  const driftedSources = [
+    source.replace("threadRuntimeStatus:i}){return", "threadRuntimeStatus:i,extra:o}){return"),
+    source.replace("pendingRequestType:e,requests:t", "pendingRequestType:e,extra:o,requests:t"),
+    source.replace("return LQt({hasInProgressSideChat:", "return LQt({extra:!0,hasInProgressSideChat:"),
+  ];
+
+  for (const driftedSource of driftedSources) {
+    const { result, warnings } = captureWarnings(() =>
+      applyLinuxRemoteTerminalStatusRecoveryPatch(driftedSource),
+    );
+    assert.equal(result, driftedSource);
+    assert.ok(
+      warnings.some((warning) =>
+        warning.includes("skipping Linux remote terminal status recovery patch"),
+      ),
+    );
+  }
+});
+
+test("Linux remote terminal status recovery ignores unrelated matching chunks", () => {
+  const source = "const remoteMobileConversationChunk={threadRuntimeStatus:null};";
+  const { result, warnings } = captureWarnings(() =>
+    applyLinuxRemoteTerminalStatusRecoveryPatch(source),
+  );
+
+  assert.equal(result, source);
+  assert.deepEqual(warnings, []);
+});
+
+test("Linux remote terminal status recovery escapes current minified function aliases", () => {
+  const source = syntheticRemoteTerminalStatusBundle().split("LQt").join("$yn");
+  const patched = applyLinuxRemoteTerminalStatusRecoveryPatch(source);
+
+  assert.notEqual(patched, source);
+  assert.match(
+    patched,
+    /hasUserInputRequest:codexLinuxRemoteHasUserInputRequest\(t\(fi,e\)\)/,
+  );
+});
+
 test("Linux remote-control status wait supports the current 26.707 app bundle", () => {
   const source = syntheticCurrentStatusWaitBundle();
   const patched = applyLinuxRemoteControlStatusWaitPatch(source);
@@ -2133,7 +2335,9 @@ test("remote mobile feature patch report records feature metadata and partial wa
         path.join(assetsDir, UNIFIED_REMOTE_CONVERSATION_ASSET),
         syntheticRemoteConnectionVisibilityBundle() +
           syntheticAppServerManagerSignalsBundle() +
-          syntheticAppServerManagerStatusBundle(),
+          syntheticAppServerManagerStatusBundle() +
+          syntheticCompletedItemRecoveryBundle() +
+          syntheticRemoteTerminalStatusBundle(),
       );
       fs.writeFileSync(path.join(assetsDir, "app-main-test.js"), syntheticAppMainFeatureSyncBundle() + syntheticAppMainEnablementBridgeBundle() + syntheticAppMainActiveStatusBundle());
       fs.writeFileSync(
@@ -2169,18 +2373,27 @@ test("remote mobile feature patch report records feature metadata and partial wa
       assert.equal(settingsPatch.status, "applied-with-warnings");
       assert.ok(settingsPatch.warnings.some((warning) => warning.includes("SSH install release needles")));
 
-      const hydrationPatch = report.patches.find(
-        (patch) => patch.name === "linux-app-server-conversation-hydration",
+      assert.equal(
+        report.patches.some((patch) => patch.name === "linux-app-server-conversation-hydration"),
+        false,
       );
-      assert.equal(hydrationPatch.sourceKind, "core");
-      assert.equal(hydrationPatch.status, "applied");
-      assert.equal(hydrationPatch.warnings, undefined);
 
       const featureHydrationPatch = report.patches.find(
         (patch) => patch.name === "feature:remote-mobile-control:linux-remote-mobile-conversation-hydration",
       );
       assert.equal(featureHydrationPatch.sourceKind, "feature");
-      assert.equal(featureHydrationPatch.status, "already-applied");
+      assert.equal(featureHydrationPatch.status, "applied");
+
+      const completedItemPatch = report.patches.find(
+        (patch) => patch.name === "feature:remote-mobile-control:linux-remote-mobile-completed-item-recovery",
+      );
+      assert.equal(completedItemPatch.sourceKind, "feature");
+      assert.equal(completedItemPatch.featureId, "remote-mobile-control");
+      assert.equal(completedItemPatch.status, "applied");
+      assert.equal(
+        report.patches.some((patch) => patch.name === "linux-completed-item-recovery"),
+        false,
+      );
     } finally {
       fs.rmSync(tempApp, { recursive: true, force: true });
     }
@@ -2450,7 +2663,9 @@ test("remote mobile control feature participates in ASAR patching and reports", 
           syntheticRemoteConnectionVisibilityBundle() +
             syntheticAppServerManagerSignalsBundle() +
             syntheticAppServerManagerStatusBundle() +
-            syntheticCurrentStatusWaitBundle(),
+            syntheticCurrentStatusWaitBundle() +
+            syntheticCompletedItemRecoveryBundle() +
+            syntheticRemoteTerminalStatusBundle(),
         );
         fs.writeFileSync(
           path.join(assetsDir, "remote-control-connections-visibility-test.js"),
@@ -2542,6 +2757,7 @@ test("remote mobile control feature participates in ASAR patching and reports", 
         assert.match(patchedMobileConnectedSettingsFile, /apps on this Linux desktop/);
         assert.match(patchedSignalsFile, /codexLinuxRemoteMobileHydrateUnknownTurn/);
         assert.match(patchedSignalsFile, /codexLinuxRemoteMobileThreadRuntimeStatus/);
+        assert.match(patchedSignalsFile, /codexLinuxCompletedItemExists=/);
         assert.match(patchedStatusFile, /codexLinuxRemoteControlShouldReadStatus/);
         assert.match(patchedStatusFile, /codexLinuxRemoteControlStatusWaitMs/);
         assert.match(patchedAppMainFile, /codexLinuxRemoteControlEnablementBridge/);
@@ -2613,15 +2829,32 @@ test("remote mobile control feature participates in ASAR patching and reports", 
           ),
         );
         assert.ok(
-          report.patches.some((patch) =>
-            patch.name === "linux-app-server-conversation-hydration" &&
-            patch.status === "applied",
+          !report.patches.some(
+            (patch) => patch.name === "linux-app-server-conversation-hydration",
           ),
         );
         assert.ok(
           report.patches.some((patch) =>
             patch.name === "feature:remote-mobile-control:linux-remote-mobile-conversation-hydration" &&
-            patch.status === "already-applied",
+            patch.status === "applied",
+          ),
+        );
+        assert.ok(
+          report.patches.some((patch) =>
+            patch.name === "feature:remote-mobile-control:linux-remote-mobile-completed-item-recovery" &&
+            patch.status === "applied",
+          ),
+        );
+        assert.ok(
+          !report.patches.some((patch) => patch.name === "linux-completed-item-recovery"),
+        );
+        assert.ok(
+          !report.patches.some((patch) => patch.name === "linux-remote-terminal-status-recovery"),
+        );
+        assert.ok(
+          report.patches.some((patch) =>
+            patch.name === "feature:remote-mobile-control:linux-remote-terminal-status-recovery" &&
+            patch.status === "applied",
           ),
         );
         assert.ok(
@@ -2646,6 +2879,21 @@ test("remote mobile control feature participates in ASAR patching and reports", 
           report.patches.some((patch) =>
             patch.name === "feature:remote-mobile-control:linux-remote-mobile-active-status" &&
             patch.status === "applied",
+          ),
+        );
+
+        const secondReport = createPatchReport();
+        patchExtractedApp(tempApp, { report: secondReport });
+        assert.ok(
+          secondReport.patches.some((patch) =>
+            patch.name === "feature:remote-mobile-control:linux-remote-mobile-completed-item-recovery" &&
+            patch.status === "already-applied",
+          ),
+        );
+        assert.ok(
+          secondReport.patches.some((patch) =>
+            patch.name === "feature:remote-mobile-control:linux-remote-terminal-status-recovery" &&
+            patch.status === "already-applied",
           ),
         );
       } finally {

@@ -20,6 +20,7 @@ const {
   patchLinuxWorkerFileManagerTarget,
   applyLinuxTerminalUserPathPatch,
   applyLinuxGitOriginsSourceFallbackPatch,
+  applyLinuxX11ProjectPickerPatch,
 } = require("../../../../impl/main-process/misc.js");
 const {
   applyLinuxBuildInfoTrayPatch,
@@ -91,6 +92,13 @@ module.exports = [
     order: 80,
     ciPolicy: "required-upstream",
     apply: applyLinuxOpaqueBackgroundPatch,
+  }),
+  mainBundlePatch({
+    id: "linux-x11-project-picker",
+    phase: "main-bundle",
+    order: 82,
+    ciPolicy: "optional",
+    apply: applyLinuxX11ProjectPickerPatch,
   }),
   mainBundlePatch({
     id: "linux-avatar-overlay-mouse-passthrough",

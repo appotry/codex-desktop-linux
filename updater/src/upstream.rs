@@ -1,12 +1,40 @@
 //! Upstream DMG metadata and download helpers.
 
+use crate::cache_cleanup::{acquire_dmg_cache_lease, DmgCacheLease};
 use anyhow::{anyhow, Context, Result};
 use chrono::{DateTime, Utc};
 use futures_util::StreamExt;
 use reqwest::{header, Client};
 use sha2::{Digest, Sha256};
-use std::path::{Path, PathBuf};
-use tokio::{fs::File, io::AsyncWriteExt};
+use std::{
+    path::{Path, PathBuf},
+    sync::atomic::{AtomicU64, Ordering},
+    time::Duration,
+};
+use tokio::{fs::OpenOptions, io::AsyncWriteExt};
+
+const HTTP_CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
+const HTTP_READ_TIMEOUT: Duration = Duration::from_secs(60);
+const DOWNLOAD_TEMP_PREFIX: &str = ".Codex.dmg.download-";
+static DOWNLOAD_TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+struct DownloadTempFile {
+    path: PathBuf,
+}
+
+impl DownloadTempFile {
+    fn commit(mut self) {
+        self.path = PathBuf::new();
+    }
+}
+
+impl Drop for DownloadTempFile {
+    fn drop(&mut self) {
+        if !self.path.as_os_str().is_empty() {
+            let _ = std::fs::remove_file(&self.path);
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 /// Selected HTTP metadata used to detect upstream DMG changes.
@@ -17,12 +45,22 @@ pub struct RemoteMetadata {
     pub headers_fingerprint: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug)]
 /// Result of downloading the current upstream DMG snapshot.
 pub struct DownloadedDmg {
     pub path: PathBuf,
     pub sha256: String,
     pub candidate_version: String,
+    pub(crate) lease: DmgCacheLease,
+}
+
+/// Builds the HTTP client shared by upstream metadata and DMG requests.
+pub fn http_client() -> Result<Client> {
+    Client::builder()
+        .connect_timeout(HTTP_CONNECT_TIMEOUT)
+        .read_timeout(HTTP_READ_TIMEOUT)
+        .build()
+        .context("Failed to build upstream HTTP client")
 }
 
 /// Fetches the upstream DMG headers used to detect candidate updates.
@@ -79,11 +117,9 @@ pub async fn download_dmg(
     tokio::fs::create_dir_all(destination_dir)
         .await
         .with_context(|| format!("Failed to create {}", destination_dir.display()))?;
-
-    let destination = destination_dir.join("Codex.dmg");
-    let mut file = File::create(&destination)
-        .await
-        .with_context(|| format!("Failed to create {}", destination.display()))?;
+    // Hold one updater-wide lease from the first temporary write until the
+    // caller finishes consuming the published DMG and persists its state path.
+    let lease = acquire_dmg_cache_lease(destination_dir).await?;
 
     let response = client
         .get(dmg_url)
@@ -93,6 +129,8 @@ pub async fn download_dmg(
         .error_for_status()
         .with_context(|| format!("GET request for {dmg_url} returned an error status"))?;
 
+    let (temp, mut file) = create_download_temp(destination_dir).await?;
+
     let mut hasher = Sha256::new();
     let mut stream = response.bytes_stream();
 
@@ -100,13 +138,17 @@ pub async fn download_dmg(
         let chunk = chunk.with_context(|| format!("Failed downloading {dmg_url}"))?;
         file.write_all(&chunk)
             .await
-            .with_context(|| format!("Failed writing {}", destination.display()))?;
+            .with_context(|| format!("Failed writing {}", temp.path.display()))?;
         hasher.update(&chunk);
     }
 
     file.flush()
         .await
-        .with_context(|| format!("Failed flushing {}", destination.display()))?;
+        .with_context(|| format!("Failed flushing {}", temp.path.display()))?;
+    file.sync_all()
+        .await
+        .with_context(|| format!("Failed syncing {}", temp.path.display()))?;
+    drop(file);
 
     let sha256 = hasher
         .finalize()
@@ -114,12 +156,59 @@ pub async fn download_dmg(
         .map(|byte| format!("{byte:02x}"))
         .collect::<String>();
     let candidate_version = derive_candidate_version(&sha256, version_timestamp)?;
+    let destination = destination_dir.join(format!("Codex-{sha256}.dmg"));
+
+    // A content-addressed destination remains stable while either updater path
+    // consumes it. Concurrent downloads can publish the same bytes safely and
+    // different upstream snapshots never overwrite one another.
+    tokio::fs::rename(&temp.path, &destination)
+        .await
+        .with_context(|| {
+            format!(
+                "Failed to atomically publish completed DMG as {}",
+                destination.display()
+            )
+        })?;
+    sync_parent_directory(destination_dir)?;
+    temp.commit();
 
     Ok(DownloadedDmg {
         path: destination,
         sha256,
         candidate_version,
+        lease,
     })
+}
+
+async fn create_download_temp(
+    destination_dir: &Path,
+) -> Result<(DownloadTempFile, tokio::fs::File)> {
+    loop {
+        let id = DOWNLOAD_TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let path = destination_dir.join(format!(
+            "{DOWNLOAD_TEMP_PREFIX}{}-{id}.tmp",
+            std::process::id()
+        ));
+        match OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+            .await
+        {
+            Ok(file) => return Ok((DownloadTempFile { path }, file)),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => {
+                return Err(error).with_context(|| format!("Failed to create {}", path.display()))
+            }
+        }
+    }
+}
+
+fn sync_parent_directory(directory: &Path) -> Result<()> {
+    std::fs::File::open(directory)
+        .with_context(|| format!("Failed to open {} for sync", directory.display()))?
+        .sync_all()
+        .with_context(|| format!("Failed to sync {}", directory.display()))
 }
 
 /// Derives a local package version from the DMG hash and download timestamp.
@@ -192,12 +281,92 @@ mod tests {
         )
         .await?;
 
-        assert_eq!(downloaded.path, temp.path().join("Codex.dmg"));
         assert_eq!(
             downloaded.sha256,
             "678cd508ffe0071e217020a7a4eecbebe25362c022ac78c13a5ae87b7a3a0c92"
         );
+        assert_eq!(
+            downloaded.path,
+            temp.path().join(format!("Codex-{}.dmg", downloaded.sha256))
+        );
         assert_eq!(downloaded.candidate_version, "2026.03.24.120000+678cd508");
+        assert_eq!(std::fs::read(&downloaded.path)?, body);
+        assert_no_download_temps(temp.path())?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn failed_download_does_not_publish_or_leave_temps() -> Result<()> {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/Codex.dmg"))
+            .respond_with(ResponseTemplate::new(503))
+            .mount(&server)
+            .await;
+
+        let temp = tempdir()?;
+        let result = download_dmg(
+            &http_client()?,
+            &format!("{}/Codex.dmg", server.uri()),
+            temp.path(),
+            Utc::now(),
+        )
+        .await;
+
+        assert!(result.is_err());
+        assert!(std::fs::read_dir(temp.path())?.all(|entry| {
+            entry
+                .map(|entry| entry.file_name() == crate::cache_cleanup::DMG_CACHE_LOCK_NAME)
+                .unwrap_or(false)
+        }));
+        assert_no_download_temps(temp.path())?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn concurrent_different_downloads_publish_immutable_paths() -> Result<()> {
+        let first_server = MockServer::start().await;
+        let second_server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/Codex.dmg"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(b"first".to_vec()))
+            .mount(&first_server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/Codex.dmg"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(b"second".to_vec()))
+            .mount(&second_server)
+            .await;
+
+        let temp = tempdir()?;
+        let client = http_client()?;
+        let first_url = format!("{}/Codex.dmg", first_server.uri());
+        let second_url = format!("{}/Codex.dmg", second_server.uri());
+        let (first, second) = tokio::join!(
+            download_dmg(&client, &first_url, temp.path(), Utc::now(),),
+            download_dmg(&client, &second_url, temp.path(), Utc::now(),)
+        );
+        let first = first?;
+        let second = second?;
+
+        assert_ne!(first.path, second.path);
+        assert_eq!(std::fs::read(first.path)?, b"first");
+        assert_eq!(std::fs::read(second.path)?, b"second");
+        assert_no_download_temps(temp.path())?;
+        Ok(())
+    }
+
+    fn assert_no_download_temps(directory: &Path) -> Result<()> {
+        let leftovers = std::fs::read_dir(directory)?
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(DOWNLOAD_TEMP_PREFIX)
+            })
+            .collect::<Vec<_>>();
+        assert!(leftovers.is_empty(), "temporary downloads remain");
         Ok(())
     }
 

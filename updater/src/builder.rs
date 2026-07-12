@@ -16,7 +16,7 @@ use tracing::info;
 
 const UPDATE_BUILDER_MANIFEST: &str = ".codex-linux/update-builder-manifest.txt";
 
-const REQUIRED_BUNDLE_FILES: [(&str, &str); 19] = [
+const REQUIRED_BUNDLE_FILES: [(&str, &str); 20] = [
     ("Cargo.toml", "Cargo.toml"),
     ("Cargo.lock", "Cargo.lock"),
     ("computer-use-linux", "computer-use-linux"),
@@ -41,6 +41,10 @@ const REQUIRED_BUNDLE_FILES: [(&str, &str); 19] = [
     ),
     ("scripts/patches", "scripts/patches"),
     ("scripts/lib", "scripts/lib"),
+    (
+        "scripts/validate-upstream-dmg.js",
+        "scripts/validate-upstream-dmg.js",
+    ),
     ("packaging/linux", "packaging/linux"),
     ("assets/codex.png", "assets/codex.png"),
     ("assets/codex-linux.png", "assets/codex-linux.png"),
@@ -132,6 +136,7 @@ pub async fn build_update_from(
             "CODEX_REBUILD_REPORT_JSON",
             workspace.reports_dir.join("rebuild-report.json"),
         )
+        .env("CODEX_ACCEPTANCE_OVERRIDE", "0")
         .env("CODEX_MANAGED_NODE_SOURCE", managed_node_source)
         .env("PATH", &build_path)
         .current_dir(&workspace.bundle_dir);
@@ -814,6 +819,10 @@ fi
             b"#!/bin/bash\n",
         )?;
         fs::write(
+            bundle_root.join("scripts/validate-upstream-dmg.js"),
+            b"#!/usr/bin/env node\n",
+        )?;
+        fs::write(
             bundle_root.join("scripts/patch-linux-window-ui.js"),
             b"console.log('patched');\n",
         )?;
@@ -935,6 +944,10 @@ fi
             b"# fake webview server\n",
         )?;
         fs::write(source_root.join("scripts/build-deb.sh"), b"#!/bin/bash\n")?;
+        fs::write(
+            source_root.join("scripts/validate-upstream-dmg.js"),
+            b"#!/usr/bin/env node\n",
+        )?;
         fs::write(
             source_root.join("scripts/patch-linux-window-ui.js"),
             b"console.log('patched');\n",

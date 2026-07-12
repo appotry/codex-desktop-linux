@@ -1,16 +1,15 @@
 #!/usr/bin/env node
 "use strict";
 
-const fs = require("node:fs");
 const {
-  requiredPatchNamesForProfile,
-} = require("../patches/runner.js");
-const {
-  PATCH_STATUS_APPLIED,
   SUCCESS_STATUSES,
-  criticalFailuresFromReport,
   optionalDriftFromReport,
 } = require("../lib/patch-report.js");
+const {
+  readPatchReport,
+  uniqueStrings,
+  validatePatchReport,
+} = require("../lib/patch-validation.js");
 
 function usage() {
   return [
@@ -18,11 +17,6 @@ function usage() {
     "       [--require-enabled-feature FEATURE_ID] [--require-success PATCH_NAME]",
     "       [--require-applied PATCH_NAME]",
   ].join("\n");
-}
-
-function uniqueStrings(values) {
-  const list = Array.isArray(values) ? values : [values];
-  return [...new Set(list.filter((value) => typeof value === "string" && value.length > 0))];
 }
 
 function parseArgs(argv) {
@@ -86,70 +80,8 @@ function parseArgs(argv) {
   };
 }
 
-function readReport(reportPath) {
-  const raw = fs.readFileSync(reportPath, "utf8");
-  const report = JSON.parse(raw);
-  if (report == null || typeof report !== "object" || !Array.isArray(report.patches)) {
-    throw new Error(`Invalid patch report: ${reportPath}`);
-  }
-  return report;
-}
-
-function validateReport(report, profile, requirements = {}) {
-  const requiredNames = requiredPatchNamesForProfile(profile);
-  const patches = Array.isArray(report?.patches) ? report.patches : [];
-  const patchesByName = new Map(patches.map((patch) => [patch.name, patch]));
-  const enabledFeatures = new Set(Array.isArray(report.enabledFeatures) ? report.enabledFeatures : []);
-  const requiredAppliedPatches = uniqueStrings(requirements.requiredAppliedPatches ?? []);
-  const requiredEnabledFeatures = uniqueStrings(requirements.requiredEnabledFeatures ?? []);
-  const requiredSuccessfulPatches = uniqueStrings(requirements.requiredSuccessfulPatches ?? []);
-  const failures = [];
-
-  // A required patch that never ran leaves no report entry, so the
-  // report-driven check below cannot see it — catch it by name first.
-  for (const name of requiredNames) {
-    if (!patchesByName.has(name)) {
-      failures.push(`${name}: missing from patch report`);
-    }
-  }
-
-  // Shared predicate with the local build gate (patch-linux-window-ui.js
-  // --enforce-critical): any recorded critical patch with a non-success,
-  // applicable status fails validation.
-  for (const failure of criticalFailuresFromReport(report)) {
-    failures.push(`${failure.name}: ${failure.status}${failure.reason ? ` (${failure.reason})` : ""}`);
-  }
-
-  for (const featureId of requiredEnabledFeatures) {
-    if (!enabledFeatures.has(featureId)) {
-      failures.push(`feature ${featureId}: not enabled in patch report`);
-    }
-  }
-
-  for (const name of requiredSuccessfulPatches) {
-    const patch = patchesByName.get(name);
-    if (patch == null) {
-      failures.push(`${name}: missing from patch report`);
-      continue;
-    }
-    if (!SUCCESS_STATUSES.has(patch.status)) {
-      failures.push(`${name}: ${patch.status}${patch.reason ? ` (${patch.reason})` : ""}`);
-    }
-  }
-
-  for (const name of requiredAppliedPatches) {
-    const patch = patchesByName.get(name);
-    if (patch == null) {
-      failures.push(`${name}: missing from patch report`);
-      continue;
-    }
-    if (patch.status !== PATCH_STATUS_APPLIED) {
-      failures.push(`${name}: expected applied, got ${patch.status}${patch.reason ? ` (${patch.reason})` : ""}`);
-    }
-  }
-
-  return failures;
-}
+const readReport = readPatchReport;
+const validateReport = validatePatchReport;
 
 function printOptionalDrift(report) {
   const drift = optionalDriftFromReport(report);

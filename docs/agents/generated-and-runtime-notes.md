@@ -8,7 +8,9 @@ that agents need without keeping them in the main quick-start.
 - `codex-app/`
   Generated Linux app directory. Treat as build output.
 - `codex-app-next/`
-  Side-by-side rebuild candidate from `scripts/rebuild-candidate.sh`.
+  Side-by-side rebuild candidate from `scripts/rebuild-candidate.sh`. Hidden
+  sibling `.codex-app.candidate-*` directories are temporary transactional
+  install state and are removed after success or rejection by default.
 - `codex-*-app/`
   Alternate identity app directories, such as `codex-cua-lab-app/`.
 - `dist/`

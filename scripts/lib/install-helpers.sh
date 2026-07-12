@@ -29,8 +29,17 @@ Or install manually:
 EOF
 }
 
+remove_tree_safely() {
+    local path="$1"
+    [ -e "$path" ] || [ -L "$path" ] || return 0
+    # Sources copied from immutable stores can preserve read-only directory
+    # modes. Make only the local copy writable before removing it.
+    chmod -R u+w "$path" 2>/dev/null || true
+    rm -rf -- "$path"
+}
+
 cleanup() {
-    rm -rf "$WORK_DIR"
+    remove_tree_safely "$WORK_DIR"
 }
 trap cleanup EXIT
 trap 'error "Failed at line $LINENO (exit code $?)"' ERR
@@ -74,6 +83,12 @@ Environment variables:
   ELECTRON_MIRROR     Override the Electron runtime download mirror root
                       (example: https://npmmirror.com/mirrors/electron/)
   REBUILD_REPORT_DIR  Default report directory for --inspect and rebuild reports
+  CODEX_ACCEPTANCE_OVERRIDE=1
+                      Developer-only promotion override for a completely built
+                      candidate rejected by the shared acceptance profile
+  CODEX_KEEP_REJECTED_CANDIDATE=1
+                      Keep a rejected or safely unpromoted sibling candidate
+                      for diagnostics
 
 After install, launch with:
   ./codex-app/start.sh
@@ -176,7 +191,7 @@ prepare_install() {
 # ---- Check dependencies ----
 check_deps() {
     local missing=()
-    for cmd in python3 curl unzip tar; do
+    for cmd in python3 curl unzip tar flock; do
         command -v "$cmd" &>/dev/null || missing+=("$cmd")
     done
     if ! command -v 7zz &>/dev/null && ! command -v 7z &>/dev/null; then

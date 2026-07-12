@@ -135,7 +135,37 @@ PACKAGE_WITH_UPDATER=0 make update-native
 ```
 
 `make update-native` runs `git pull --ff-only`, regenerates `codex-app/` from a
-fresh upstream `Codex.dmg`, builds the native package, and installs it.
+fresh upstream `Codex.dmg`, builds the native package, and installs it. The
+rebuild uses the shared [upstream DMG acceptance profile](upstream-dmg-acceptance.md);
+rejected and inconclusive candidates never replace the working generated app
+or advance to package installation.
+The rebuild evaluates only the Linux Features selected in the user's saved
+configuration. Drift in any selected feature rejects the candidate; disable
+that feature and retry if receiving the upstream update is more important than
+retaining it.
+
+Automated user-local rebuilds always force
+`CODEX_INSTALL_ALLOW_RUNNING=0` and `CODEX_ACCEPTANCE_OVERRIDE=0`, even if the
+service or invoking shell inherited developer overrides. The in-app update path
+continues through its after-exit hook and relaunches after a successful update.
+A manual command or timer may build while the app is open, but final promotion
+is refused and the working app remains unchanged until Electron exits. Failed
+promotion candidates are disposable by default; opt in to diagnostic retention
+with `CODEX_KEEP_REJECTED_CANDIDATE=1`.
+
+Transactional user-local installs retain one previous-app directory for manual
+recovery. Each successful promotion replaces that retained backup with the
+version that was working immediately beforehand; older exact managed backup
+directories are pruned under the promotion lock.
+
+Updater downloads are streamed to unique temporary files and published as
+`Codex-<sha256>.dmg` only after the file and parent directory are synced. The
+content-addressed path stays immutable while daemon and wrapper rebuild flows
+consume it under a shared lease, so cleanup and concurrent rebuilds cannot
+truncate or remove another build's DMG input. Startup and post-build cleanup
+retain the DMG referenced by updater state, remove older managed hash files,
+and delete strictly named download temporaries left by a killed process.
+Unrelated files and symlinks in `downloads/` are never removed.
 
 ## Service Controls
 

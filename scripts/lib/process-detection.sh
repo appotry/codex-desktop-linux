@@ -78,7 +78,18 @@ find_running_install_target_pid() {
 }
 
 assert_install_target_not_running() {
+    if ! install_target_is_stopped; then
+        error "ChatGPT Desktop is currently running from $INSTALL_DIR (pid $RUNNING_INSTALL_TARGET_PID).
+Close that app before rebuilding this install directory, or build into a separate path:
+  CODEX_INSTALL_DIR=/tmp/codex-app-build ./install.sh
+
+Set CODEX_INSTALL_ALLOW_RUNNING=1 only if you intentionally want to overwrite a running app."
+    fi
+}
+
+install_target_is_stopped() {
     local pid
+    RUNNING_INSTALL_TARGET_PID=""
 
     if [ "${CODEX_INSTALL_ALLOW_RUNNING:-0}" = "1" ]; then
         warn "CODEX_INSTALL_ALLOW_RUNNING=1 set; installer may overwrite a running ChatGPT app"
@@ -86,10 +97,10 @@ assert_install_target_not_running() {
     fi
 
     if pid="$(find_running_install_target_pid)"; then
-        error "ChatGPT Desktop is currently running from $INSTALL_DIR (pid $pid).
-Close that app before rebuilding this install directory, or build into a separate path:
-  CODEX_INSTALL_DIR=/tmp/codex-app-build ./install.sh
-
-Set CODEX_INSTALL_ALLOW_RUNNING=1 only if you intentionally want to overwrite a running app."
+        RUNNING_INSTALL_TARGET_PID="$pid"
+        export RUNNING_INSTALL_TARGET_PID
+        return 1
     fi
+
+    return 0
 }

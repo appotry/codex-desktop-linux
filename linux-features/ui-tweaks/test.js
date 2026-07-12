@@ -17,6 +17,7 @@ const {
   GPT_56_ALLOWLIST_MARKER,
   INLINE_MODEL_LIST_RUNTIME_MARKER,
   MODEL_ALLOWLIST_MARKER,
+  MODEL_PICKER_ALLOWLIST_ASSET_PATTERN,
   MODEL_PICKER_MENU_ASSET_PATTERN,
   MODEL_PICKER_STATE_ASSET_PATTERN,
   SIMPLE_MENU_VIEW_PATTERN,
@@ -179,19 +180,27 @@ test("ui-tweaks is discoverable and disabled until listed in features.json", () 
 
 test("model picker descriptors target the current state and menu bundles", () => {
   assert.match(
-    "app-initial~app-main~new-thread-panel-page~appgen-library-page~hotkey-window-thread-page~ho~iufn7mg3-MXsOJYYa.js",
+    "app-initial~app-main~page-hSvsQcNf.js",
     MODEL_PICKER_STATE_ASSET_PATTERN,
   );
   assert.match(
-    "app-initial~app-main~onboarding-page~hotkey-window-thread-page~quick-chat-window-page~chatg~k0ede4gb-C17KDkOa.js",
+    "app-initial~app-main~new-thread-panel-page~onboarding-page~projects-index-page~appgen-libra~ggy53w99-CqMu8hJo.js",
+    MODEL_PICKER_ALLOWLIST_ASSET_PATTERN,
+  );
+  assert.match(
+    "app-initial~app-main~new-thread-panel-page~onboarding-page~projects-index-page~appgen-libra~lpb6mnim-BqYcBFmq.js",
     MODEL_PICKER_MENU_ASSET_PATTERN,
   );
   assert.doesNotMatch(
-    "app-initial~app-main~page-BF1QkwFT.js",
+    "app-initial~app-main~new-thread-panel-page~appgen-library-page~hotkey-window-thread-page~ho~iufn7mg3-MXsOJYYa.js",
     MODEL_PICKER_STATE_ASSET_PATTERN,
   );
   assert.doesNotMatch(
-    "app-initial~app-main~page-BF1QkwFT.js",
+    "app-initial~app-main~onboarding-page~hotkey-window-thread-page~quick-chat-window-page~chatg~k0ede4gb-C17KDkOa.js",
+    MODEL_PICKER_ALLOWLIST_ASSET_PATTERN,
+  );
+  assert.doesNotMatch(
+    "app-initial~app-main~onboarding-page~hotkey-window-thread-page~quick-chat-window-page~chatg~k0ede4gb-C17KDkOa.js",
     MODEL_PICKER_MENU_ASSET_PATTERN,
   );
 });

@@ -326,115 +326,6 @@ function linuxSettingsFallbackComponents({ jsxRuntimeAsset, jsxRuntimeExportName
   };
 }
 
-function inferToggleExportName(source) {
-  const functionPattern = /function\s+([A-Za-z_$][\w$]*)\s*\([^)]*\)\s*\{/g;
-  let match;
-  while ((match = functionPattern.exec(source)) != null) {
-    const nextFunctionIndex = source.indexOf("function ", functionPattern.lastIndex);
-    const functionSource = source.slice(
-      match.index,
-      nextFunctionIndex === -1 ? source.length : nextFunctionIndex,
-    );
-    if (
-      !functionSource.includes("checked") ||
-      !functionSource.includes("onChange") ||
-      !(
-        functionSource.includes("ariaLabel") ||
-        functionSource.includes("aria-label") ||
-        functionSource.includes("aria-checked") ||
-        functionSource.includes('role:"switch"') ||
-        functionSource.includes("role:`switch`")
-      )
-    ) {
-      continue;
-    }
-
-    const exportMatch = source.match(/export\{([^}]*)\}/);
-    if (exportMatch == null) {
-      return null;
-    }
-    for (const rawExport of exportMatch[1].split(",")) {
-      const exportPart = rawExport.trim();
-      const aliasedMatch = exportPart.match(
-        new RegExp(`^${escapeRegExp(match[1])}\\s+as\\s+([A-Za-z_$][\\w$]*)$`),
-      );
-      if (aliasedMatch != null) {
-        return aliasedMatch[1];
-      }
-      if (exportPart === match[1]) {
-        return match[1];
-      }
-    }
-  }
-  return null;
-}
-
-function inferToggleDependencyFromSettingsSource(source) {
-  const bindings = importBindings(source);
-  const controlPattern = /control:(?:\(0,[A-Za-z_$][\w$]*\.jsx\)|[A-Za-z_$][\w$]*\.jsx)\(([A-Za-z_$][\w$]*),\{/g;
-  let match;
-  while ((match = controlPattern.exec(source)) != null) {
-    const localName = match[1];
-    const sample = source.slice(match.index, match.index + 1000);
-    if (!sample.includes("checked:") || !sample.includes("onChange:") || !sample.includes("ariaLabel:")) {
-      continue;
-    }
-    const binding = bindings.get(localName);
-    if (binding != null) {
-      return {
-        assetName: binding.assetName,
-        exportName: binding.exportName,
-      };
-    }
-  }
-  return null;
-}
-
-function resolveSettingsToggleDependency(webviewAssetsDir, fallbackComponents, generatedAssets) {
-  const directToggleAssets = fs
-    .readdirSync(webviewAssetsDir)
-    .filter((name) => /^toggle-.*\.js$/.test(name))
-    .sort();
-  for (const directToggleAsset of directToggleAssets) {
-    const source = fs.readFileSync(path.join(webviewAssetsDir, directToggleAsset), "utf8");
-    const exportName = inferToggleExportName(source);
-    if (exportName != null) {
-      return {
-        assetName: directToggleAsset,
-        exportName,
-      };
-    }
-  }
-
-  const settingsAssets = fs
-    .readdirSync(webviewAssetsDir)
-    .filter((name) =>
-      name.endsWith(".js") &&
-        name.includes("settings") &&
-        name !== linuxDesktopSettingsAsset &&
-        name !== keybindsSettingsAsset &&
-        !name.startsWith("linux-settings-")
-    )
-    .sort();
-  for (const assetName of settingsAssets) {
-    const source = fs.readFileSync(path.join(webviewAssetsDir, assetName), "utf8");
-    const dependency = inferToggleDependencyFromSettingsSource(source);
-    if (dependency != null) {
-      return dependency;
-    }
-  }
-
-  const fallback = fallbackComponents.settingsToggle;
-  generatedAssets.push({
-    filePath: path.join(webviewAssetsDir, fallback.assetName),
-    source: fallback.source,
-  });
-  return {
-    assetName: fallback.assetName,
-    exportName: fallback.exportName,
-  };
-}
-
 function resolveSettingsAssetDependencies(extractedDir, { includeHotkeySettings = true } = {}) {
   const webviewAssetsDir = path.join(extractedDir, "webview", "assets");
   if (!fs.existsSync(webviewAssetsDir)) {
@@ -525,7 +416,12 @@ function resolveSettingsAssetDependencies(extractedDir, { includeHotkeySettings 
     .sort()[0] ?? null;
   const settingsSectionFallback = settingsGroupCandidate == null ? useFallbackComponent("settingsSection") : null;
   const settingsGroupFallback = settingsSurfaceCandidate == null ? useFallbackComponent("settingsGroup") : null;
-  const toggleDependency = resolveSettingsToggleDependency(webviewAssetsDir, fallbackComponents, generatedAssets);
+  // Upstream settings controls are often exported from lazy Rolldown modules
+  // whose private initializer is only invoked by their original consumer.
+  // Importing those controls directly can therefore succeed while rendering
+  // crashes inside an uninitialized React compiler runtime. Keep this small
+  // control self-contained instead of depending on upstream module internals.
+  const toggleDependency = useFallbackComponent("settingsToggle");
 
   return {
     chunkAsset,

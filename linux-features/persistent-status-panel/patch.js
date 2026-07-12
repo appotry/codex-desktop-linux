@@ -37,6 +37,7 @@ function applyPersistentStatusPanelPatch(source) {
   }
 
   if (!source.includes("composer.statusSlashCommand.description")) {
+    console.warn("WARN: Could not find Codex status panel bundle marker - skipping persistent status panel patch");
     return source;
   }
 
@@ -76,7 +77,7 @@ const patches = [
     phase: "webview-asset",
     order: 20_800,
     ciPolicy: "optional",
-    pattern: /^composer-.*\.js$/,
+    pattern: /^app-initial~app-main~page-.*\.js$/,
     missingDescription: "composer status panel bundle",
     skipDescription: "persistent status panel patch",
     apply: applyPersistentStatusPanelPatch,
