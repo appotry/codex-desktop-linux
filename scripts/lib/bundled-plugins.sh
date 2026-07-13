@@ -239,12 +239,37 @@ find_cargo_for_linux_computer_use() {
     return 1
 }
 
+find_system_computer_use_binary() {
+    local name="$1"
+    local candidate
+
+    for candidate in \
+        "$HOME/.cargo/bin/$name" \
+        "$HOME/.local/bin/$name"; do
+        if [ -x "$candidate" ]; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+    done
+
+    candidate="$(command -v "$name" 2>/dev/null || true)"
+    if [ -n "$candidate" ] && [ -x "$candidate" ]; then
+        printf '%s\n' "$candidate"
+        return 0
+    fi
+
+    return 1
+}
+
 build_linux_computer_use_backend() {
     local crate_dir="$SCRIPT_DIR/computer-use-linux"
     local backend_binary="$SCRIPT_DIR/target/release/codex-computer-use-linux"
     local cosmic_helper_binary="$SCRIPT_DIR/target/release/codex-computer-use-cosmic"
     local cargo_cmd=""
+    local system_backend=""
+    local system_cosmic=""
 
+    # Step 1: Environment override
     if [ -n "${CODEX_LINUX_COMPUTER_USE_BACKEND_SOURCE:-}" ] || [ -n "${CODEX_LINUX_COMPUTER_USE_COSMIC_SOURCE:-}" ]; then
         [ -n "${CODEX_LINUX_COMPUTER_USE_BACKEND_SOURCE:-}" ] || warn "CODEX_LINUX_COMPUTER_USE_BACKEND_SOURCE is not set"
         [ -n "${CODEX_LINUX_COMPUTER_USE_COSMIC_SOURCE:-}" ] || warn "CODEX_LINUX_COMPUTER_USE_COSMIC_SOURCE is not set"
@@ -255,6 +280,39 @@ build_linux_computer_use_backend() {
         return 0
     fi
 
+    # Steps 2-3 are opt-in: the vendored build stays the default so the
+    # repository only ships code it is responsible for. Set
+    # CODEX_LINUX_COMPUTER_USE_SYSTEM_INSTALL=1 to reuse a system-installed
+    # computer-use-linux (or install it from crates.io) instead of building
+    # the vendored crate.
+    if [ "${CODEX_LINUX_COMPUTER_USE_SYSTEM_INSTALL:-}" = "1" ]; then
+        # Step 2: System-installed binaries
+        if system_backend="$(find_system_computer_use_binary computer-use-linux)" &&
+            system_cosmic="$(find_system_computer_use_binary computer-use-linux-cosmic)"; then
+            info "Using system computer-use-linux MCP binaries: $system_backend"
+            printf '%s\n%s\n' "$system_backend" "$system_cosmic"
+            return 0
+        fi
+
+        # Step 3: Install from crates.io
+        if cargo_cmd="$(find_cargo_for_linux_computer_use)"; then
+            info "Installing computer-use-linux MCP from crates.io..."
+            if "$cargo_cmd" install --locked computer-use-linux >&2; then
+                if system_backend="$(find_system_computer_use_binary computer-use-linux)" &&
+                    system_cosmic="$(find_system_computer_use_binary computer-use-linux-cosmic)"; then
+                    printf '%s\n%s\n' "$system_backend" "$system_cosmic"
+                    return 0
+                fi
+                warn "computer-use-linux binaries missing after crates.io install"
+            else
+                warn "Failed to install computer-use-linux from crates.io; falling back to vendored build"
+            fi
+        else
+            warn "cargo not found for crates.io install; falling back to vendored build"
+        fi
+    fi
+
+    # Step 4: Vendored build fallback
     if [ ! -d "$crate_dir" ]; then
         warn "Linux Computer Use backend source not found at $crate_dir"
         return 1
@@ -265,7 +323,7 @@ build_linux_computer_use_backend() {
         return 1
     fi
 
-    info "Building Linux Computer Use backend..."
+    info "Building Linux Computer Use backend from vendored source..."
     if ! (cd "$SCRIPT_DIR" && "$cargo_cmd" build --release -p codex-computer-use-linux >&2); then
         warn "Failed to build Linux Computer Use backend"
         return 1
@@ -311,6 +369,11 @@ stage_linux_computer_use_plugin() {
     cp "$cosmic_helper_binary" "$target_plugin/bin/codex-computer-use-cosmic"
     chmod 0755 "$target_plugin/bin/codex-computer-use-linux"
     chmod 0755 "$target_plugin/bin/codex-computer-use-cosmic"
+    if [ "${backend_binary##*/}" = "computer-use-linux" ]; then
+        # The published backend resolves its COSMIC helper by this sibling name.
+        cp "$cosmic_helper_binary" "$target_plugin/bin/computer-use-linux-cosmic"
+        chmod 0755 "$target_plugin/bin/computer-use-linux-cosmic"
+    fi
 
     local plugin_icon_source="${LINUX_ICON_SOURCE:-$ICON_SOURCE}"
     if [ -f "$plugin_icon_source" ]; then
@@ -1579,6 +1642,11 @@ install_bundled_plugin_resources() {
 
     install_linux_executable_resource "$upstream_resources/node" "$resources_dir/node" "node runtime" "info" || true
     install_browser_use_node_repl_resource "$upstream_resources" "$resources_dir/node_repl" || true
+
+    # These files become the trust root for user-cache refreshes at runtime.
+    # Normalize them while staging from the accepted DMG instead of blessing a
+    # potentially modified installed tree during launcher startup.
+    chmod -R u+rwX,go-w "$bundled_plugins_dir"
 
     info "Linux-safe bundled plugins installed"
 }

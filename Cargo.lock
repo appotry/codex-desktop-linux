@@ -517,6 +517,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "codex-notification-actions-linux"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "futures-util",
+ "serde",
+ "serde_json",
+ "tokio",
+ "zbus",
+]
+
+[[package]]
 name = "codex-read-aloud-linux"
 version = "0.1.0-linux-alpha1"
 dependencies = [

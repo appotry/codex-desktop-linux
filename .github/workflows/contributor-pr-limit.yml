@@ -1,0 +1,41 @@
+name: Enforce contributor pull request limit
+
+on:
+  pull_request_target:
+    types: [opened, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  enforce-limit:
+    name: Enforce contributor pull request limit
+    runs-on: ubuntu-latest
+    concurrency:
+      group: contributor-pr-limit
+      cancel-in-progress: false
+    steps:
+      # pull_request_target grants write access for fork PRs. Always load the
+      # enforcement code from the trusted default branch, never from the PR.
+      - name: Check out trusted enforcement code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - name: Enforce open pull request limit
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        env:
+          MAX_OPEN_PRS_PER_CONTRIBUTOR: ${{ vars.MAX_OPEN_PRS_PER_CONTRIBUTOR }}
+          MAX_OPEN_PRS_PER_CONTRIBUTOR_OVERRIDES: ${{ vars.MAX_OPEN_PRS_PER_CONTRIBUTOR_OVERRIDES }}
+        with:
+          script: |
+            const { enforcePullRequestLimits } = require('./scripts/ci/enforce-pr-limit.js');
+            await enforcePullRequestLimits({
+              context,
+              core,
+              github,
+              rawLimit: process.env.MAX_OPEN_PRS_PER_CONTRIBUTOR,
+              rawOverrides: process.env.MAX_OPEN_PRS_PER_CONTRIBUTOR_OVERRIDES,
+            });

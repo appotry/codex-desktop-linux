@@ -161,6 +161,7 @@ test("upstream workflow concurrency is isolated per PR or ref", () => {
     path.resolve(__dirname, "../../.github/workflows/upstream-build-app.yml"),
     "utf8",
   );
+  assert.match(workflow, /cron: '30 \* \* \* \*'/);
   assert.match(
     workflow,
     /group: upstream-dmg-acceptance-\$\{\{ github\.event_name \}\}-\$\{\{ github\.event\.pull_request\.number \|\| github\.ref \}\}/,

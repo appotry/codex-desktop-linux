@@ -2,7 +2,7 @@ name: Upstream Build App
 
 on:
   schedule:
-    - cron: '30 6 * * *'
+    - cron: '30 * * * *'
   pull_request:
     paths:
       - install.sh

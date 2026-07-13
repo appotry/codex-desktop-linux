@@ -1,3 +1,5 @@
+**IMPORTANT: Please keep only one pull request open at a time. The default maximum is two active pull requests from the same contributor, and even that should be reserved for exceptional circumstances. Maintainers may configure a different per-contributor limit for explicit exceptions. Do not open several pull requests at once; finish or close existing work before submitting more. An automated bot will close pull requests that exceed the effective limit.**
+
 <!-- Complete this template before requesting review or merge. -->
 
 ## Summary

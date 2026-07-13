@@ -1,3 +1,47 @@
+codex_capture_original_ld_library_path() {
+    # Packaged runtimes may extend LD_LIBRARY_PATH after this point. Main-process
+    # host children use this three-state snapshot instead of inheriting those paths.
+    # HOST is populated later from the login shell; inherited values are stale or
+    # user-controlled internal state and must never override this fresh snapshot.
+    unset CODEX_LINUX_HOST_LD_LIBRARY_PATH_STATE CODEX_LINUX_HOST_LD_LIBRARY_PATH_VALUE
+    if [ "${LD_LIBRARY_PATH+x}" != x ]; then
+        CODEX_LINUX_ORIGINAL_LD_LIBRARY_PATH_STATE="unset"
+        CODEX_LINUX_ORIGINAL_LD_LIBRARY_PATH_VALUE=""
+    elif [ -z "$LD_LIBRARY_PATH" ]; then
+        CODEX_LINUX_ORIGINAL_LD_LIBRARY_PATH_STATE="empty"
+        CODEX_LINUX_ORIGINAL_LD_LIBRARY_PATH_VALUE=""
+    else
+        CODEX_LINUX_ORIGINAL_LD_LIBRARY_PATH_STATE="value"
+        CODEX_LINUX_ORIGINAL_LD_LIBRARY_PATH_VALUE="$LD_LIBRARY_PATH"
+    fi
+    export CODEX_LINUX_ORIGINAL_LD_LIBRARY_PATH_STATE CODEX_LINUX_ORIGINAL_LD_LIBRARY_PATH_VALUE
+}
+
+codex_restore_original_ld_library_path() {
+    local state="${CODEX_LINUX_ORIGINAL_LD_LIBRARY_PATH_STATE:-}"
+    local value="${CODEX_LINUX_ORIGINAL_LD_LIBRARY_PATH_VALUE:-}"
+
+    unset CODEX_LINUX_ORIGINAL_LD_LIBRARY_PATH_STATE CODEX_LINUX_ORIGINAL_LD_LIBRARY_PATH_VALUE
+    unset CODEX_LINUX_HOST_LD_LIBRARY_PATH_STATE CODEX_LINUX_HOST_LD_LIBRARY_PATH_VALUE
+    case "$state" in
+        unset) unset LD_LIBRARY_PATH ;;
+        empty) export LD_LIBRARY_PATH="" ;;
+        value) export LD_LIBRARY_PATH="$value" ;;
+    esac
+}
+
+codex_exec_host_command() {
+    codex_restore_original_ld_library_path
+    exec "$@"
+}
+
+codex_run_host_command() (
+    codex_exec_host_command "$@"
+)
+
+# Capture before package-specific launcher patches add application runtime paths.
+codex_capture_original_ld_library_path
+
 resolve_script_dir() {
     local source="${BASH_SOURCE[0]}"
     local dir
@@ -332,6 +376,50 @@ make_tree_owner_writable() {
     chmod -R u+rwX "$path" 2>/dev/null || true
 }
 
+make_path_owner_trusted() {
+    local path
+
+    for path in "$@"; do
+        [ ! -L "$path" ] || return 1
+        [ -e "$path" ] || continue
+        chmod u+rwX,go-w "$path" 2>/dev/null || return 1
+    done
+}
+
+make_tree_owner_trusted() {
+    local path="$1"
+
+    [ ! -L "$path" ] || return 1
+    [ -e "$path" ] || return 0
+    if find "$path" -xdev -type l -print -quit 2>/dev/null | grep -q .; then
+        return 1
+    fi
+    chmod -R u+rwX,go-w "$path" 2>/dev/null || return 1
+}
+
+path_has_unsafe_write() {
+    local path
+
+    for path in "$@"; do
+        if [ -L "$path" ]; then
+            return 0
+        fi
+        [ -e "$path" ] || continue
+        if find "$path" -maxdepth 0 -perm /022 -print -quit 2>/dev/null | grep -q .; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+tree_has_unsafe_write() {
+    local path="$1"
+
+    [ ! -L "$path" ] || return 0
+    [ -e "$path" ] || return 1
+    find "$path" -xdev \( -type l -o -perm /022 \) -print -quit 2>/dev/null | grep -q .
+}
+
 remove_tree_if_exists() {
     local path="$1"
 
@@ -636,7 +724,7 @@ run_feature_prelaunch_hooks() {
         CODEX_LINUX_LAUNCHER_CMD="${CODEX_LINUX_LAUNCHER_CMD:-$SCRIPT_DIR/start.sh}" \
         CODEX_LINUX_FEATURE_HOOK_PHASE="prelaunch" \
         CODEX_UPDATE_MANAGER_PATH="${CODEX_UPDATE_MANAGER_PATH:-}" \
-            "$hook" "$SCRIPT_DIR" "$APP_STATE_DIR" "$LOG_DIR"
+            codex_run_host_command "$hook" "$SCRIPT_DIR" "$APP_STATE_DIR" "$LOG_DIR"
     done
 }
 
@@ -894,6 +982,7 @@ sync_chrome_bundled_plugin_cache() {
     local marketplace_plugin_link
     local host_path
     local needs_copy=1
+    local cache_was_untrusted=0
 
     [ -f "$plugin_json" ] || return 0
     [ -d "$source_plugin" ] || return 0
@@ -909,6 +998,17 @@ sync_chrome_bundled_plugin_cache() {
     [ -f "$source_client" ] || return 0
     [ -f "$source_install_manifest" ] || return 0
 
+    if path_has_unsafe_write \
+        "$SCRIPT_DIR" \
+        "$SCRIPT_DIR/resources" \
+        "$SCRIPT_DIR/resources/plugins" \
+        "$SCRIPT_DIR/resources/plugins/openai-bundled" \
+        "$SCRIPT_DIR/resources/plugins/openai-bundled/plugins" \
+        "$source_plugin" || tree_has_unsafe_write "$source_plugin"; then
+        echo "Chrome bundled plugin source is not trusted; skipping cache and native-host manifest sync."
+        return 0
+    fi
+
     version="$(bundled_plugin_version "$plugin_json" 2>/dev/null || true)"
     [ -n "$version" ] || return 0
 
@@ -918,7 +1018,27 @@ sync_chrome_bundled_plugin_cache() {
     cache_client="$cache_plugin/scripts/browser-client.mjs"
     cache_install_manifest="$cache_plugin/scripts/installManifest.mjs"
 
-    if [ -f "$cache_plugin/.codex-plugin/plugin.json" ] && \
+    if path_has_unsafe_write \
+        "$codex_home" \
+        "$codex_home/plugins" \
+        "$codex_home/plugins/cache" \
+        "$codex_home/plugins/cache/openai-bundled" \
+        "$cache_root" || tree_has_unsafe_write "$cache_plugin"; then
+        cache_was_untrusted=1
+    fi
+
+    if ! make_path_owner_trusted \
+        "$codex_home" \
+        "$codex_home/plugins" \
+        "$codex_home/plugins/cache" \
+        "$codex_home/plugins/cache/openai-bundled" \
+        "$cache_root"; then
+        echo "Chrome plugin cache ancestors could not be hardened; skipping cache and native-host manifest sync."
+        return 0
+    fi
+
+    if [ "$cache_was_untrusted" -eq 0 ] && \
+        [ -f "$cache_plugin/.codex-plugin/plugin.json" ] && \
         [ -f "$cache_host" ] && \
         [ -f "$cache_client" ] && \
         [ -f "$cache_install_manifest" ] && \
@@ -951,9 +1071,23 @@ sync_chrome_bundled_plugin_cache() {
         tmp_plugin="$cache_parent/.chrome-$version.tmp.$$"
         remove_tree_if_exists "$tmp_plugin"
         mkdir -p "$cache_parent"
+        if ! make_path_owner_trusted \
+            "$codex_home" \
+            "$codex_home/plugins" \
+            "$codex_home/plugins/cache" \
+            "$codex_home/plugins/cache/openai-bundled" \
+            "$cache_root" \
+            "$cache_parent"; then
+            echo "Chrome plugin cache parent could not be hardened; skipping cache and native-host manifest sync."
+            return 0
+        fi
 
         if cp -R "$source_plugin" "$tmp_plugin"; then
-            make_tree_owner_writable "$tmp_plugin"
+            if ! make_tree_owner_trusted "$tmp_plugin"; then
+                remove_tree_if_exists "$tmp_plugin"
+                echo "Chrome plugin cache copy could not be hardened; continuing without a new cache."
+                return 0
+            fi
             find "$tmp_plugin" -type f -name '*:com.apple.*' -delete
             remove_tree_if_exists "$cache_plugin"
             mv "$tmp_plugin" "$cache_plugin"
@@ -965,6 +1099,10 @@ sync_chrome_bundled_plugin_cache() {
         fi
     fi
 
+    if ! make_tree_owner_trusted "$cache_plugin"; then
+        echo "Chrome plugin cache could not be hardened; skipping native-host manifest sync."
+        return 0
+    fi
     replace_symlink "$version" "$cache_root/latest"
 
     marketplace_root="$codex_home/.tmp/bundled-marketplaces/openai-bundled"
@@ -1270,7 +1408,7 @@ run_cold_start_hooks() {
             CODEX_LINUX_LAUNCHER_CMD="${CODEX_LINUX_LAUNCHER_CMD:-$SCRIPT_DIR/start.sh}" \
             CODEX_LINUX_FEATURE_HOOK_PHASE="cold-start" \
             CODEX_UPDATE_MANAGER_PATH="${CODEX_UPDATE_MANAGER_PATH:-}" \
-            "$hook" "$SCRIPT_DIR" "$APP_STATE_DIR" "$LOG_DIR"
+            codex_run_host_command "$hook" "$SCRIPT_DIR" "$APP_STATE_DIR" "$LOG_DIR"
         ) >>"$LOG_FILE" 2>&1 &
     done
 }
@@ -1295,7 +1433,7 @@ run_feature_after_exit_hooks() {
         CODEX_LINUX_FEATURE_HOOK_PHASE="after-exit" \
         CODEX_LINUX_ELECTRON_EXIT_STATUS="$electron_status" \
         CODEX_UPDATE_MANAGER_PATH="${CODEX_UPDATE_MANAGER_PATH:-}" \
-            "$hook" "$SCRIPT_DIR" "$APP_STATE_DIR" "$LOG_DIR" "$electron_status"
+            codex_run_host_command "$hook" "$SCRIPT_DIR" "$APP_STATE_DIR" "$LOG_DIR" "$electron_status"
         hook_status=$?
         set -e
         if [ "$hook_status" -ne 0 ]; then
@@ -1544,7 +1682,7 @@ codex_cli_version_probe() {
     rm -f "$marker"
     ( trap - EXIT
       { exec 9>&-; } 2>/dev/null || true
-      exec "$@" >"$output_file" 2>/dev/null
+      codex_exec_host_command "$@" >"$output_file" 2>/dev/null
     ) &
     probe_pid="$!"
     # The watchdog (and its sleep child, which outlives the kill below) must
@@ -1641,7 +1779,7 @@ notify_error() {
     icon="$(resolve_notification_icon)"
     echo "$message"
     if command -v notify-send >/dev/null 2>&1; then
-        notify-send \
+        codex_run_host_command notify-send \
             -a "$CODEX_LINUX_APP_DISPLAY_NAME" \
             -i "$icon" \
             -h "string:desktop-entry:$CODEX_LINUX_APP_ID" \
@@ -1696,7 +1834,7 @@ export_feature_runtime_env() {
 
 run_update_manager() {
     resolve_update_manager_path || return 127
-    "$CODEX_UPDATE_MANAGER_PATH" "$@"
+    codex_run_host_command "$CODEX_UPDATE_MANAGER_PATH" "$@"
 }
 
 pid_is_current_user() {
@@ -3318,7 +3456,7 @@ run_feature_launcher_hooks() {
             CODEX_LINUX_FEATURES_DIR="$CODEX_LINUX_FEATURES_DIR" \
             CODEX_LINUX_LAUNCHER_LOG="$LOG_FILE" \
             CODEX_LINUX_FEATURE_HOOK_PHASE=launcher \
-            "$hook" "${ELECTRON_ARGS[@]}"
+            codex_run_host_command "$hook" "${ELECTRON_ARGS[@]}"
         )"; then
             :
         else

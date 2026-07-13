@@ -6,6 +6,10 @@ function requireName(source, moduleName) {
   return source.match(new RegExp(`([A-Za-z_$][\\w$]*)=require\\([\\\`'"]${escaped}[\\\`'"]\\)`))?.[1] ?? null;
 }
 
+function buildUpdateManagerEnvSource() {
+  return "function codexLinuxUpdateManagerEnv(){let e={...process.env},t=process.env.CODEX_LINUX_ORIGINAL_LD_LIBRARY_PATH_STATE,n=t==null?void 0:process.env.CODEX_LINUX_HOST_LD_LIBRARY_PATH_STATE??t,r=process.env.CODEX_LINUX_HOST_LD_LIBRARY_PATH_STATE==null?process.env.CODEX_LINUX_ORIGINAL_LD_LIBRARY_PATH_VALUE:process.env.CODEX_LINUX_HOST_LD_LIBRARY_PATH_VALUE;n===`unset`?delete e.LD_LIBRARY_PATH:n===`empty`?e.LD_LIBRARY_PATH=``:n===`value`&&typeof r==`string`&&(e.LD_LIBRARY_PATH=r);for(let t of[`CODEX_LINUX_ORIGINAL_LD_LIBRARY_PATH_STATE`,`CODEX_LINUX_ORIGINAL_LD_LIBRARY_PATH_VALUE`,`CODEX_LINUX_HOST_LD_LIBRARY_PATH_STATE`,`CODEX_LINUX_HOST_LD_LIBRARY_PATH_VALUE`])delete e[t];return e}";
+}
+
 function buildInstallAfterQuitSource(childProcessVar) {
   return `function codexLinuxInstallAfterQuit(){try{let e=${childProcessVar}.spawn(\`/bin/sh\`,[\`-c\`,\`for i in 1 2 3 4 5 6 7 8 9 10;do sleep 1;s="$("$1" status 2>/dev/null||true)";echo "$s"|grep -q "^status: WaitingForAppExit"&&continue;echo "$s"|grep -q "^status: Installing"&&continue;"$1" install-ready||exit $?;s="$("$1" status 2>/dev/null||true)";echo "$s"|grep -q "^status: WaitingForAppExit"&&continue;echo "$s"|grep -q "^status: Installing"&&continue;if echo "$s"|grep -q "^status: Installed";then (/usr/bin/codex-desktop >/dev/null 2>&1 &);fi;exit 0;done\`,\`codex-linux-update-install\`,codexLinuxUpdateManagerPath()],{detached:!0,stdio:\`ignore\`,windowsHide:!0});e.unref?.()}catch{}}`;
 }
@@ -50,6 +54,25 @@ function migrateLinuxUpdaterBridgeSource(source) {
     "async function codexLinuxRefreshUpdateState(){await codexLinuxRunUpdateManager([`status`,`--json`]);return codexLinuxReadUpdateState()}",
     "async function codexLinuxRefreshUpdateState(){return codexLinuxReadUpdateState()}",
   );
+  if (patchedSource.includes("function codexLinuxRunUpdateManager(")) {
+    if (!patchedSource.includes("function codexLinuxUpdateManagerEnv(")) {
+      patchedSource = patchedSource.replace(
+        "function codexLinuxUpdateStatePath(",
+        `${buildUpdateManagerEnvSource()}function codexLinuxUpdateStatePath(`,
+      );
+    }
+    if (patchedSource.includes("function codexLinuxUpdateManagerEnv(")) {
+      patchedSource = patchedSource
+        .replace(
+          "{encoding:`utf8`,windowsHide:!0}",
+          "{encoding:`utf8`,windowsHide:!0,env:codexLinuxUpdateManagerEnv()}",
+        )
+        .replace(
+          "{detached:!0,stdio:`ignore`,windowsHide:!0}",
+          "{detached:!0,stdio:`ignore`,windowsHide:!0,env:codexLinuxUpdateManagerEnv()}",
+        );
+    }
+  }
   const probeSource =
     "async function codexLinuxProbeUpdateManager(){await codexLinuxRunUpdateManager([`--help`])}";
   const refreshSource =

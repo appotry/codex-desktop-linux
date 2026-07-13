@@ -36,6 +36,7 @@ LINUX_ICON_SOURCE="${CODEX_LINUX_ICON_SOURCE:-}"
 . "$SCRIPT_DIR/scripts/lib/asar-patch.sh"
 . "$SCRIPT_DIR/scripts/lib/webview-install.sh"
 . "$SCRIPT_DIR/scripts/lib/bundled-plugins.sh"
+. "$SCRIPT_DIR/scripts/lib/notification-actions.sh"
 . "$SCRIPT_DIR/scripts/lib/linux-features.sh"
 . "$SCRIPT_DIR/scripts/lib/rebuild-report.sh"
 . "$SCRIPT_DIR/scripts/lib/build-info.sh"
@@ -341,6 +342,7 @@ main() {
     download_electron
     extract_webview "$app_dir"
     install_app
+    stage_linux_notification_actions_bridge
     install_bundled_plugin_resources "$app_dir"
     run_linux_feature_stage_hooks "$app_dir"
     create_start_script

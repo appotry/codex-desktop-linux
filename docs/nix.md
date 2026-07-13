@@ -144,6 +144,14 @@ in
 }
 ```
 
+Set `remoteControl.environmentFile` to a quoted absolute runtime path such as
+`"/run/secrets/codex-remote-control.env"`. Prefix it with `-` only when systemd
+should ignore a missing file. Empty, relative, non-canonical, Nix-context, and
+store-backed paths are rejected. Do not interpolate a path containing secrets:
+Nix can copy it into the store before module validation rejects the
+configuration. The referenced runtime file must be readable by the user service
+and should remain owner-only.
+
 Pinning `github:sadjow/codex-cli-nix` to a release tag or commit is
 recommended for fully reproducible configurations.
 
@@ -197,11 +205,12 @@ The Home Manager and NixOS modules accept these feature IDs through
 | Feature ID | Purpose |
 | --- | --- |
 | `appshots` | Linux AppShots capture integration |
+| `frameless-titlebar` | Hide app-provided titlebar controls for compositor-managed decorations |
 | `mcp-helper-reaper` | Cleanup for stale configured MCP helper processes |
 | `node-repl-reaper` | Cleanup for leaked Browser Use `node_repl` helpers |
 | `open-target-discovery` | Linux terminal, editor, and file-manager discovery |
 | `persistent-status-panel` | Persistent `/status` panel state |
-| `remote-mobile-control` | Experimental mobile remote-control host enrollment |
+| `remote-mobile-control` | Experimental Linux Remote host and outbound-control adaptation |
 
 The list is validated during module evaluation, then deduplicated and sorted so
 equivalent configurations produce the same derivation. Features that are not in

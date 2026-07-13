@@ -1,9 +1,10 @@
 # Frameless Titlebar
 
 This optional feature hides the Linux Electron titlebar overlay controls and
-removes the native menu chrome from the main Codex window. It is intended for
-compositors or window managers where compositor-managed decorations already
-provide the expected window controls, such as Hyprland setups. It is also a
+removes the native menu chrome from the primary and Quick Chat Codex windows.
+It is intended for compositors or window managers where compositor-managed
+decorations already provide the expected window controls, such as Hyprland
+setups. It is also a
 useful diagnostic switch for GNOME/X11 titlebar right-click lockups, because it
 removes the Linux Window Controls Overlay path from the main window.
 
@@ -35,14 +36,15 @@ node --test linux-features/frameless-titlebar/test.js
 
 For a manual check, enable the feature as above, rebuild, and launch the app:
 
-- The primary window should show no Electron-drawn titlebar overlay buttons
-  (minimize/maximize/close in the top-right corner) and no menu bar.
+- The primary and Quick Chat windows should show no Electron-drawn titlebar
+  overlay buttons (minimize/maximize/close in the top-right corner) and no menu
+  bar.
 - Window move, resize, and close/minimize/maximize should work through your
   compositor's bindings (for example Hyprland's `bindm` mouse binds and
   `killactive`/`fullscreen` dispatchers).
 - Changing the system dark/light theme must not crash the app or repaint a
-  titlebar strip in the primary window; the patch removes its Linux
-  `setTitleBarOverlay` calls while preserving the Quick Chat overlay.
+  titlebar strip in either window; the patch removes their Linux
+  `setTitleBarOverlay` calls.
 - On GNOME/X11, right-click the same titlebar area that previously locked input
   and verify whether clicks outside the window recover normally. If the issue
   still reproduces, disable the feature again and report the distro, GNOME

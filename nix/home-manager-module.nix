@@ -8,6 +8,14 @@
 let
   cfg = config.programs.codexDesktopLinux;
   remoteCfg = cfg.remoteControl;
+  remoteEnvironmentFilePath =
+    if remoteCfg.environmentFile == null then null else lib.removePrefix "-" remoteCfg.environmentFile;
+  remoteEnvironmentFileSegments =
+    if remoteEnvironmentFilePath == null then [ ] else lib.drop 1 (lib.splitString "/" remoteEnvironmentFilePath);
+  remoteEnvironmentFileIsCanonical =
+    remoteEnvironmentFilePath != null
+    && lib.hasPrefix "/" remoteEnvironmentFilePath
+    && lib.all (segment: segment != "" && segment != "." && segment != "..") remoteEnvironmentFileSegments;
   system = pkgs.stdenv.hostPlatform.system;
   flakePackages = self.packages.${system};
   linuxFeatures = import ./linux-features.nix { inherit lib; };
@@ -187,11 +195,14 @@ in
       };
 
       environmentFile = lib.mkOption {
-        type = lib.types.nullOr lib.types.path;
+        type = lib.types.nullOr lib.types.str;
         default = null;
         example = "/run/secrets/codex-remote-control.env";
         description = ''
-          Additional environment file as defined in {manpage}`systemd.exec(5)`.
+          Runtime path to an additional environment file as defined in
+          {manpage}`systemd.exec(5)`. Use a quoted runtime string. Nix path
+          literals or interpolations can copy contents into the Nix store
+          before module validation; store-backed values are rejected.
         '';
       };
 
@@ -235,6 +246,28 @@ in
       {
         assertion = !remoteCfg.enable || pkgs.stdenv.hostPlatform.isLinux;
         message = "`programs.codexDesktopLinux.remoteControl.enable` is only supported on Linux";
+      }
+      {
+        assertion =
+          remoteCfg.environmentFile == null
+          || (!builtins.hasContext remoteCfg.environmentFile && remoteEnvironmentFileIsCanonical);
+        message = ''
+          `programs.codexDesktopLinux.remoteControl.environmentFile` must be an
+          absolute canonical runtime path without Nix store context, optionally
+          prefixed with `-`
+        '';
+      }
+      {
+        assertion =
+          remoteCfg.environmentFile == null
+          || (
+            remoteEnvironmentFilePath != builtins.storeDir
+            && !lib.hasPrefix "${builtins.storeDir}/" remoteEnvironmentFilePath
+          );
+        message = ''
+          `programs.codexDesktopLinux.remoteControl.environmentFile` must be a
+          runtime path outside the Nix store
+        '';
       }
     ];
 

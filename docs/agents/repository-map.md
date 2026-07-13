@@ -220,6 +220,10 @@ The updater runs unprivileged and only escalates through `pkexec` for
 
 ## Computer Use, Browser, Read Aloud, And Record & Replay
 
+- `notification-actions-linux/`
+  Small Rust D-Bus bridge for freedesktop notification action and close
+  signals. The main-process core patch uses it only for upstream notifications
+  that already carry actions and falls back to Electron otherwise.
 - `computer-use-linux/`
   Rust crate for Linux Computer Use MCP, Chrome native messaging host, and the
   COSMIC helper. It covers input, capture, accessibility, terminal, identity,

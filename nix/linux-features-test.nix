@@ -13,6 +13,7 @@ let
   testFeatureIds = [
     "persistent-status-panel"
     "appshots"
+    "frameless-titlebar"
     "global-dictation"
     "mcp-helper-reaper"
     "remote-mobile-control"
@@ -22,6 +23,7 @@ let
   ];
   normalizedTestFeatureIds = [
     "appshots"
+    "frameless-titlebar"
     "global-dictation"
     "mcp-helper-reaper"
     "open-target-discovery"
@@ -123,6 +125,7 @@ let
     enableComputerUseUi = true;
     linuxFeatureIds = [
       "remote-mobile-control"
+      "frameless-titlebar"
       "global-dictation"
       "persistent-status-panel"
       "mcp-helper-reaper"
@@ -137,6 +140,32 @@ let
     mkdir -p "$out"
   '';
   customConfig = combinedConfig // { package = customPackage; };
+  remoteControlConfig = {
+    enable = true;
+    package = customPackage;
+    remoteControl = {
+      enable = true;
+      package = pkgs.writeShellScriptBin "codex" "exit 0";
+      environmentFile = "/run/secrets/codex-remote-control.env";
+    };
+  };
+  remoteControlConfigWithEnvironmentFile = environmentFile:
+    remoteControlConfig
+    // {
+      remoteControl = remoteControlConfig.remoteControl // { inherit environmentFile; };
+    };
+  homeRemoteService =
+    (evalHomeManager remoteControlConfig).config.systemd.user.services.codex-remote-control;
+  nixosRemoteService =
+    (evalNixOS remoteControlConfig).config.systemd.user.services.codex-remote-control;
+  optionalHomeRemoteService =
+    (evalHomeManager (
+      remoteControlConfigWithEnvironmentFile "-/run/secrets/codex-remote-control.env"
+    )).config.systemd.user.services.codex-remote-control;
+  optionalNixOSRemoteService =
+    (evalNixOS (
+      remoteControlConfigWithEnvironmentFile "-/run/secrets/codex-remote-control.env"
+    )).config.systemd.user.services.codex-remote-control;
 
   invalidBuilder = builtins.tryEval (
     (packages.codex-desktop.override {
@@ -159,6 +188,74 @@ let
       }).config.environment.systemPackages
       true
   );
+  invalidHomeManagerEnvironmentFile = builtins.tryEval (
+    builtins.deepSeq
+      (evalHomeManager (
+        remoteControlConfigWithEnvironmentFile ./linux-features-test.nix
+      )).config.systemd.user.services.codex-remote-control
+      true
+  );
+  invalidNixOSEnvironmentFile = builtins.tryEval (
+    builtins.deepSeq
+      (evalNixOS (
+        remoteControlConfigWithEnvironmentFile ./linux-features-test.nix
+      )).config.systemd.user.services.codex-remote-control
+      true
+  );
+  storeEnvironmentFiles = [
+    "${./linux-features-test.nix}"
+    "-${./linux-features-test.nix}"
+  ];
+  invalidRuntimeEnvironmentFiles = [
+    ""
+    "secrets.env"
+    "-secrets.env"
+    "//nix/store/example-secret"
+    "/run/../nix/store/example-secret"
+    "/nix//store/example-secret"
+    "/run/secrets/./codex-remote-control.env"
+    "/run/secrets/"
+  ];
+  contextEnvironmentFiles = [
+    "/run/secrets/${./linux-features-test.nix}"
+    "-/run/secrets/${./linux-features-test.nix}"
+  ];
+  homeManagerStoreEnvironmentFileAssertions = map (
+    environmentFile:
+    (evalHomeManager (
+      remoteControlConfigWithEnvironmentFile environmentFile
+    )).config.assertions
+  ) storeEnvironmentFiles;
+  nixosStoreEnvironmentFileAssertions = map (
+    environmentFile:
+    (evalNixOS (
+      remoteControlConfigWithEnvironmentFile environmentFile
+    )).config.assertions
+  ) storeEnvironmentFiles;
+  homeManagerRuntimeEnvironmentFileAssertions = map (
+    environmentFile:
+    (evalHomeManager (
+      remoteControlConfigWithEnvironmentFile environmentFile
+    )).config.assertions
+  ) invalidRuntimeEnvironmentFiles;
+  nixosRuntimeEnvironmentFileAssertions = map (
+    environmentFile:
+    (evalNixOS (
+      remoteControlConfigWithEnvironmentFile environmentFile
+    )).config.assertions
+  ) invalidRuntimeEnvironmentFiles;
+  homeManagerContextEnvironmentFileAssertions = map (
+    environmentFile:
+    (evalHomeManager (
+      remoteControlConfigWithEnvironmentFile environmentFile
+    )).config.assertions
+  ) contextEnvironmentFiles;
+  nixosContextEnvironmentFileAssertions = map (
+    environmentFile:
+    (evalNixOS (
+      remoteControlConfigWithEnvironmentFile environmentFile
+    )).config.assertions
+  ) contextEnvironmentFiles;
 in
 assert lib.assertMsg
   (linuxFeatures.normalize testFeatureIds == normalizedTestFeatureIds)
@@ -193,6 +290,42 @@ assert lib.assertMsg
 assert lib.assertMsg (!invalidBuilder.success) "the package builder accepted an unsupported feature";
 assert lib.assertMsg (!invalidHomeManager.success) "Home Manager accepted an unsupported feature";
 assert lib.assertMsg (!invalidNixOS.success) "NixOS accepted an unsupported feature";
+assert lib.assertMsg
+  (homeRemoteService.Service.EnvironmentFile == "/run/secrets/codex-remote-control.env")
+  "Home Manager changed the runtime remote-control environment-file path";
+assert lib.assertMsg
+  (nixosRemoteService.serviceConfig.EnvironmentFile == "/run/secrets/codex-remote-control.env")
+  "NixOS changed the runtime remote-control environment-file path";
+assert lib.assertMsg
+  (optionalHomeRemoteService.Service.EnvironmentFile == "-/run/secrets/codex-remote-control.env")
+  "Home Manager rejected or changed an optional absolute environment-file path";
+assert lib.assertMsg
+  (optionalNixOSRemoteService.serviceConfig.EnvironmentFile == "-/run/secrets/codex-remote-control.env")
+  "NixOS rejected or changed an optional absolute environment-file path";
+assert lib.assertMsg
+  (!invalidHomeManagerEnvironmentFile.success)
+  "Home Manager accepted a Nix path that can copy remote-control secrets into the store";
+assert lib.assertMsg
+  (!invalidNixOSEnvironmentFile.success)
+  "NixOS accepted a Nix path that can copy remote-control secrets into the store";
+assert lib.assertMsg
+  (lib.all (assertions: !lib.all (item: item.assertion) assertions) homeManagerStoreEnvironmentFileAssertions)
+  "Home Manager accepted a store path for the remote-control environment file";
+assert lib.assertMsg
+  (lib.all (assertions: !lib.all (item: item.assertion) assertions) nixosStoreEnvironmentFileAssertions)
+  "NixOS accepted a store path for the remote-control environment file";
+assert lib.assertMsg
+  (lib.all (assertions: !lib.all (item: item.assertion) assertions) homeManagerRuntimeEnvironmentFileAssertions)
+  "Home Manager accepted an empty, relative, or non-canonical remote-control environment-file path";
+assert lib.assertMsg
+  (lib.all (assertions: !lib.all (item: item.assertion) assertions) nixosRuntimeEnvironmentFileAssertions)
+  "NixOS accepted an empty, relative, or non-canonical remote-control environment-file path";
+assert lib.assertMsg
+  (lib.all (assertions: !lib.all (item: item.assertion) assertions) homeManagerContextEnvironmentFileAssertions)
+  "Home Manager accepted a context-bearing remote-control environment-file path";
+assert lib.assertMsg
+  (lib.all (assertions: !lib.all (item: item.assertion) assertions) nixosContextEnvironmentFileAssertions)
+  "NixOS accepted a context-bearing remote-control environment-file path";
 pkgs.runCommand "nix-linux-features-evaluation" { } ''
   touch "$out"
 ''

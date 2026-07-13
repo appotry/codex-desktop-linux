@@ -1399,8 +1399,12 @@ test("open-target discovery targets only the current native selector bundle", ()
   );
 
   assert.ok(descriptor);
-  assert.match(
+  assert.doesNotMatch(
     "app-initial~app-main~onboarding-page~hotkey-window-thread-page~quick-chat-window-page~chatg~gwqc41kz-Bj9ubaFn.js",
+    descriptor.pattern,
+  );
+  assert.match(
+    "app-initial~app-main~new-thread-panel-page~appgen-library-page~hotkey-window-thread-page~ho~iufn7mg3-MXsOJYYa.js",
     descriptor.pattern,
   );
   assert.doesNotMatch("open-target-selection-legacy.js", descriptor.pattern);

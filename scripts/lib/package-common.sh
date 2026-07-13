@@ -808,6 +808,7 @@ stage_update_builder_bundle() {
     cp "$REPO_DIR/Cargo.toml" "$update_builder_root/Cargo.toml"
     cp "$REPO_DIR/Cargo.lock" "$update_builder_root/Cargo.lock"
     cp -r "$REPO_DIR/computer-use-linux" "$update_builder_root/computer-use-linux"
+    cp -r "$REPO_DIR/notification-actions-linux" "$update_builder_root/notification-actions-linux"
     cp -r "$REPO_DIR/record-replay-linux" "$update_builder_root/record-replay-linux"
     cp -r "$REPO_DIR/read-aloud-linux" "$update_builder_root/read-aloud-linux"
     cp -r "$REPO_DIR/updater" "$update_builder_root/updater"
@@ -834,6 +835,7 @@ stage_update_builder_bundle() {
     cp "$REPO_DIR/scripts/lib/asar-patch.sh" "$update_builder_root/scripts/lib/asar-patch.sh"
     cp "$REPO_DIR/scripts/lib/webview-install.sh" "$update_builder_root/scripts/lib/webview-install.sh"
     cp "$REPO_DIR/scripts/lib/bundled-plugins.sh" "$update_builder_root/scripts/lib/bundled-plugins.sh"
+    cp "$REPO_DIR/scripts/lib/notification-actions.sh" "$update_builder_root/scripts/lib/notification-actions.sh"
     cp "$REPO_DIR/scripts/lib/patch-browser-client-iab-socket-scope.js" \
         "$update_builder_root/scripts/lib/patch-browser-client-iab-socket-scope.js"
     cp "$REPO_DIR/scripts/lib/linux-features.js" "$update_builder_root/scripts/lib/linux-features.js"
