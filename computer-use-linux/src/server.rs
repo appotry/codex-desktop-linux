@@ -21,6 +21,7 @@ use crate::windows::{
     window_permission_hint, WindowFocusResult, WindowInfo, WindowTarget,
     GNOME_SHELL_INTROSPECT_BACKEND,
 };
+use crate::ydotool;
 use anyhow::Result;
 use rmcp::{
     handler::server::wrapper::{Json, Parameters},
@@ -1905,8 +1906,9 @@ impl ComputerUseLinux {
     }
 
     // The Wayland remote-desktop portal is now a *fallback* for input: when a
-    // working `ydotoold` socket is present we prefer ydotool, because it injects
-    // input without a permission prompt. GNOME refuses to persist remote-desktop
+    // compatible ydotool CLI and working `ydotoold` socket are present we prefer
+    // ydotool, because it injects input without a permission prompt. GNOME
+    // refuses to persist remote-desktop
     // grants (`org.freedesktop.portal.Error: Remote desktop sessions cannot
     // persist`), so the portal would otherwise re-prompt on every new session.
     // `COMPUTER_USE_LINUX_FORCE_YDOTOOL_*=1` always uses ydotool;
@@ -1926,7 +1928,10 @@ impl ComputerUseLinux {
         ]) {
             return self.is_wayland_session();
         }
-        self.is_wayland_session() && ydotool_socket().is_none()
+        should_prefer_portal_backend_by_default(
+            self.is_wayland_session(),
+            ydotool_backend_available(),
+        )
     }
 
     fn should_prefer_portal_keyboard_backend(&self) -> bool {
@@ -1942,7 +1947,11 @@ impl ComputerUseLinux {
         ]) {
             return self.is_wayland_session() && !self.is_kde_wayland_session();
         }
-        self.is_wayland_session() && !self.is_kde_wayland_session() && ydotool_socket().is_none()
+        !self.is_kde_wayland_session()
+            && should_prefer_portal_backend_by_default(
+                self.is_wayland_session(),
+                ydotool_backend_available(),
+            )
     }
 
     fn should_prefer_kde_clipboard_text_backend(&self) -> bool {
@@ -3281,6 +3290,7 @@ async fn run_ydotool_sequence(
 }
 
 async fn run_ydotool(args: &[String]) -> std::result::Result<Output, String> {
+    ydotool::ensure_supported()?;
     let mut command = TokioCommand::new("ydotool");
     command.args(args);
     if let Some(socket) = ydotool_socket() {
@@ -3291,7 +3301,13 @@ async fn run_ydotool(args: &[String]) -> std::result::Result<Output, String> {
 
     match command.spawn() {
         Ok(child) => match wait_for_ydotool_output(child).await {
-            Ok(output) if output.status.success() => Ok(output),
+            Ok(output) if output.status.success() => {
+                if let Some(error) = ydotool::cli_error(&output.stderr) {
+                    Err(error)
+                } else {
+                    Ok(output)
+                }
+            }
             Ok(output) => Err(ydotool_output_error(output)),
             Err(error) => Err(error),
         },
@@ -3300,6 +3316,7 @@ async fn run_ydotool(args: &[String]) -> std::result::Result<Output, String> {
 }
 
 async fn run_ydotool_type_text(text: &str) -> std::result::Result<Output, String> {
+    ydotool::ensure_supported()?;
     let mut command = TokioCommand::new("ydotool");
     command.args(["type", "--file", "-"]);
     if let Some(socket) = ydotool_socket() {
@@ -3320,7 +3337,11 @@ async fn run_ydotool_type_text(text: &str) -> std::result::Result<Output, String
             let output =
                 wait_for_ydotool_output_with_timeout(child, ydotool_type_timeout(text)).await?;
             if output.status.success() {
-                Ok(output)
+                if let Some(error) = ydotool::cli_error(&output.stderr) {
+                    Err(error)
+                } else {
+                    Ok(output)
+                }
             } else {
                 Err(ydotool_output_error(output))
             }
@@ -3539,6 +3560,28 @@ fn ydotool_socket() -> Option<String> {
 
     connectable_ydotool_socket_from(fallback_ydotool_socket_candidates())
         .map(|path| path.display().to_string())
+}
+
+fn ydotool_backend_available() -> bool {
+    ydotool_backend_available_from(
+        ydotool_socket_connectable(),
+        ydotool::ensure_supported().is_ok(),
+    )
+}
+
+fn ydotool_socket_connectable() -> bool {
+    if let Some(socket) = explicit_ydotool_socket() {
+        return ydotool_socket_connects(&PathBuf::from(socket));
+    }
+    connectable_ydotool_socket_from(fallback_ydotool_socket_candidates()).is_some()
+}
+
+fn ydotool_backend_available_from(socket_available: bool, cli_supported: bool) -> bool {
+    socket_available && cli_supported
+}
+
+fn should_prefer_portal_backend_by_default(is_wayland: bool, ydotool_available: bool) -> bool {
+    is_wayland && !ydotool_available
 }
 
 fn explicit_ydotool_socket() -> Option<String> {
@@ -4515,6 +4558,25 @@ mod tests {
                 "930".to_string(),
             ]
         );
+    }
+
+    #[test]
+    fn legacy_ydotool_socket_does_not_suppress_portal_fallback() {
+        let legacy_ydotool_available = ydotool_backend_available_from(true, false);
+        let current_ydotool_available = ydotool_backend_available_from(true, true);
+
+        assert!(should_prefer_portal_backend_by_default(
+            true,
+            legacy_ydotool_available
+        ));
+        assert!(!should_prefer_portal_backend_by_default(
+            true,
+            current_ydotool_available
+        ));
+        assert!(!should_prefer_portal_backend_by_default(
+            false,
+            legacy_ydotool_available
+        ));
     }
 
     #[test]

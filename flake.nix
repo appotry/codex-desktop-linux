@@ -53,6 +53,7 @@
           ];
         };
         flakeSourceCommit = self.rev or (self.dirtyRev or "");
+        flakeSourceRemote = "https://github.com/ilysenko/codex-desktop-linux.git";
         flakeSourceDateEpoch = toString (self.lastModified or 1);
         sourceRoot = pkgs.lib.cleanSourceWith {
           src = ./.;
@@ -93,10 +94,10 @@
 
         codexDmg = pkgs.fetchurl {
           url = "https://persistent.oaistatic.com/codex-app-prod/ChatGPT.dmg";
-          hash = "sha256-pmoGRf1N5vTyLnXKh77bFYWutX80V6PfVVCb+NoRCHk=";
+          hash = "sha256-QONIFOdOMJQ8IJ69TalM1N41gaUsW/++K88uSI1jYcY=";
         };
 
-        codexVersion = "26.707.51957";
+        codexVersion = "26.707.72221";
         electronVersion = "42.1.0";
         electronPlatform =
           {
@@ -518,6 +519,7 @@ PY
             export SOURCE_DATE_EPOCH="${flakeSourceDateEpoch}"
             ${pkgs.lib.optionalString (flakeSourceCommit != "") ''
             export CODEX_LINUX_SOURCE_COMMIT="${flakeSourceCommit}"
+            export CODEX_LINUX_SOURCE_REMOTE="${flakeSourceRemote}"
             ''}
             ${pkgs.lib.optionalString enableComputerUseUi ''
             export CODEX_LINUX_ENABLE_COMPUTER_USE_UI=1

@@ -474,6 +474,503 @@ function applyLinuxChatSearchHydrationPatch(currentSource) {
   return patchedSource;
 }
 
+// The upstream main process waits 15 seconds for attachment. Two bounded
+// 5-second renderer attempts leave time for did-attach handling and rejection.
+function codexLinuxWatchBrowserWebviewAttachment({
+  active,
+  browserTabId,
+  conversationId,
+  completeRecovery = () => {},
+  host,
+  failRecovery = () => {},
+  recoveryState = null,
+  recoveryRef,
+  remount,
+  timerApi = window,
+  logger = console,
+  now = Date.now,
+  timeoutMs = 5e3,
+}) {
+  const key = `${conversationId}\0${browserTabId}`;
+  const inheritedRecoveryState = () => ({
+    attempt: recoveryState.attempt,
+    deadlineAt: recoveryState.deadlineAt,
+    host,
+    key,
+  });
+  if (!active) {
+    recoveryRef.current = { attempt: 0, deadlineAt: null, host, key };
+  } else if (recoveryRef.current?.key !== key) {
+    recoveryRef.current =
+      recoveryRef.current?.attempt < 2 && recoveryRef.current.host === host
+        ? { ...recoveryRef.current, host, key }
+        : recoveryState != null
+          ? inheritedRecoveryState()
+        : { attempt: 0, deadlineAt: null, host, key };
+  } else if (recoveryRef.current.host !== host) {
+    recoveryRef.current =
+      recoveryRef.current.attempt < 2 && recoveryRef.current.host != null
+        ? { ...recoveryRef.current, host }
+        : recoveryState != null
+          ? inheritedRecoveryState()
+        : { attempt: 0, deadlineAt: null, host, key };
+  }
+  if (!active) {
+    return () => {};
+  }
+
+  const isHostAttached = () => {
+    try {
+      const webview = host.webview;
+      return (
+        webview?.isConnected === true &&
+        typeof webview.getWebContentsId === "function" &&
+        webview.getWebContentsId() > 0
+      );
+    } catch {
+      return false;
+    }
+  };
+  if (recoveryRef.current.attempt >= 2) {
+    if (isHostAttached()) completeRecovery();
+    return () => {};
+  }
+  if (isHostAttached()) {
+    completeRecovery();
+    recoveryRef.current = { attempt: 2, deadlineAt: null, host, key };
+    return () => {};
+  }
+
+  let disposed = false;
+  let timer = null;
+  let removeDidAttachListener = () => {};
+  const markAttached = () => {
+    if (disposed) return;
+    completeRecovery();
+    recoveryRef.current = { attempt: 2, deadlineAt: null, host, key };
+    if (timer != null) {
+      timerApi.clearTimeout(timer);
+      timer = null;
+    }
+    removeDidAttachListener();
+  };
+  const cleanup = () => {
+    disposed = true;
+    removeDidAttachListener();
+    if (timer != null) {
+      timerApi.clearTimeout(timer);
+      timer = null;
+    }
+  };
+  removeDidAttachListener = host.listenForDidAttach?.(markAttached) ?? (() => {});
+  if (recoveryRef.current?.attempt >= 2 || isHostAttached()) {
+    markAttached();
+    return cleanup;
+  }
+  const state = recoveryRef.current;
+  const deadlineAt = state.deadlineAt ?? now() + timeoutMs;
+  if (state.deadlineAt == null) {
+    recoveryRef.current = { ...state, deadlineAt };
+  }
+  timer = timerApi.setTimeout(() => {
+    timer = null;
+    if (disposed) return;
+    removeDidAttachListener();
+    const state = recoveryRef.current;
+    if (state?.key !== key || state.attempt >= 2) return;
+    const details = { browserTabId, conversationId };
+    if (state.attempt === 0) {
+      const remountDeadlineAt = now() + timeoutMs;
+      const remountResult = remount(remountDeadlineAt);
+      if (remountResult == null) {
+        recoveryRef.current = { attempt: 2, deadlineAt: null, host, key };
+        return;
+      }
+      if (remountResult === false || remountResult.state?.attempt >= 2) {
+        failRecovery();
+        recoveryRef.current = { attempt: 2, deadlineAt: null, host, key };
+        logger.error(
+          "IAB_LIFECYCLE Linux Browser webview attachment recovery remount was rejected",
+          details,
+        );
+        return;
+      }
+      const sharedState =
+        remountResult === true
+          ? { attempt: 1, deadlineAt: remountDeadlineAt }
+          : remountResult.state;
+      recoveryRef.current = {
+        attempt: 1,
+        deadlineAt: sharedState.deadlineAt,
+        host,
+        key,
+      };
+      if (remountResult === true || remountResult.started) {
+        logger.warn(
+          "IAB_LIFECYCLE Linux Browser webview attachment timed out; remounting once",
+          details,
+        );
+      }
+      return;
+    }
+    failRecovery();
+    recoveryRef.current = { attempt: 2, deadlineAt: null, host, key };
+    logger.error(
+      "IAB_LIFECYCLE Linux Browser webview attachment failed after one remount",
+      details,
+    );
+  }, Math.max(0, deadlineAt - now()));
+
+  return cleanup;
+}
+
+function hasCompleteLinuxBrowserUseWebviewRemountStorePatch(source) {
+  return (
+    source.includes("linuxBrowserUseRecoveryStates=new Map") &&
+    source.includes("linuxStartWebviewRecovery(e,t,n)") &&
+    source.includes("linuxCompleteWebviewRecovery(e,t,n)") &&
+    source.includes("linuxFailWebviewRecovery(e,t,n)") &&
+    source.includes("linuxRemountWebview(e,t,n,r)") &&
+    source.includes("for(let e of this.linuxBrowserUseRecoveryStates.keys())") &&
+    source.includes("this.linuxBrowserUseRecoveryStates.clear()") &&
+    source.includes("this.linuxBrowserUseRecoveryStates.set(") &&
+    (source.match(/linuxBrowserUseRecoveryStates\.delete\(/gu) ?? []).length >= 7
+  );
+}
+
+function applyLinuxBrowserUseWebviewRemountStorePatch(currentSource) {
+  if (hasCompleteLinuxBrowserUseWebviewRemountStorePatch(currentSource)) {
+    return currentSource;
+  }
+
+  const markerIndex = currentSource.indexOf("registrationAttempts=new WeakMap");
+  const classPrefixIndex = currentSource.lastIndexOf("=class{", markerIndex);
+  const classOpenIndex = classPrefixIndex === -1 ? -1 : classPrefixIndex + "=class".length;
+  const classCloseIndex =
+    classOpenIndex === -1 ? -1 : findMatchingBrace(currentSource, classOpenIndex);
+  const registerMethodMatch =
+    markerIndex === -1
+      ? null
+      : /registerWebviewHost\([A-Za-z_$][\w$]*,[A-Za-z_$][\w$]*\)\{/gu.exec(
+          currentSource.slice(markerIndex),
+        );
+  const classSource =
+    classOpenIndex === -1 || classCloseIndex === -1
+      ? ""
+      : currentSource.slice(classOpenIndex, classCloseIndex + 1);
+  const keyHelper =
+    classSource.match(
+      /this\.webviews\.get\(([A-Za-z_$][\w$]*)\(/u,
+    )?.[1] ??
+    classSource.match(
+      /this\.snapshots\.get\(([A-Za-z_$][\w$]*)\(/u,
+    )?.[1];
+  const activeMethodMatch =
+    /setBrowserUseActive\(([A-Za-z_$][\w$]*),\.\.\.([A-Za-z_$][\w$]*)\)\{let ([A-Za-z_$][\w$]*)=typeof \2\[0\]==`boolean`\?([A-Za-z_$][\w$]*)\(\1,void 0\):\2\[0\],([A-Za-z_$][\w$]*)=typeof \2\[0\]==`boolean`\?\2\[0\]:\2\[1\],/u.exec(
+      classSource,
+    );
+  const removeTabMatch =
+    keyHelper == null
+      ? null
+      : new RegExp(
+          `removeTab\\(([A-Za-z_$][\\w$]*),([A-Za-z_$][\\w$]*)\\)\\{let ([A-Za-z_$][\\w$]*)=${escapeRegExp(keyHelper)}\\(\\1,\\2\\),`,
+          "u",
+        ).exec(classSource);
+  const removeConversationTabsMatch =
+    /removeConversationTabs\(([A-Za-z_$][\w$]*)\)\{let ([A-Za-z_$][\w$]*)=`\$\{\1\}\\0`;/u.exec(
+      classSource,
+    );
+  const releaseBrowserUseTabMatch =
+    keyHelper == null
+      ? null
+      : new RegExp(
+          `releaseBrowserUseTab\\(([A-Za-z_$][\\w$]*),([A-Za-z_$][\\w$]*)\\)\\{let ([A-Za-z_$][\\w$]*)=${escapeRegExp(keyHelper)}\\(\\1,\\2\\),`,
+          "u",
+        ).exec(classSource);
+  const siblingDeactivateMatch =
+    /for\(let ([A-Za-z_$][\w$]*) of Array\.from\(this\.browserUseActiveTabKeys\)\)\{if\(\1===([A-Za-z_$][\w$]*)\|\|!\1\.startsWith\(([A-Za-z_$][\w$]*)\)\)continue;this\.browserUseActiveTabKeys\.delete\(\1\);let /u.exec(
+      classSource,
+    );
+  const reassociateMethodIndex = classSource.indexOf("reassociateTabState(");
+  const reassociateMethodOpenIndex =
+    reassociateMethodIndex === -1
+      ? -1
+      : classSource.indexOf("{", reassociateMethodIndex);
+  const reassociateMethodCloseIndex =
+    reassociateMethodOpenIndex === -1
+      ? -1
+      : findMatchingBrace(classSource, reassociateMethodOpenIndex);
+  const reassociateMethodSource =
+    reassociateMethodCloseIndex === -1
+      ? ""
+      : classSource.slice(reassociateMethodIndex, reassociateMethodCloseIndex + 1);
+  const reassociateKeysMatch =
+    keyHelper == null
+      ? null
+      : new RegExp(
+          `,([A-Za-z_$][\\w$]*)=${escapeRegExp(keyHelper)}\\([^)]*\\),([A-Za-z_$][\\w$]*)=${escapeRegExp(keyHelper)}\\([^)]*\\);if\\(\\1===\\2\\|\\|this\\.transferredWebviewKeys\\.has\\(`,
+          "u",
+        ).exec(reassociateMethodSource);
+  const reassociateStateMatch =
+    reassociateKeysMatch == null
+      ? null
+      : new RegExp(
+          `;let ([A-Za-z_$][\\w$]*)=this\\.browserUseViewportSizes\\.get\\(${escapeRegExp(reassociateKeysMatch[1])}\\)\\?\\?null,`,
+          "u",
+        ).exec(reassociateMethodSource);
+  const disposeAllMatch = /disposeAll\(\)\{this\.electronPageHandoff\.disposeAll\(\),/u.exec(
+    classSource,
+  );
+  if (
+    markerIndex === -1 ||
+    classOpenIndex === -1 ||
+    classCloseIndex === -1 ||
+    registerMethodMatch == null ||
+    activeMethodMatch == null ||
+    removeTabMatch == null ||
+    removeConversationTabsMatch == null ||
+    releaseBrowserUseTabMatch == null ||
+    siblingDeactivateMatch == null ||
+    reassociateKeysMatch == null ||
+    reassociateStateMatch == null ||
+    disposeAllMatch == null ||
+    keyHelper == null ||
+    !classSource.includes("disposeWebviewHost(") ||
+    !classSource.includes("emitChange()")
+  ) {
+    if (
+      currentSource.includes("registrationAttempts=new WeakMap") ||
+      currentSource.includes("registerWebviewHost(")
+    ) {
+      console.warn(
+        "WARN: Could not find Browser webview store remount insertion point — skipping Linux attachment recovery store patch",
+      );
+    }
+    return currentSource;
+  }
+
+  const [
+    activeMethodNeedle,
+    activeConversationVar,
+    activeArgsVar,
+    activeBrowserTabVar,
+    activeDefaultTabHelper,
+    activeValueVar,
+  ] = activeMethodMatch;
+  const activeMethodPatch =
+    `setBrowserUseActive(${activeConversationVar},...${activeArgsVar}){let ${activeBrowserTabVar}=typeof ${activeArgsVar}[0]==\`boolean\`?${activeDefaultTabHelper}(${activeConversationVar},void 0):${activeArgsVar}[0],${activeValueVar}=typeof ${activeArgsVar}[0]==\`boolean\`?${activeArgsVar}[0]:${activeArgsVar}[1];${activeValueVar}||this.linuxBrowserUseRecoveryStates.delete(${keyHelper}(${activeConversationVar},${activeBrowserTabVar}));let `;
+  const method = `linuxStartWebviewRecovery(e,t,n){let r=${keyHelper}(e,t),i=this.linuxBrowserUseRecoveryStates.get(r);return i??(i={attempt:0,deadlineAt:n},this.linuxBrowserUseRecoveryStates.set(r,i)),i}linuxCompleteWebviewRecovery(e,t,n){let r=${keyHelper}(e,t);this.webviews.get(r)===n&&this.linuxBrowserUseRecoveryStates.delete(r)}linuxFailWebviewRecovery(e,t,n){let r=${keyHelper}(e,t);this.webviews.get(r)===n&&this.linuxBrowserUseRecoveryStates.set(r,{attempt:2,deadlineAt:null})}linuxRemountWebview(e,t,n,r){let i=${keyHelper}(e,t),a=this.linuxBrowserUseRecoveryStates.get(i);if(a?.attempt>=1)return{started:!1,state:a};if(this.webviews.get(i)!==n)return null;let o={attempt:1,deadlineAt:r};return this.linuxBrowserUseRecoveryStates.set(i,o),this.disposeWebviewHost(e,t,i,\`web\`),this.emitChange(),{started:!0,state:o}}`;
+  const [
+    removeTabNeedle,
+    removeTabConversationVar,
+    removeTabBrowserTabVar,
+    removeTabKeyVar,
+  ] = removeTabMatch;
+  const [removeConversationNeedle, , removeConversationPrefixVar] =
+    removeConversationTabsMatch;
+  const removeTabPatch =
+    `removeTab(${removeTabConversationVar},${removeTabBrowserTabVar}){let ${removeTabKeyVar}=${keyHelper}(${removeTabConversationVar},${removeTabBrowserTabVar});` +
+    `this.linuxBrowserUseRecoveryStates.delete(${removeTabKeyVar});let `;
+  const removeConversationPatch = `${removeConversationNeedle}for(let e of this.linuxBrowserUseRecoveryStates.keys())e.startsWith(${removeConversationPrefixVar})&&this.linuxBrowserUseRecoveryStates.delete(e);`;
+  const [
+    releaseBrowserUseTabNeedle,
+    releaseConversationVar,
+    releaseBrowserTabVar,
+    releaseKeyVar,
+  ] = releaseBrowserUseTabMatch;
+  const releaseBrowserUseTabPatch =
+    `releaseBrowserUseTab(${releaseConversationVar},${releaseBrowserTabVar}){let ${releaseKeyVar}=${keyHelper}(${releaseConversationVar},${releaseBrowserTabVar});` +
+    `this.linuxBrowserUseRecoveryStates.delete(${releaseKeyVar});let `;
+  const [siblingDeactivateNeedle, siblingKeyVar] = siblingDeactivateMatch;
+  const siblingDeactivatePatch = siblingDeactivateNeedle.replace(
+    ";let ",
+    `;this.linuxBrowserUseRecoveryStates.delete(${siblingKeyVar});let `,
+  );
+  const reassociateStateNeedle = reassociateStateMatch[0];
+  const reassociateStateVar = reassociateStateMatch[1];
+  const reassociateSourceKeyVar = reassociateKeysMatch[1];
+  const reassociateTargetKeyVar = reassociateKeysMatch[2];
+  const reassociateStatePatch =
+    `;let codexLinuxRecoveryState=this.linuxBrowserUseRecoveryStates.get(${reassociateSourceKeyVar});codexLinuxRecoveryState==null||(this.linuxBrowserUseRecoveryStates.delete(${reassociateSourceKeyVar}),this.linuxBrowserUseRecoveryStates.set(${reassociateTargetKeyVar},codexLinuxRecoveryState));` +
+    `let ${reassociateStateVar}=this.browserUseViewportSizes.get(${reassociateSourceKeyVar})??null,`;
+  const disposeAllPatch = `${disposeAllMatch[0]}this.linuxBrowserUseRecoveryStates.clear(),`;
+  const registrationAttemptsNeedle = "registrationAttempts=new WeakMap;";
+  let patchedClass = classSource
+    .replace(
+      registrationAttemptsNeedle,
+      `${registrationAttemptsNeedle}linuxBrowserUseRecoveryStates=new Map;`,
+    )
+    .replace(activeMethodNeedle, activeMethodPatch)
+    .replace(registerMethodMatch[0], `${method}${registerMethodMatch[0]}`)
+    .replace(removeTabNeedle, removeTabPatch)
+    .replace(removeConversationNeedle, removeConversationPatch)
+    .replace(releaseBrowserUseTabNeedle, releaseBrowserUseTabPatch)
+    .replace(siblingDeactivateNeedle, siblingDeactivatePatch)
+    .replace(reassociateStateNeedle, reassociateStatePatch)
+    .replace(disposeAllMatch[0], disposeAllPatch);
+  if (!hasCompleteLinuxBrowserUseWebviewRemountStorePatch(patchedClass)) {
+    console.warn(
+      "WARN: Browser webview store remount patch was incomplete — skipping Linux attachment recovery store patch",
+    );
+    return currentSource;
+  }
+  return (
+    `${currentSource.slice(0, classOpenIndex)}${patchedClass}` +
+    `${currentSource.slice(classCloseIndex + 1)}`
+  );
+}
+
+function applyLinuxBrowserUseWebviewHostRecoveryPatch(currentSource) {
+  if (currentSource.includes("function codexLinuxWatchBrowserWebviewAttachment(")) {
+    return currentSource;
+  }
+
+  const componentPattern =
+    /function ([A-Za-z_$][\w$]*)\(\{adoptionLease:([A-Za-z_$][\w$]*),adoptedWebContentsId:([A-Za-z_$][\w$]*),bounds:([A-Za-z_$][\w$]*),browserTabId:([A-Za-z_$][\w$]*),children:([A-Za-z_$][\w$]*),conversationId:([A-Za-z_$][\w$]*),hostKind:([A-Za-z_$][\w$]*)=`right-panel`,initialUrl:([A-Za-z_$][\w$]*),isVisible:([A-Za-z_$][\w$]*),persistedTabsEnabled:([A-Za-z_$][\w$]*)=!1,scale:([A-Za-z_$][\w$]*),shouldBootstrapWhenHidden:([A-Za-z_$][\w$]*),shouldPaint:([A-Za-z_$][\w$]*),webviewRef:([A-Za-z_$][\w$]*),windowZoom:([A-Za-z_$][\w$]*)\}\)\{/u;
+  const match = componentPattern.exec(currentSource);
+  const openBraceIndex = match == null ? -1 : match.index + match[0].length - 1;
+  const closeBraceIndex =
+    openBraceIndex === -1 ? -1 : findMatchingBrace(currentSource, openBraceIndex);
+  if (match == null || openBraceIndex === -1 || closeBraceIndex === -1) {
+    if (
+      currentSource.includes("shouldBootstrapWhenHidden") &&
+      currentSource.includes("claimMountGeneration")
+    ) {
+      console.warn(
+        "WARN: Could not find Browser webview host component — skipping Linux attachment recovery host patch",
+      );
+    }
+    return currentSource;
+  }
+
+  const browserTabIdVar = match[5];
+  const conversationIdVar = match[7];
+  const componentSource = currentSource.slice(match.index, closeBraceIndex + 1);
+  const reactVar = componentSource.match(
+    /\(0,([A-Za-z_$][\w$]*)\.useRef\)\(null\)/u,
+  )?.[1];
+  const storeVar = componentSource.match(
+    new RegExp(
+      `([A-Za-z_$][\\w$]*)\\.getMountGeneration\\(${escapeRegExp(conversationIdVar)},${escapeRegExp(browserTabIdVar)}\\)`,
+      "u",
+    ),
+  )?.[1];
+  const hostRefVar =
+    reactVar == null
+      ? null
+      : componentSource.match(
+          new RegExp(
+            `let ([A-Za-z_$][\\w$]*)=\\(0,${escapeRegExp(reactVar)}\\.useRef\\)\\(null\\)`,
+            "u",
+          ),
+        )?.[1];
+  const cursorHostVar =
+    reactVar == null || storeVar == null
+      ? null
+      : componentSource.match(
+          new RegExp(
+            `,([A-Za-z_$][\\w$]*)=\\(0,${escapeRegExp(reactVar)}\\.useSyncExternalStore\\)\\(${escapeRegExp(storeVar)}\\.subscribe,\\(\\)=>${escapeRegExp(storeVar)}\\.getCursorOverlayHost\\(${escapeRegExp(conversationIdVar)},${escapeRegExp(browserTabIdVar)}\\),\\(\\)=>null\\)`,
+            "u",
+          ),
+        )?.[1];
+  const webviewVar =
+    storeVar == null
+      ? null
+      : componentSource.match(
+          new RegExp(
+            `let ([A-Za-z_$][\\w$]*)=${escapeRegExp(storeVar)}\\.getWebview\\(${escapeRegExp(conversationIdVar)},${escapeRegExp(browserTabIdVar)},`,
+            "u",
+          ),
+        )?.[1];
+  if (
+    reactVar == null ||
+    storeVar == null ||
+    hostRefVar == null ||
+    cursorHostVar == null ||
+    webviewVar == null ||
+    !componentSource.includes(`${storeVar}.syncElectronWebview(`)
+  ) {
+    console.warn(
+      "WARN: Could not find Browser webview host lifecycle seams — skipping Linux attachment recovery host patch",
+    );
+    return currentSource;
+  }
+
+  const syncNeedle = `${hostRefVar}.current=${webviewVar},${storeVar}.syncElectronWebview(${webviewVar},`;
+  const syncIndex = componentSource.indexOf(syncNeedle);
+  const effectEndIndex = componentSource.lastIndexOf("},[", componentSource.lastIndexOf(`,${cursorHostVar}==null`));
+  const dependenciesEndIndex =
+    effectEndIndex === -1 ? -1 : componentSource.indexOf("])", effectEndIndex + 3);
+  if (syncIndex === -1 || effectEndIndex === -1 || dependenciesEndIndex === -1) {
+    console.warn(
+      "WARN: Could not find Browser webview host sync effect — skipping Linux attachment recovery host patch",
+    );
+    return currentSource;
+  }
+
+  const helperSource = codexLinuxWatchBrowserWebviewAttachment.toString();
+  const declarations =
+    `let codexLinuxBrowserWebviewRecoveryRef=(0,${reactVar}.useRef)({attempt:0,key:${conversationIdVar}+\`\\0\`+${browserTabIdVar}}),codexLinuxBrowserUseActive=(0,${reactVar}.useSyncExternalStore)(${storeVar}.subscribe,()=>${storeVar}.isBrowserUseActive(${conversationIdVar},${browserTabIdVar}),()=>!1);` +
+    `(0,${reactVar}.useEffect)(()=>{codexLinuxBrowserUseActive||(codexLinuxBrowserWebviewRecoveryRef.current={attempt:0,deadlineAt:null,host:null,key:${conversationIdVar}+\`\\0\`+${browserTabIdVar}})},[codexLinuxBrowserUseActive,${conversationIdVar},${browserTabIdVar}]);`;
+  const watchSource =
+    `let codexLinuxBrowserWebviewRecoveryCleanup=codexLinuxWatchBrowserWebviewAttachment({active:codexLinuxBrowserUseActive,browserTabId:${browserTabIdVar},completeRecovery:()=>typeof ${storeVar}.linuxCompleteWebviewRecovery==\`function\`&&${storeVar}.linuxCompleteWebviewRecovery(${conversationIdVar},${browserTabIdVar},${webviewVar}),conversationId:${conversationIdVar},failRecovery:()=>typeof ${storeVar}.linuxFailWebviewRecovery==\`function\`&&${storeVar}.linuxFailWebviewRecovery(${conversationIdVar},${browserTabIdVar},${webviewVar}),host:${webviewVar},recoveryRef:codexLinuxBrowserWebviewRecoveryRef,recoveryState:codexLinuxBrowserUseActive&&typeof ${storeVar}.linuxStartWebviewRecovery==\`function\`?${storeVar}.linuxStartWebviewRecovery(${conversationIdVar},${browserTabIdVar},Date.now()+5e3):null,remount:codexLinuxRemountDeadline=>typeof ${storeVar}.linuxRemountWebview==\`function\`&&${storeVar}.linuxRemountWebview(${conversationIdVar},${browserTabIdVar},${webviewVar},codexLinuxRemountDeadline)});`;
+  const componentBodyOpenIndex = openBraceIndex - match.index;
+  let patchedComponent = `${componentSource.slice(0, componentBodyOpenIndex + 1)}${declarations}${componentSource.slice(componentBodyOpenIndex + 1)}`;
+  const patchedSyncIndex = patchedComponent.indexOf(syncNeedle);
+  patchedComponent = `${patchedComponent.slice(0, patchedSyncIndex)}${watchSource}${patchedComponent.slice(patchedSyncIndex)}`;
+  let patchedEffectEndIndex = patchedComponent.lastIndexOf(
+    "},[",
+    patchedComponent.lastIndexOf(`,${cursorHostVar}==null`),
+  );
+  patchedComponent = `${patchedComponent.slice(0, patchedEffectEndIndex)};return codexLinuxBrowserWebviewRecoveryCleanup${patchedComponent.slice(patchedEffectEndIndex)}`;
+  patchedEffectEndIndex = patchedComponent.lastIndexOf(
+    "},[",
+    patchedComponent.lastIndexOf(`,${cursorHostVar}==null`),
+  );
+  const patchedDependenciesEndIndex = patchedComponent.indexOf(
+    "])",
+    patchedEffectEndIndex + 3,
+  );
+  patchedComponent =
+    `${patchedComponent.slice(0, patchedDependenciesEndIndex)}` +
+    `,codexLinuxBrowserUseActive,${cursorHostVar}` +
+    `${patchedComponent.slice(patchedDependenciesEndIndex)}`;
+
+  return (
+    `${currentSource.slice(0, match.index)}${helperSource}` +
+    `${patchedComponent}${currentSource.slice(closeBraceIndex + 1)}`
+  );
+}
+
+function applyLinuxBrowserUseWebviewAttachRecoveryPatch(currentSource) {
+  const hasHostPatch = (source) =>
+    source.includes("function codexLinuxWatchBrowserWebviewAttachment(");
+  if (
+    hasCompleteLinuxBrowserUseWebviewRemountStorePatch(currentSource) &&
+    hasHostPatch(currentSource)
+  ) {
+    return currentSource;
+  }
+
+  const patchedStore = applyLinuxBrowserUseWebviewRemountStorePatch(currentSource);
+  const patchedSource = applyLinuxBrowserUseWebviewHostRecoveryPatch(patchedStore);
+  if (
+    !hasCompleteLinuxBrowserUseWebviewRemountStorePatch(patchedSource) ||
+    !hasHostPatch(patchedSource)
+  ) {
+    if (
+      currentSource.includes("registrationAttempts=new WeakMap") ||
+      currentSource.includes("shouldBootstrapWhenHidden")
+    ) {
+      console.warn(
+        "WARN: Browser webview store and host recovery seams did not patch atomically — skipping Linux attachment recovery patch",
+      );
+    }
+    return currentSource;
+  }
+  return patchedSource;
+}
+
 function applyLinuxBrowserUseExternalAvailabilityPatch(currentSource) {
   const externalFeatureNeedle = "featureName:`browser_use_external`";
   const statsigNeedle = "410065390";
@@ -1812,8 +2309,11 @@ module.exports = {
   applyAutomationUpdateEagerToolPatch,
   applyLinuxChatSearchHydrationPatch,
   applyLinuxBrowserUseAvailabilityPatch,
+  applyLinuxBrowserUseWebviewAttachRecoveryPatch,
   applyLinuxBrowserUseExternalAvailabilityPatch,
   applyLinuxBrowserUseNonLocalNavigationPatch,
+  applyLinuxBrowserUseWebviewHostRecoveryPatch,
+  applyLinuxBrowserUseWebviewRemountStorePatch,
   applyLinuxConfigWriteVersionConflictPatch,
   applyLinuxI18nGatePatch,
   applyPersistentRateLimitFooterPatch,
@@ -1828,5 +2328,6 @@ module.exports = {
   applyLinuxSkillsListDedupePatch,
   applyLocalEnvironmentActionModalDraftPatch,
   applySubagentNicknameMetadataPatch,
+  codexLinuxWatchBrowserWebviewAttachment,
   patchCommentPreloadBundle,
 };

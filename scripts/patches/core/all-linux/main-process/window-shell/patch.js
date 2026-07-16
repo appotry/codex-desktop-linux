@@ -6,6 +6,7 @@ const {
 } = require("../../../../descriptor.js");
 const {
   applyLinuxAboutDialogPatch,
+  applyLinuxAppReloadShortcutsPatch,
   applyLinuxApplicationMenuPatch,
   applyLinuxWindowOptionsPatch,
   applyLinuxNativeTitlebarPatch,
@@ -29,7 +30,10 @@ const {
   applyLinuxTrayPatch,
   applyLinuxSingleInstancePatch,
 } = require("../../../../impl/main-process/tray.js");
-const { applyLinuxAvatarOverlayMousePassthroughPatch } = require("../../../../impl/avatar-overlay.js");
+const {
+  applyLinuxAvatarOverlayMousePassthroughPatch,
+  applyLinuxQueryCacheInvalidationBroadcastPatch,
+} = require("../../../../impl/avatar-overlay.js");
 
 module.exports = [
   extractedAppPatch({
@@ -75,6 +79,13 @@ module.exports = [
     order: 65,
     ciPolicy: "optional",
     apply: applyLinuxApplicationMenuPatch,
+  }),
+  mainBundlePatch({
+    id: "linux-app-reload-shortcuts",
+    phase: "main-bundle",
+    order: 67,
+    ciPolicy: "optional",
+    apply: applyLinuxAppReloadShortcutsPatch,
   }),
   mainBundlePatch({
     id: "linux-native-titlebar",
@@ -124,6 +135,13 @@ module.exports = [
     order: 90,
     ciPolicy: "required-upstream",
     apply: applyLinuxAvatarOverlayMousePassthroughPatch,
+  }),
+  mainBundlePatch({
+    id: "linux-avatar-settings-sync",
+    phase: "main-bundle",
+    order: 92,
+    ciPolicy: "optional",
+    apply: applyLinuxQueryCacheInvalidationBroadcastPatch,
   }),
   mainBundlePatch({
     id: "linux-file-manager",

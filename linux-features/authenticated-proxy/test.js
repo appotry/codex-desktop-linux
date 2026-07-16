@@ -63,6 +63,7 @@ function runHook(env, args = []) {
   const result = spawnSync("bash", [hookPath, ...args], {
     encoding: "utf8",
     env: {
+      HOME: process.env.HOME ?? os.homedir(),
       PATH: process.env.PATH ?? "/usr/bin:/bin",
       ...env,
     },

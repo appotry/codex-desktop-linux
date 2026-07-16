@@ -2,8 +2,10 @@
 
 const HANDLER_NAME = "linux-read-aloud";
 const RUNTIME_VERSION = "conversation-mode-v26";
+const CURRENT_DICTATION_ASSET_PATTERN =
+  /^app-initial~app-main~onboarding-page-[A-Za-z0-9_-]+\.js$/;
 const CURRENT_COMPOSER_ASSET_PATTERN =
-  /^app-initial~app-main~new-thread-panel-page~appgen-library-page~hotkey-window-thread-page~ho~[A-Za-z0-9_-]+\.js$/;
+  /^app-initial~app-main~new-thread-panel-page~appgen-library-page~hotkey-window-thread-page~ho~iufn7mg3-[^.]+\.js$/;
 
 function warn(message, patchName) {
   console.warn(`WARN: ${message} - skipping ${patchName}`);
@@ -358,8 +360,8 @@ module.exports = {
       phase: "webview-asset",
       order: 20690,
       ciPolicy: "optional",
-      pattern: CURRENT_COMPOSER_ASSET_PATTERN,
-      missingDescription: "current primary composer dictation bundle",
+      pattern: CURRENT_DICTATION_ASSET_PATTERN,
+      missingDescription: "current primary dictation bundle",
       skipDescription: "conversation mode dictation endpoint patch",
       apply: applyDictationEndpointPatch,
     },

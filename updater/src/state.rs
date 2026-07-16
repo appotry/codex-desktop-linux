@@ -48,6 +48,15 @@ pub enum CliStatus {
     Failed,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+/// Installation channel inferred for a user-installed Codex CLI.
+pub enum CliInstallChannel {
+    Standalone,
+    Homebrew,
+    Npm,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 /// Artifact paths tracked across update checks, rebuilds, and installation.
 pub struct ArtifactPaths {
@@ -86,6 +95,8 @@ pub struct PersistedState {
     pub rollback_blocked_dmg_sha256: Option<String>,
     #[serde(default)]
     pub cli_path: Option<PathBuf>,
+    #[serde(default)]
+    pub cli_install_channel: Option<CliInstallChannel>,
     #[serde(default)]
     pub cli_installed_version: Option<String>,
     #[serde(default, alias = "cli_latest_version")]
@@ -144,6 +155,7 @@ impl PersistedState {
             rollback_blocked_candidate_version: None,
             rollback_blocked_dmg_sha256: None,
             cli_path: None,
+            cli_install_channel: None,
             cli_installed_version: None,
             cli_official_latest_version: None,
             cli_package_manager_latest_version: None,

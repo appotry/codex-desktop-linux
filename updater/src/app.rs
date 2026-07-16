@@ -88,6 +88,11 @@ pub async fn run(cli: Cli) -> Result<()> {
             print_path,
             allow_install_missing,
         ),
+        Commands::RecoverStandaloneCli {
+            codex_home,
+            install_dir,
+            print_path,
+        } => run_recover_standalone_cli(codex_home, install_dir, print_path),
         Commands::PromptInstallCli {
             cli_path,
             print_path,
@@ -380,6 +385,37 @@ fn update_install_is_pending(status: &UpdateStatus) -> bool {
     )
 }
 
+// Failed attempts and transient states persisted before fallible download or
+// build work must retry after the next checker acquires the check lock. A
+// still-running checker continues to own that lock and prevents duplicate work.
+fn update_check_should_retry(status: &UpdateStatus) -> bool {
+    matches!(
+        status,
+        UpdateStatus::Failed
+            | UpdateStatus::DownloadingDmg
+            | UpdateStatus::UpdateDetected
+            | UpdateStatus::PreparingWorkspace
+            | UpdateStatus::PatchingApp
+            | UpdateStatus::BuildingPackage
+    )
+}
+
+fn prepare_upstream_check(state: &mut PersistedState, paths: &RuntimePaths) -> Result<bool> {
+    let retrying_update = update_check_should_retry(&state.status);
+
+    // Keep a retryable status durable until the metadata request completes. If
+    // the updater exits while that request is in flight, the next run must not
+    // mistake the interrupted rebuild for an ordinary unchanged-upstream check.
+    if !retrying_update {
+        state.status = UpdateStatus::CheckingUpstream;
+    }
+    state.last_check_at = Some(Utc::now());
+    state.error_message = None;
+    persist_state(paths, state)?;
+
+    Ok(retrying_update)
+}
+
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 enum PendingInstallRecovery {
     NoChange,
@@ -468,7 +504,10 @@ async fn run_check_now(
     normalize_workspace_dir_and_persist(state, paths)?;
     maybe_prune_caches(config, state);
     maybe_notify_cli_missing(state, paths, config.notifications)?;
-    if if_stale && upstream_check_is_fresh(config, state) {
+    if if_stale
+        && !update_check_should_retry(&state.status)
+        && upstream_check_is_fresh(config, state)
+    {
         if let Err(error) = detect_and_record_wrapper_update(config, state, paths) {
             warn!(
                 ?error,
@@ -753,6 +792,18 @@ fn run_cli_preflight(
     Ok(())
 }
 
+fn run_recover_standalone_cli(
+    codex_home: Option<PathBuf>,
+    install_dir: Option<PathBuf>,
+    print_path: bool,
+) -> Result<()> {
+    let launch_path = codex_cli::recover_standalone_cli(codex_home, install_dir)?;
+    if print_path {
+        println!("{}", launch_path.display());
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum PromptInstallCliOutcome {
     Installed(PathBuf),
@@ -941,8 +992,6 @@ async fn run_check_cycle(
         );
     }
 
-    let retrying_failed_update = state.status == UpdateStatus::Failed;
-
     let Some(_check_lock) = try_acquire_check_lock(paths)? else {
         return Ok(());
     };
@@ -950,10 +999,7 @@ async fn run_check_cycle(
     let client = upstream::http_client()?;
 
     sync_runtime_state(config, state);
-    state.status = UpdateStatus::CheckingUpstream;
-    state.last_check_at = Some(Utc::now());
-    state.error_message = None;
-    persist_state(paths, state)?;
+    let retrying_update = prepare_upstream_check(state, paths)?;
 
     let result: Result<()> = async {
         let metadata = upstream::fetch_remote_metadata(&client, &config.dmg_url).await?;
@@ -963,7 +1009,7 @@ async fn run_check_cycle(
 
         if previous_headers_fingerprint.as_deref() == Some(metadata.headers_fingerprint.as_str())
             && state.dmg_sha256.is_some()
-            && !retrying_failed_update
+            && !retrying_update
         {
             set_status(state, paths, UpdateStatus::Idle)?;
             info!("upstream fingerprint unchanged; skipping download");
@@ -1001,9 +1047,7 @@ async fn run_check_cycle(
             return Ok(());
         }
 
-        if state.dmg_sha256.as_deref() == Some(downloaded.sha256.as_str())
-            && !retrying_failed_update
-        {
+        if state.dmg_sha256.as_deref() == Some(downloaded.sha256.as_str()) && !retrying_update {
             state.status = UpdateStatus::Idle;
             state.artifact_paths.dmg_path = Some(downloaded.path);
             persist_state(paths, state)?;
@@ -2009,6 +2053,66 @@ mod tests {
     }
 
     #[test]
+    fn interrupted_preinstall_states_retry_the_update_check() {
+        for status in [
+            UpdateStatus::Failed,
+            UpdateStatus::DownloadingDmg,
+            UpdateStatus::UpdateDetected,
+            UpdateStatus::PreparingWorkspace,
+            UpdateStatus::PatchingApp,
+            UpdateStatus::BuildingPackage,
+        ] {
+            assert!(update_check_should_retry(&status), "status: {status:?}");
+        }
+
+        for status in [
+            UpdateStatus::Idle,
+            UpdateStatus::CheckingUpstream,
+            UpdateStatus::ReadyToInstall,
+            UpdateStatus::WaitingForAppExit,
+            UpdateStatus::Installing,
+            UpdateStatus::Installed,
+        ] {
+            assert!(!update_check_should_retry(&status), "status: {status:?}");
+        }
+    }
+
+    #[test]
+    fn upstream_check_setup_preserves_persisted_retry_intent() -> Result<()> {
+        let temp = tempfile::tempdir()?;
+        let paths = test_paths(temp.path());
+        paths.ensure_dirs()?;
+
+        for status in [
+            UpdateStatus::Failed,
+            UpdateStatus::DownloadingDmg,
+            UpdateStatus::UpdateDetected,
+            UpdateStatus::PreparingWorkspace,
+            UpdateStatus::PatchingApp,
+            UpdateStatus::BuildingPackage,
+        ] {
+            let mut state = PersistedState::new(true);
+            state.status = status.clone();
+            state.error_message = Some("previous failure".to_string());
+
+            assert!(prepare_upstream_check(&mut state, &paths)?);
+            assert_eq!(state.status, status);
+            assert!(state.last_check_at.is_some());
+            assert_eq!(state.error_message, None);
+
+            let persisted = PersistedState::load_or_default(&paths.state_file, true)?;
+            assert_eq!(persisted.status, status);
+        }
+
+        let mut fresh_state = PersistedState::new(true);
+        assert!(!prepare_upstream_check(&mut fresh_state, &paths)?);
+        assert_eq!(fresh_state.status, UpdateStatus::CheckingUpstream);
+        let persisted = PersistedState::load_or_default(&paths.state_file, true)?;
+        assert_eq!(persisted.status, UpdateStatus::CheckingUpstream);
+        Ok(())
+    }
+
+    #[test]
     fn disabled_wrapper_tracking_clears_stale_candidate() -> Result<()> {
         let temp = tempfile::tempdir()?;
         let paths = test_paths(temp.path());
@@ -2363,6 +2467,68 @@ mod tests {
         assert_eq!(state.artifact_paths.package_path, None);
         assert_eq!(state.artifact_paths.workspace_dir, None);
         assert_eq!(state.error_message, None);
+        assert!(state.last_successful_check_at.is_some());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn interrupted_download_with_cached_hash_reaches_build_path() -> Result<()> {
+        let server = MockServer::start().await;
+        let body = b"codex-dmg-test-payload";
+        let sha256 = "678cd508ffe0071e217020a7a4eecbebe25362c022ac78c13a5ae87b7a3a0c92";
+        let headers_fingerprint = format!(
+            "etag=\"same-dmg\"|last_modified=|content_length={}",
+            body.len()
+        );
+
+        Mock::given(method("HEAD"))
+            .and(path("/Codex.dmg"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("ETag", "\"same-dmg\"")
+                    .insert_header("Content-Length", body.len().to_string()),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/Codex.dmg"))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(body.to_vec()))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let temp = tempfile::tempdir()?;
+        let paths = test_paths(temp.path());
+        paths.ensure_dirs()?;
+        let mut config = test_config(temp.path());
+        config.dmg_url = format!("{}/Codex.dmg", server.uri());
+        write_installed_build_info(
+            &config,
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        )?;
+
+        let mut state = PersistedState::new(true);
+        state.status = UpdateStatus::DownloadingDmg;
+        state.remote_headers_fingerprint = Some(headers_fingerprint);
+        state.dmg_sha256 = Some(sha256.to_string());
+
+        let error = run_check_cycle(&config, &mut state, &paths)
+            .await
+            .expect_err("retry should reach the intentionally missing builder bundle");
+        server.verify().await;
+
+        assert!(error
+            .to_string()
+            .contains("Required builder bundle path is missing"));
+        assert_eq!(state.status, UpdateStatus::Failed);
+        assert!(state.candidate_version.is_some());
+        assert_eq!(state.dmg_sha256.as_deref(), Some(sha256));
+        assert!(state.artifact_paths.workspace_dir.is_some());
+        assert!(state
+            .error_message
+            .as_deref()
+            .is_some_and(|message| message.contains("Required builder bundle path is missing")));
         assert!(state.last_successful_check_at.is_some());
         Ok(())
     }
@@ -3160,6 +3326,7 @@ mod tests {
     fn prompt_install_cli_does_not_treat_non_executable_file_as_installed() -> Result<()> {
         let _env_guard = crate::test_util::env_lock();
         let temp = tempfile::tempdir()?;
+        fs::set_permissions(temp.path(), fs::Permissions::from_mode(0o755))?;
         let paths = RuntimePaths {
             config_file: temp.path().join("config/config.toml"),
             state_file: temp.path().join("state/state.json"),
@@ -3581,6 +3748,7 @@ mod tests {
     fn status_preserves_cli_reconciliation_failure() -> Result<()> {
         let _env_guard = crate::test_util::env_lock();
         let temp = tempfile::tempdir()?;
+        fs::set_permissions(temp.path(), fs::Permissions::from_mode(0o755))?;
         let paths = RuntimePaths {
             config_file: temp.path().join("config/config.toml"),
             state_file: temp.path().join("state/state.json"),
@@ -3593,6 +3761,7 @@ mod tests {
 
         let bin_dir = temp.path().join("bin");
         fs::create_dir_all(&bin_dir)?;
+        fs::set_permissions(&bin_dir, fs::Permissions::from_mode(0o755))?;
         let codex_path = bin_dir.join("codex");
         fs::write(
             &codex_path,
@@ -3610,6 +3779,9 @@ mod tests {
         let mut permissions = fs::metadata(&npm_path)?.permissions();
         permissions.set_mode(0o755);
         fs::set_permissions(&npm_path, permissions)?;
+        let node_path = bin_dir.join("node");
+        fs::write(&node_path, "#!/bin/sh\nexec /bin/sh \"$@\"\n")?;
+        fs::set_permissions(node_path, fs::Permissions::from_mode(0o755))?;
 
         let original_home = std::env::var_os("HOME");
         let original_path = std::env::var_os("PATH");

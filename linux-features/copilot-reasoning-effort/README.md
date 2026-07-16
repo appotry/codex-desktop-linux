@@ -25,10 +25,10 @@ feature to the generated app.
 
 ## What It Patches
 
-- The current `...quick-chat-window-page~chatg~k0ede4gb-*.js` bundle reads and
+- The current `...thread-app-shell~cf704xib-*.js` bundle reads and
   writes `copilot-default-reasoning-effort` next to `copilot-default-model` and
   keeps the model's full `supportedReasoningEfforts` list for Copilot auth.
-- The current `...hotkey-window-thread-page~ho~iufn7mg3-*.js` bundle keeps the
+- The current `...~ho~iufn7mg3-*.js` bundle keeps the
   reasoning effort controls and `/reasoning` command enabled when the normal
   model and effort prerequisites are present.
 

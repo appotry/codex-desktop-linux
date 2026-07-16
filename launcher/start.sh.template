@@ -252,8 +252,11 @@ ADOPTED_WEBVIEW_PID=""
 ELECTRON_PID=""
 RUNNING_APP_PID=""
 WARM_START=0
-LAUNCHER_LOCK_FD_OPEN=0
+LAUNCHER_LOCK_HELD=0
 LAUNCHER_LOCK_TIMED_OUT=0
+LAUNCHER_LOCK_HELPER_PID=""
+LAUNCHER_LOCK_HELPER_START_TIME=""
+LAUNCHER_LOCK_STATUS_PATH=""
 
 if [[ "${LAUNCHER_ARGS[0]:-}" == "--help" || "${LAUNCHER_ARGS[0]:-}" == "-h" ]]; then
     cat <<HELP
@@ -1444,8 +1447,9 @@ run_feature_after_exit_hooks() {
 
 run_cli_preflight() {
     local allow_install_missing="${1:-0}"
+    local require_success="${2:-0}"
     if ! has_update_manager; then
-        if [ "$allow_install_missing" = "1" ]; then
+        if [ "$allow_install_missing" = "1" ] || [ "$require_success" = "1" ]; then
             return 1
         fi
         return 0
@@ -1455,8 +1459,9 @@ run_cli_preflight() {
         cli-preflight
         --print-path
     )
-    if [ -n "${CODEX_CLI_PATH:-}" ]; then
-        preflight_args+=(--cli-path "$CODEX_CLI_PATH")
+    local preflight_cli_path="${CODEX_CLI_SOURCE_PATH:-${CODEX_CLI_PATH:-}}"
+    if [ -n "$preflight_cli_path" ]; then
+        preflight_args+=(--cli-path "$preflight_cli_path")
     fi
     if [ "$allow_install_missing" = "1" ]; then
         preflight_args+=(--allow-install-missing)
@@ -1464,7 +1469,7 @@ run_cli_preflight() {
 
     local refreshed_path=""
     if ! refreshed_path="$(run_update_manager "${preflight_args[@]}")"; then
-        if [ "$allow_install_missing" = "1" ]; then
+        if [ "$allow_install_missing" = "1" ] || [ "$require_success" = "1" ]; then
             return 1
         fi
         notify_error "Codex CLI prelaunch check failed. Continuing with the current CLI state. Check the launcher and updater logs if ChatGPT Desktop misbehaves."
@@ -1484,13 +1489,33 @@ run_cli_preflight_background() {
 
     (
         local -a args=(cli-preflight --print-path)
-        if [ -n "${CODEX_CLI_PATH:-}" ]; then
-            args+=(--cli-path "$CODEX_CLI_PATH")
+        local preflight_cli_path="${CODEX_CLI_SOURCE_PATH:-${CODEX_CLI_PATH:-}}"
+        if [ -n "$preflight_cli_path" ]; then
+            args+=(--cli-path "$preflight_cli_path")
         fi
         if ! run_update_manager "${args[@]}" >/dev/null 2>&1; then
             echo "Codex CLI background preflight failed. Continuing with the current CLI."
         fi
     ) &
+}
+
+run_cli_launch_path_helper() {
+    python3 "$SCRIPT_DIR/.codex-linux/cli-launch-path.py" "$1"
+}
+
+verify_cli_launch_path() {
+    local selected_path="${CODEX_CLI_PATH:-}"
+    local verified_path=""
+
+    [ -n "$selected_path" ] || return 1
+    if ! verified_path="$(run_cli_launch_path_helper "$selected_path")"; then
+        return 1
+    fi
+    [ -n "$verified_path" ] || return 1
+
+    CODEX_CLI_SOURCE_PATH="$selected_path"
+    CODEX_CLI_PATH="$verified_path"
+    export CODEX_CLI_SOURCE_PATH CODEX_CLI_PATH
 }
 
 is_interactive_terminal() {
@@ -1613,6 +1638,14 @@ find_codex_cli() {
         return 0
     fi
 
+    if [ -n "${HOMEBREW_PREFIX:-}" ]; then
+        local homebrew_candidate="$HOMEBREW_PREFIX/bin/codex"
+        if [ -x "$homebrew_candidate" ]; then
+            echo "$homebrew_candidate"
+            return 0
+        fi
+    fi
+
     local nvm_dir="${NVM_DIR:-}"
     if [ -z "$nvm_dir" ]; then
         if [ -s "${XDG_CONFIG_HOME:-$HOME/.config}/nvm/nvm.sh" ]; then
@@ -1635,6 +1668,7 @@ find_codex_cli() {
     for candidate in \
         "$(cached_codex_cli_path || true)" \
         "$HOME/.bun/bin/codex" \
+        "$HOME/.codex-cli-npm/bin/codex" \
         "$HOME/.npm-global/bin/codex" \
         "${XDG_CONFIG_HOME:-$HOME/.config}/nvm/versions/node/current/bin/codex" \
         "${XDG_CONFIG_HOME:-$HOME/.config}/nvm/versions/node"/*/bin/codex \
@@ -1642,6 +1676,8 @@ find_codex_cli() {
         "$HOME/.nvm/versions/node"/*/bin/codex \
         "$(find_fnm_codex_cli || true)" \
         "$HOME/.local/share/pnpm/codex" \
+        "$HOME/.linuxbrew/bin/codex" \
+        "/home/linuxbrew/.linuxbrew/bin/codex" \
         "$HOME/.local/bin/codex" \
         "/usr/local/bin/codex" \
         "/usr/bin/codex"
@@ -1671,7 +1707,8 @@ pid_parent_matches() {
 
 codex_cli_version_probe() {
     local output_file="$1"
-    shift
+    local stderr_file="$2"
+    shift 2
     local marker="${output_file}.timed-out"
     local probe_pid
     local watchdog_pid
@@ -1682,7 +1719,7 @@ codex_cli_version_probe() {
     rm -f "$marker"
     ( trap - EXIT
       { exec 9>&-; } 2>/dev/null || true
-      codex_exec_host_command "$@" >"$output_file" 2>/dev/null
+      codex_exec_host_command "$@" >"$output_file" 2>"$stderr_file"
     ) &
     probe_pid="$!"
     # The watchdog (and its sleep child, which outlives the kill below) must
@@ -1733,7 +1770,7 @@ codex_cli_version() {
 
     for version_arg in --version version; do
         : > "$probe_file"
-        if codex_cli_version_probe "$probe_file" "$cli_path" "$version_arg"; then
+        if codex_cli_version_probe "$probe_file" /dev/null "$cli_path" "$version_arg"; then
             output="$(sed -n '1,3p' "$probe_file" 2>/dev/null || true)"
             version="$(printf '%s\n' "$output" | sed -nE '
 s/^v?([0-9]+([.][0-9]+)+(-[0-9A-Za-z.-]+)?([+][0-9A-Za-z.-]+)?)([^0-9A-Za-z._+-].*)?$/\1/p
@@ -1754,6 +1791,35 @@ s/.*[^0-9A-Za-z._+-]v?([0-9]+([.][0-9]+)+(-[0-9A-Za-z.-]+)?([+][0-9A-Za-z.-]+)?)
     done
 
     rm -f "$probe_file" "${probe_file}.timed-out"
+    return 1
+}
+
+codex_cli_missing_optional_dependency() {
+    local cli_path="$1"
+    local output_file
+    local stderr_file
+    local probe_status
+
+    [ -n "$cli_path" ] || return 1
+    [ -x "$cli_path" ] || return 1
+    output_file="$(mktemp "${TMPDIR:-/tmp}/codex-cli-output.XXXXXX" 2>/dev/null)" || return 1
+    stderr_file="$(mktemp "${TMPDIR:-/tmp}/codex-cli-error.XXXXXX" 2>/dev/null)" || {
+        rm -f "$output_file"
+        return 1
+    }
+
+    if codex_cli_version_probe "$output_file" "$stderr_file" "$cli_path" --version; then
+        probe_status=0
+    else
+        probe_status=$?
+    fi
+    if [ "$probe_status" -ne 0 ] && [ "$probe_status" -ne 124 ] && \
+        grep -Eq 'Missing optional dependency[[:space:]]*@openai/codex-linux-(x64|arm64)([[:space:].,:;)]|$)' "$output_file" "$stderr_file"; then
+        rm -f "$output_file" "$stderr_file" "${output_file}.timed-out"
+        return 0
+    fi
+
+    rm -f "$output_file" "$stderr_file" "${output_file}.timed-out"
     return 1
 }
 
@@ -1917,6 +1983,34 @@ pid_environ_lines() {
     tr '\0' '\n' 2>/dev/null < "/proc/$pid/environ" || true
 }
 
+pid_environ_value() {
+    local pid="$1"
+    local key="$2"
+    local entry
+
+    [ -r "/proc/$pid/environ" ] || return 1
+    while IFS= read -r -d '' entry; do
+        case "$entry" in
+            "$key="*) printf '%s\n' "${entry#*=}"; return 0 ;;
+        esac
+    done < "/proc/$pid/environ" 2>/dev/null
+    return 1
+}
+
+pid_start_time() {
+    local pid="$1"
+    local stat_line
+    local rest
+
+    [ -r "/proc/$pid/stat" ] || return 1
+    stat_line=$(< "/proc/$pid/stat") || return 1
+    rest=${stat_line##*) }
+    set -- $rest
+    # /proc/<pid>/stat field 22 is token 20 after stripping pid and comm.
+    [ -n "${20:-}" ] || return 1
+    printf '%s\n' "${20}"
+}
+
 pid_matches_executable() {
     local pid="$1"
     local expected="$2"
@@ -2051,45 +2145,6 @@ pid_summary() {
     printf 'pid=%s exe=%s cmd=%s' "$pid" "${exe:-unknown}" "${cmdline:-unknown}"
 }
 
-pid_is_orphaned_runtime_process() {
-    local pid="$1"
-    local cmdline
-    local arg0
-
-    [[ "$pid" =~ ^[0-9]+$ ]] || return 1
-    [ "$pid" != "$$" ] || return 1
-    [ -d "/proc/$pid" ] || return 1
-
-    arg0="$(pid_cmdline_arg0_path "$pid")"
-    case "$arg0" in
-        "$SCRIPT_DIR/electron"|"$SCRIPT_DIR/electron "*)
-            pid_is_current_user "$pid" || return 1
-            pid_matches_app_identity "$pid" || return 1
-            pid_is_electron_helper "$pid"
-            ;;
-        "$SCRIPT_DIR/chrome_crashpad_handler"|"$SCRIPT_DIR/chrome_crashpad_handler "*|"$SCRIPT_DIR/resources/node-runtime/bin/node"|"$SCRIPT_DIR/resources/node-runtime/bin/node "*|"$SCRIPT_DIR/resources/node_repl"|"$SCRIPT_DIR/resources/node_repl "*)
-            pid_is_current_user "$pid" || return 1
-            pid_matches_app_identity "$pid" || return 1
-            return 0
-            ;;
-        *)
-            case "$arg0" in
-                "$SCRIPT_DIR"/*) ;;
-                *) return 1 ;;
-            esac
-            cmdline="$(pid_cmdline "$pid")"
-            case "$cmdline" in
-                *"$SCRIPT_DIR/resources/node-runtime/bin/node"*|*"$SCRIPT_DIR/resources/node_repl"*)
-                    pid_is_current_user "$pid" || return 1
-                    pid_matches_app_identity "$pid" || return 1
-                    return 0
-                    ;;
-            esac
-            return 1
-            ;;
-    esac
-}
-
 detect_cross_install_conflict() {
     local pid
     local install_dir
@@ -2158,6 +2213,182 @@ detect_warm_start() {
         WARM_START=0
         echo "Warm-start handoff disabled by $APP_SETTINGS_FILE"
     fi
+}
+
+running_app_uses_renderer_url_override() {
+    local allow_override
+    local renderer_url
+
+    running_app_is_active || return 1
+    allow_override="$(pid_environ_value "$RUNNING_APP_PID" CODEX_LINUX_ALLOW_RENDERER_URL_OVERRIDE 2>/dev/null || true)"
+    truthy_env_value "$allow_override" || return 1
+    renderer_url="$(pid_environ_value "$RUNNING_APP_PID" ELECTRON_RENDERER_URL 2>/dev/null || true)"
+    [ -n "$renderer_url" ] && [ "$renderer_url" != "$WEBVIEW_ORIGIN/" ]
+}
+
+terminate_stale_electron_with_pidfd() {
+    local pid="$1"
+    local expected_start_time
+
+    pid_matches_executable "$pid" "$SCRIPT_DIR/electron" || return 1
+    expected_start_time="$(pid_start_time "$pid")" || return 1
+
+    python3 - \
+        "$pid" \
+        "$expected_start_time" \
+        "$SCRIPT_DIR/electron" \
+        "$CODEX_LINUX_APP_ID" \
+        "$CODEX_LINUX_INSTANCE_ID" \
+        "$MULTI_LAUNCH_ACTIVE" <<'PY'
+import os
+import select
+import signal
+import sys
+
+pid = int(sys.argv[1])
+expected_start_time = sys.argv[2]
+expected_executable = sys.argv[3]
+expected_app_id = sys.argv[4]
+expected_instance_id = sys.argv[5]
+expected_multi_launch = sys.argv[6] == "1"
+
+if not hasattr(os, "pidfd_open") or not hasattr(signal, "pidfd_send_signal"):
+    print("pidfd APIs are unavailable; refusing to terminate the stale Electron process", file=sys.stderr)
+    sys.exit(1)
+
+try:
+    pidfd = os.pidfd_open(pid, 0)
+except OSError as exc:
+    print(f"could not open pidfd for stale Electron pid {pid}: {exc}", file=sys.stderr)
+    sys.exit(1)
+
+try:
+    with open(f"/proc/{pid}/stat", "r", encoding="utf-8") as handle:
+        stat_fields = handle.read().rsplit(") ", 1)[1].split()
+    actual_start_time = stat_fields[19]
+    with open(f"/proc/{pid}/status", "r", encoding="utf-8") as handle:
+        status_lines = handle.read().splitlines()
+    uid_line = next(line for line in status_lines if line.startswith("Uid:"))
+    actual_uid = int(uid_line.split()[1])
+    with open(f"/proc/{pid}/cmdline", "rb") as handle:
+        cmdline = [part for part in handle.read().split(b"\0") if part]
+    with open(f"/proc/{pid}/environ", "rb") as handle:
+        environ_entries = [part for part in handle.read().split(b"\0") if b"=" in part]
+except (OSError, IndexError, StopIteration, ValueError) as exc:
+    print(f"could not revalidate stale Electron pid {pid}: {exc}", file=sys.stderr)
+    os.close(pidfd)
+    sys.exit(1)
+
+environ = {}
+for entry in environ_entries:
+    key, value = entry.split(b"=", 1)
+    environ[os.fsdecode(key)] = os.fsdecode(value)
+
+identity_matches = (
+    actual_start_time == expected_start_time
+    and actual_uid == os.geteuid()
+    and bool(cmdline)
+    and os.fsdecode(cmdline[0]) == expected_executable
+    and not any(part.startswith(b"--type=") for part in cmdline[1:])
+    and expected_app_id in {
+        environ.get("CODEX_LINUX_APP_ID"),
+        environ.get("CODEX_APP_ID"),
+    }
+)
+if expected_multi_launch:
+    identity_matches = identity_matches and environ.get("CODEX_LINUX_INSTANCE_ID") == expected_instance_id
+else:
+    identity_matches = identity_matches and environ.get("CODEX_LINUX_MULTI_LAUNCH") != "1"
+
+if not identity_matches:
+    print(f"stale Electron pid {pid} failed identity revalidation", file=sys.stderr)
+    os.close(pidfd)
+    sys.exit(1)
+
+poller = select.poll()
+poller.register(pidfd, select.POLLIN)
+try:
+    signal.pidfd_send_signal(pidfd, signal.SIGTERM)
+except ProcessLookupError:
+    os.close(pidfd)
+    sys.exit(0)
+except OSError as exc:
+    print(f"could not terminate stale Electron pid {pid}: {exc}", file=sys.stderr)
+    os.close(pidfd)
+    sys.exit(1)
+
+if not poller.poll(2000):
+    try:
+        signal.pidfd_send_signal(pidfd, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    except OSError as exc:
+        print(f"could not kill stale Electron pid {pid}: {exc}", file=sys.stderr)
+        os.close(pidfd)
+        sys.exit(1)
+    if not poller.poll(1000):
+        print(f"stale Electron pid {pid} did not exit", file=sys.stderr)
+        os.close(pidfd)
+        sys.exit(1)
+
+os.close(pidfd)
+PY
+}
+
+recover_unhealthy_running_app() {
+    running_app_is_active || return 0
+
+    if running_app_uses_renderer_url_override; then
+        echo "Skipping packaged webview recovery because an explicit renderer URL override is active"
+        return 0
+    fi
+    webview_origin_is_reachable && return 0
+
+    if webview_port_is_open; then
+        notify_error "$CODEX_LINUX_APP_DISPLAY_NAME packaged webview origin is unhealthy, but port $CODEX_LINUX_WEBVIEW_PORT is occupied. Keeping the live Electron process untouched. Close it manually and retry."
+        exit 1
+    fi
+
+    echo "Detected live Electron pid=$RUNNING_APP_PID with an unavailable packaged webview origin; preparing a safe cold-start recovery"
+    acquire_launcher_lock
+    if [ "$LAUNCHER_LOCK_HELD" -ne 1 ] || [ "$LAUNCHER_LOCK_TIMED_OUT" -eq 1 ]; then
+        release_launcher_lock
+        notify_error "$CODEX_LINUX_APP_DISPLAY_NAME could not lock launcher state for safe webview recovery. Keeping the live Electron process untouched; close it manually and retry."
+        exit 1
+    fi
+
+    refresh_launch_state_quick
+    if ! running_app_is_active; then
+        WARM_START=0
+        reconcile_runtime_state
+        return 0
+    fi
+    if running_app_uses_renderer_url_override; then
+        release_launcher_lock
+        echo "Skipping packaged webview recovery because the running app uses an explicit renderer URL override"
+        return 0
+    fi
+    if webview_origin_is_reachable; then
+        release_launcher_lock
+        echo "Packaged webview origin recovered while waiting for launcher state"
+        return 0
+    fi
+    if webview_port_is_open; then
+        release_launcher_lock
+        notify_error "$CODEX_LINUX_APP_DISPLAY_NAME packaged webview port became occupied during recovery. Keeping the live Electron process untouched; close it manually and retry."
+        exit 1
+    fi
+
+    if ! terminate_stale_electron_with_pidfd "$RUNNING_APP_PID"; then
+        release_launcher_lock
+        notify_error "$CODEX_LINUX_APP_DISPLAY_NAME could not safely verify and stop stale Electron pid $RUNNING_APP_PID. Close it manually and retry."
+        exit 1
+    fi
+
+    echo "Stopped identity-verified stale Electron pid=$RUNNING_APP_PID; continuing with a cold start"
+    WARM_START=0
+    RUNNING_APP_PID=""
+    rm -f "$APP_PID_FILE" "$WEBVIEW_PID_FILE" "$LAUNCH_ACTION_SOCKET"
 }
 
 send_warm_start_launch_action() {
@@ -2594,68 +2825,6 @@ clear_stale_pid_file() {
     if [ -z "$pid" ] || ! pid_matches_executable "$pid" "$SCRIPT_DIR/electron"; then
         rm -f "$APP_PID_FILE"
     fi
-}
-
-reap_orphaned_runtime_processes() {
-    local pid
-    local proc_cmdline
-    local pids=()
-    local still_running=0
-
-    for proc_cmdline in /proc/[0-9]*/cmdline; do
-        [ -r "$proc_cmdline" ] || continue
-        pid="${proc_cmdline#/proc/}"
-        pid="${pid%/cmdline}"
-        if pid_is_orphaned_runtime_process "$pid"; then
-            pids+=("$pid")
-        fi
-    done
-
-    [ "${#pids[@]}" -gt 0 ] || return 0
-
-    for pid in "${pids[@]}"; do
-        if [ -d "/proc/$pid" ]; then
-            echo "Stopping orphaned Codex runtime process after stale launch state: $(pid_summary "$pid")"
-            kill "$pid" 2>/dev/null || true
-        fi
-    done
-
-    for _ in $(seq 1 20); do
-        still_running=0
-        for pid in "${pids[@]}"; do
-            if kill -0 "$pid" 2>/dev/null; then
-                still_running=1
-                break
-            fi
-        done
-        [ "$still_running" -eq 0 ] && return 0
-        sleep 0.05
-    done
-
-    for pid in "${pids[@]}"; do
-        if kill -0 "$pid" 2>/dev/null; then
-            echo "WARN: orphaned Codex runtime process is still running after SIGTERM; sending SIGKILL: $(pid_summary "$pid")"
-            kill -9 "$pid" 2>/dev/null || true
-        fi
-    done
-
-    for _ in $(seq 1 10); do
-        still_running=0
-        for pid in "${pids[@]}"; do
-            if kill -0 "$pid" 2>/dev/null; then
-                still_running=1
-                break
-            fi
-        done
-        [ "$still_running" -eq 0 ] && return 0
-        sleep 0.05
-    done
-
-    for pid in "${pids[@]}"; do
-        if kill -0 "$pid" 2>/dev/null; then
-            echo "WARN: orphaned Codex runtime process is still running after SIGKILL: $(pid_summary "$pid")"
-        fi
-    done
 }
 
 reconcile_runtime_state() {
@@ -3684,41 +3853,167 @@ launcher_lock_wait_seconds() {
 # Serialize the running-app detection -> Electron spawn -> app.pid write
 # critical section across concurrent launchers. Without this, two launches
 # racing through detection can both cold-start, and the loser's cleanup later
-# deletes the survivor's app.pid marker, making it undetectable. Fd 9 must not
-# survive into Electron or plugin children, otherwise a stale child can keep the
-# flock alive after this launcher has moved on.
+# deletes the survivor's app.pid marker, making it undetectable. A dedicated
+# parent-death-bound helper owns the flock so no launcher child can inherit it.
 acquire_launcher_lock() {
     local wait_seconds
+    local status=""
+    local attempts
 
-    command -v flock >/dev/null 2>&1 || return 0
+    [ "$LAUNCHER_LOCK_HELD" -eq 0 ] || return 0
     LAUNCHER_LOCK_TIMED_OUT=0
-    exec 9>"$APP_STATE_DIR/launcher.lock" || return 0
-    LAUNCHER_LOCK_FD_OPEN=1
-    if flock -n 9; then
+    wait_seconds="$(launcher_lock_wait_seconds)"
+    LAUNCHER_LOCK_STATUS_PATH="$APP_STATE_DIR/.launcher.lock.status.$$"
+    rm -f "$LAUNCHER_LOCK_STATUS_PATH"
+
+    # A dedicated helper owns the flock, so arbitrary launcher children never
+    # inherit the locked file description. PR_SET_PDEATHSIG releases it even
+    # when the launcher is SIGKILLed while a hook or cache worker survives.
+    ( trap - EXIT
+      exec python3 - \
+          "$$" \
+          "$APP_STATE_DIR/launcher.lock" \
+          "$wait_seconds" \
+          "$LAUNCHER_LOCK_STATUS_PATH" <<'PY'
+import ctypes
+import ctypes.util
+import fcntl
+import os
+import signal
+import sys
+import time
+
+parent_pid = int(sys.argv[1])
+lock_path, wait_text, status_path = sys.argv[2:]
+wait_seconds = int(wait_text)
+
+libc_name = ctypes.util.find_library("c") or "libc.so.6"
+try:
+    libc = ctypes.CDLL(libc_name, use_errno=True)
+    if libc.prctl(1, signal.SIGTERM, 0, 0, 0) != 0:
+        sys.exit(1)
+except OSError:
+    sys.exit(1)
+if os.getppid() != parent_pid:
+    sys.exit(1)
+
+def release_lock(_signum, _frame):
+    raise SystemExit(0)
+
+
+signal.signal(signal.SIGTERM, release_lock)
+signal.signal(signal.SIGUSR1, release_lock)
+lock_fd = os.open(lock_path, os.O_CREAT | os.O_WRONLY, 0o600)
+try:
+    deadline = time.monotonic() + wait_seconds
+    locked = False
+    while True:
+        try:
+            fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            locked = True
+            break
+        except BlockingIOError:
+            if time.monotonic() >= deadline:
+                break
+            time.sleep(0.05)
+
+    with open(status_path, "w", encoding="utf-8") as status_file:
+        status_file.write("locked\n" if locked else "timeout\n")
+
+    if locked:
+        while True:
+            signal.pause()
+finally:
+    os.close(lock_fd)
+    try:
+        os.unlink(status_path)
+    except FileNotFoundError:
+        pass
+PY
+    ) >/dev/null 2>&1 &
+    LAUNCHER_LOCK_HELPER_PID=$!
+    LAUNCHER_LOCK_HELPER_START_TIME="$(pid_start_time "$LAUNCHER_LOCK_HELPER_PID" 2>/dev/null || true)"
+    if [ -z "$LAUNCHER_LOCK_HELPER_START_TIME" ]; then
+        LAUNCHER_LOCK_TIMED_OUT=1
         return 0
     fi
 
-    wait_seconds="$(launcher_lock_wait_seconds)"
-    launcher_notice "Another $CODEX_LINUX_APP_DISPLAY_NAME launcher is holding $APP_STATE_DIR/launcher.lock; waiting up to ${wait_seconds}s."
+    attempts=$((wait_seconds * 20 + 20))
+    for _ in $(seq 1 "$attempts"); do
+        if [ -s "$LAUNCHER_LOCK_STATUS_PATH" ]; then
+            status="$(cat "$LAUNCHER_LOCK_STATUS_PATH" 2>/dev/null || true)"
+            break
+        fi
+        kill -0 "$LAUNCHER_LOCK_HELPER_PID" 2>/dev/null || break
+        sleep 0.05
+    done
 
-    if ! flock -w "$wait_seconds" 9; then
+    if [ "$status" != "locked" ]; then
         LAUNCHER_LOCK_TIMED_OUT=1
-        launcher_notice "WARN: timed out waiting for launcher.lock after ${wait_seconds}s; continuing after a quick state refresh."
-    else
-        echo "Acquired launcher lock after waiting"
+        if stop_launcher_lock_helper; then
+            wait "$LAUNCHER_LOCK_HELPER_PID" 2>/dev/null || true
+        fi
+        LAUNCHER_LOCK_HELPER_PID=""
+        LAUNCHER_LOCK_HELPER_START_TIME=""
+        rm -f "$LAUNCHER_LOCK_STATUS_PATH"
+        launcher_notice "WARN: timed out waiting for launcher.lock after ${wait_seconds}s; refusing to start another app process."
+        return 0
     fi
+
+    LAUNCHER_LOCK_HELD=1
+    if ! launcher_lock_helper_is_active; then
+        LAUNCHER_LOCK_HELD=0
+        if stop_launcher_lock_helper; then
+            wait "$LAUNCHER_LOCK_HELPER_PID" 2>/dev/null || true
+        fi
+        LAUNCHER_LOCK_HELPER_PID=""
+        LAUNCHER_LOCK_HELPER_START_TIME=""
+        LAUNCHER_LOCK_TIMED_OUT=1
+        rm -f "$LAUNCHER_LOCK_STATUS_PATH"
+        return 0
+    fi
+    rm -f "$LAUNCHER_LOCK_STATUS_PATH"
 }
 
-close_launcher_lock_fd_for_child() {
-    [ "$LAUNCHER_LOCK_FD_OPEN" -eq 1 ] || return 0
-    { exec 9>&-; } 2>/dev/null || true
+launcher_lock_helper_is_active() {
+    local actual_start_time
+    local cmdline
+
+    [ "$LAUNCHER_LOCK_HELD" -eq 1 ] || return 1
+    [[ "$LAUNCHER_LOCK_HELPER_PID" =~ ^[0-9]+$ ]] || return 1
+    actual_start_time="$(pid_start_time "$LAUNCHER_LOCK_HELPER_PID" 2>/dev/null || true)"
+    [ -n "$actual_start_time" ] && [ "$actual_start_time" = "$LAUNCHER_LOCK_HELPER_START_TIME" ] || return 1
+    pid_parent_matches "$LAUNCHER_LOCK_HELPER_PID" "${BASHPID:-$$}" || return 1
+    cmdline="$(pid_cmdline "$LAUNCHER_LOCK_HELPER_PID")"
+    [[ "$cmdline" == *" $APP_STATE_DIR/launcher.lock "*" $LAUNCHER_LOCK_STATUS_PATH"* ]]
+}
+
+stop_launcher_lock_helper() {
+    local actual_start_time
+    local cmdline
+
+    [[ "$LAUNCHER_LOCK_HELPER_PID" =~ ^[0-9]+$ ]] || return 1
+    actual_start_time="$(pid_start_time "$LAUNCHER_LOCK_HELPER_PID" 2>/dev/null || true)"
+    [ -n "$actual_start_time" ] && [ "$actual_start_time" = "$LAUNCHER_LOCK_HELPER_START_TIME" ] || return 1
+    pid_parent_matches "$LAUNCHER_LOCK_HELPER_PID" "${BASHPID:-$$}" || return 1
+    cmdline="$(pid_cmdline "$LAUNCHER_LOCK_HELPER_PID")"
+    [[ "$cmdline" == *" $APP_STATE_DIR/launcher.lock "*" $LAUNCHER_LOCK_STATUS_PATH"* ]] || return 1
+    kill -TERM "$LAUNCHER_LOCK_HELPER_PID" 2>/dev/null || ! kill -0 "$LAUNCHER_LOCK_HELPER_PID" 2>/dev/null
 }
 
 release_launcher_lock() {
-    [ "$LAUNCHER_LOCK_FD_OPEN" -eq 1 ] || return 0
-    flock -u 9 2>/dev/null || true
-    { exec 9>&-; } 2>/dev/null || true
-    LAUNCHER_LOCK_FD_OPEN=0
+    [ "$LAUNCHER_LOCK_HELD" -eq 1 ] || return 0
+    LAUNCHER_LOCK_HELD=0
+    if [ -n "$LAUNCHER_LOCK_HELPER_PID" ]; then
+        if stop_launcher_lock_helper; then
+            wait "$LAUNCHER_LOCK_HELPER_PID" 2>/dev/null || true
+        else
+            echo "WARN: launcher lock helper did not exit after a verified release signal" >&2
+        fi
+    fi
+    LAUNCHER_LOCK_HELPER_PID=""
+    LAUNCHER_LOCK_HELPER_START_TIME=""
+    rm -f "$LAUNCHER_LOCK_STATUS_PATH"
 }
 
 refresh_launch_state() {
@@ -3735,6 +4030,36 @@ refresh_launch_state_quick() {
     RUNNING_APP_PID=""
     if pid="$(find_running_app_pid)"; then
         set_detected_running_app "$pid"
+    fi
+}
+
+prepare_launch_state_under_lock() {
+    running_app_is_active && return 0
+
+    acquire_launcher_lock
+    if [ "$LAUNCHER_LOCK_HELD" -ne 1 ] || [ "$LAUNCHER_LOCK_TIMED_OUT" -eq 1 ]; then
+        release_launcher_lock
+        notify_error "$CODEX_LINUX_APP_DISPLAY_NAME could not acquire launcher state within the configured timeout. No new app process was started; retry after the current launch finishes."
+        exit 1
+    fi
+
+    log_phase "launcher_lock_ready"
+    refresh_launch_state_quick
+    log_phase "launch_state_refreshed_under_lock"
+    recover_unhealthy_running_app
+
+    # A healthy app discovered while waiting owns its webview already. Cold
+    # starts keep the lock through webview readiness and app.pid publication.
+    if running_app_is_active; then
+        release_launcher_lock
+    fi
+}
+
+require_active_launcher_lock() {
+    [ "$LAUNCHER_LOCK_HELD" -eq 1 ] || return 0
+    if ! launcher_lock_helper_is_active; then
+        notify_error "$CODEX_LINUX_APP_DISPLAY_NAME lost launcher serialization before Electron startup. No app process was started; retry the launch."
+        exit 1
     fi
 }
 
@@ -3764,8 +4089,8 @@ launch_electron() {
     if [ "$ELECTRON_GPU_COMPOSITING_DISABLED" = "0" ] && [ "${XDG_SESSION_TYPE:-}" = "wayland" ]; then
         echo "Rendering hint: if the side panel flickers or appears transparent on Wayland, retry with CODEX_ELECTRON_DISABLE_GPU_COMPOSITING=1"
     fi
+    require_active_launcher_lock
     (
-        close_launcher_lock_fd_for_child
         unset ELECTRON_RUN_AS_NODE
         exec "$SCRIPT_DIR/electron" "${ELECTRON_LAUNCH_ARGS[@]}" "${ELECTRON_ARGS[@]}"
     ) &
@@ -3804,6 +4129,9 @@ trap cleanup_launcher EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 trap 'exit 129' HUP
+
+recover_unhealthy_running_app
+prepare_launch_state_under_lock
 
 if send_warm_start_launch_action "${LAUNCHER_ARGS[@]}"; then
     echo "Sent launch args over warm-start IPC"
@@ -3848,25 +4176,50 @@ if needs_cold_start && [ -z "$CODEX_CLI_PATH" ]; then
     if is_interactive_terminal; then
         if prompt_install_missing_cli; then
             if ! run_cli_preflight 1; then
-                notify_error "Codex CLI installation was attempted but did not succeed. Retry by reopening the app, or install it manually with: npm i -g --include=optional @openai/codex or npm i -g --include=optional --prefix ~/.local @openai/codex"
+                notify_error "Codex CLI installation was attempted but did not succeed. Retry by reopening the app, or install into a fresh safe prefix: (umask 0022; npm i -g --include=optional --prefix ~/.codex-cli-npm @openai/codex)"
                 exit 1
             fi
         fi
     elif ! run_gui_cli_prompt; then
-        notify_error "Codex CLI is required but is not installed. Reopen the app to retry the automatic install flow, or install it manually with: npm i -g --include=optional @openai/codex or npm i -g --include=optional --prefix ~/.local @openai/codex"
+        notify_error "Codex CLI is required but is not installed. Reopen the app to retry the automatic install flow, or install into a fresh safe prefix: (umask 0022; npm i -g --include=optional --prefix ~/.codex-cli-npm @openai/codex)"
         exit 1
     fi
 fi
 
 if needs_cold_start && [ -z "$CODEX_CLI_PATH" ]; then
-    notify_error "Codex CLI is required but is not installed. Reopen the app to retry the automatic install flow, or install it manually with: npm i -g --include=optional @openai/codex or npm i -g --include=optional --prefix ~/.local @openai/codex"
+    notify_error "Codex CLI is required but is not installed. Reopen the app to retry the automatic install flow, or install into a fresh safe prefix: (umask 0022; npm i -g --include=optional --prefix ~/.codex-cli-npm @openai/codex)"
     exit 1
 fi
 
+if [ -n "$CODEX_CLI_PATH" ]; then
+    if ! verify_cli_launch_path; then
+        notify_error "The selected Codex CLI path does not resolve to an executable file. Reinstall the CLI or set CODEX_CLI_PATH to a working executable."
+        exit 1
+    fi
+    log_phase "cli_launch_path_verified"
+fi
+
 if needs_cold_start; then
+    cli_repair_required=0
+    if codex_cli_missing_optional_dependency "$CODEX_CLI_PATH"; then
+        cli_repair_required=1
+    fi
     if [ "${CODEX_SYNC_CLI_PREFLIGHT:-0}" = "1" ]; then
-        run_cli_preflight 0
-        log_phase "cli_preflight_sync"
+        if ! run_cli_preflight 0 "$cli_repair_required"; then
+            notify_error "The selected Codex CLI is missing its Linux optional dependency and could not be repaired automatically. Reinstall it with: npm i -g --include=optional @openai/codex@latest or npm i -g --include=optional --prefix ~/.local @openai/codex@latest"
+            exit 1
+        fi
+        if [ "$cli_repair_required" = "1" ]; then
+            log_phase "cli_preflight_repair_sync"
+        else
+            log_phase "cli_preflight_sync"
+        fi
+    elif [ "$cli_repair_required" = "1" ]; then
+        if ! run_cli_preflight 0 1; then
+            notify_error "The selected Codex CLI is missing its Linux optional dependency and could not be repaired automatically. Reinstall it with: npm i -g --include=optional @openai/codex@latest or npm i -g --include=optional --prefix ~/.local @openai/codex@latest"
+            exit 1
+        fi
+        log_phase "cli_preflight_repair_sync"
     else
         run_cli_preflight_background
         log_phase "cli_preflight_backgrounded"
@@ -3906,17 +4259,6 @@ if needs_cold_start; then
 fi
 resolve_browser_use_runtime_env
 log_phase "browser_use_runtime_env_resolved"
-
-if needs_cold_start; then
-    acquire_launcher_lock
-    log_phase "launcher_lock_ready"
-    refresh_launch_state_quick
-    log_phase "launch_state_refreshed_under_lock"
-    if [ "$LAUNCHER_LOCK_TIMED_OUT" -eq 1 ]; then
-        reap_orphaned_runtime_processes
-        detect_cross_install_conflict
-    fi
-fi
 
 log_codex_cli_path
 echo "Using managed Node.js runtime=${CODEX_MANAGED_NODE_RUNTIME_DIR:-$SCRIPT_DIR/resources/node-runtime}"

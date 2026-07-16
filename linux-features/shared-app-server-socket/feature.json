@@ -1,0 +1,16 @@
+{
+  "id": "shared-app-server-socket",
+  "title": "Shared App-Server Socket",
+  "description": "Opt-in protocol-transparent Unix socket shared by Codex Desktop and one or more ordinary app-server clients.",
+  "defaultEnabled": false,
+  "entrypoints": {
+    "patchDescriptors": "./patch.js"
+  },
+  "runtimeHooks": {
+    "launcher": {
+      "source": "socket-env.sh",
+      "name": "socket-env.sh",
+      "mode": "0755"
+    }
+  }
+}

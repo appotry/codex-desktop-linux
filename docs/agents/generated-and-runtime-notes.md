@@ -55,9 +55,10 @@ that agents need without keeping them in the main quick-start.
   URL.
 - GUI launchers often do not inherit shell `PATH`. The generated launcher
   searches common Codex CLI and `nvm` locations and respects `CODEX_CLI_PATH`.
-- CLI preflight is launcher-scoped and best-effort. It can prompt to install
-  or update the Codex CLI, but failures should warn rather than block app
-  launch.
+- CLI preflight is launcher-scoped and normally best-effort. A detected npm CLI
+  missing its required Linux optional dependency is the exception: the launcher
+  performs one bounded synchronous repair and blocks Electron startup if that
+  repair fails or times out, because the known-broken CLI cannot serve the app.
 - ASAR patches are fail-soft unless intentionally marked required. Each patch
   should be idempotent and report warnings when upstream drift prevents a
   needle from matching.
@@ -84,8 +85,8 @@ that agents need without keeping them in the main quick-start.
 
 ## Runtime Expectations
 
-- `python3`, `7z`, `curl`, `unzip`, `tar`, `make`, and `g++` are required for
-  `install.sh`.
+- `python3`, `7z`, `curl`, `unzip`, `tar`, `flock`, `make`, and `g++` are
+  required for `install.sh`.
 - Native package builders require their format-specific tools (`dpkg-deb`,
   `rpmbuild`, `makepkg`/pacman tooling, or `appimagetool`).
 - `scripts/install-deps.sh` bootstraps common host dependencies. On apt-based

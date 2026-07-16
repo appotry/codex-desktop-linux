@@ -24,6 +24,7 @@ codex_packaged_runtime_prelaunch_background() {
 
         systemctl --user import-environment \
             PATH \
+            HOMEBREW_PREFIX \
             DISPLAY \
             WAYLAND_DISPLAY \
             DBUS_SESSION_BUS_ADDRESS \
@@ -35,6 +36,7 @@ codex_packaged_runtime_prelaunch_background() {
         if command -v dbus-update-activation-environment >/dev/null 2>&1; then
             dbus-update-activation-environment --systemd \
                 PATH \
+                HOMEBREW_PREFIX \
                 DISPLAY \
                 WAYLAND_DISPLAY \
                 DBUS_SESSION_BUS_ADDRESS \

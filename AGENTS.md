@@ -39,6 +39,37 @@ update-builder bundle.
   cross-format changes unless the code explicitly scopes them to one package
   format or desktop target.
 
+## Issue And Pull Request Labels
+
+- [`.github/labels.json`](.github/labels.json) is the source of truth for label
+  names, colors, descriptions, groups, migrations, and retirements. Follow
+  [label governance](docs/label-governance.md) when classifying an issue or
+  pull request.
+- Labels are staff-managed. Contributors without repository label permission
+  do not determine their own labels. An agent without explicit delegated label
+  authority may propose a classification to an authorized maintainer or
+  collaborator, but it must not mutate repository labels.
+- An authorized agent operation must show a read-only plan first and use the
+  trusted manual workflow or `scripts/ci/manage-labels.js` with the required
+  typed confirmation. Never run write-capable label code from a fork pull
+  request or other untrusted ref.
+- After triage starts, issues have one `type:`, one or more `area:`, and one
+  active `status:` label. Pull requests have one `type:`, one or more `area:`,
+  and one `risk:` label. Use multiple areas only for real ownership boundaries.
+- Read native checks, draft state, mergeability, reviews, timestamps, and
+  open/closed state directly from GitHub. Do not duplicate them with labels.
+- `workflow: manual only` is a hard stop for item-specific automation: it may
+  inspect the item but must not comment, edit, classify, close, or merge it.
+  Only an owner-approved catalog migration declared in `.github/labels.json`
+  may preserve an existing classification under a replacement name.
+  `risk: low` never grants merge authority.
+- Do not infer labels from a title alone. Preserve uncertainty with the
+  appropriate triage status. Apply `resolution: duplicate` only after the
+  canonical item is verified and linked.
+- Never expose suspected secrets or an undisclosed vulnerability through a
+  public label. Use `type: security` only for public hardening or an already
+  disclosed concern.
+
 ## Source Routing
 
 Use source files, not generated artifacts. Main routing:
@@ -52,6 +83,8 @@ Use source files, not generated artifacts. Main routing:
 - Linux features: `linux-features/<id>/`.
 - Package builders: `scripts/build-*.sh` and `scripts/lib/package-common.sh`.
 - Updater: `updater/src/`.
+- Upstream DMG automation: `scripts/automation/upstream-dmg-watchdog/` and
+  `docs/upstream-dmg-watchdog.md`.
 - Computer Use: `computer-use-linux/`; compositor backends under
   `computer-use-linux/src/windowing/backends/`.
 - Nix: `flake.nix`, `flake.lock`, and `nix/`.
@@ -62,9 +95,13 @@ Detailed agent docs: [repository map](docs/agents/repository-map.md),
 
 Primary human docs: [architecture](docs/architecture.md),
 [build and packaging](docs/build-and-packaging.md),
+[native setup](docs/native-setup.md),
 [Linux features](docs/linux-features-architecture.md),
 [updater](docs/updater.md), [Linux Computer Use](docs/linux-computer-use.md),
+[Record and Replay](docs/record-and-replay-linux.md),
 [Nix](docs/nix.md), and [troubleshooting](docs/troubleshooting.md).
+
+Repository governance: [issue and pull request labels](docs/label-governance.md).
 
 ## Patch And Feature Rules
 
@@ -99,9 +136,10 @@ Primary human docs: [architecture](docs/architecture.md),
   set too.
 - GUI launchers often do not inherit shell `PATH`. The generated launcher
   searches common Codex CLI and `nvm` locations and respects `CODEX_CLI_PATH`.
-- CLI preflight is launcher-scoped and best-effort. It can prompt to install
-  or update the Codex CLI, but failures should warn rather than block app
-  launch.
+- CLI preflight is launcher-scoped and normally best-effort. A detected npm CLI
+  missing its required Linux optional dependency is the exception: the launcher
+  performs one bounded synchronous repair and blocks Electron startup if that
+  repair fails or times out, because the known-broken CLI cannot serve the app.
 - The generated launcher starts the local webview server before Electron and
   verifies the expected startup markers. See
   [webview server evaluation](docs/webview-server-evaluation.md) before

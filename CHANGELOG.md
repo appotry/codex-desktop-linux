@@ -35,6 +35,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- Launcher startup no longer requires Python's pidfd wrappers for normal
+  launcher lock acquire and release. Pidfd remains reserved for the
+  identity-verified stale Electron termination path.
 - Approval notifications now preserve the upstream Approve, Approve for
   session, and Decline actions on Linux. A small freedesktop notification
   bridge forwards the action and close signals that Electron's Linux

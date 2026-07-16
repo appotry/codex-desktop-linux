@@ -372,6 +372,40 @@
       }
     },
     {
+      "id": "hatch_pet_skill",
+      "title": "Hatch Pet recommended skill and Linux bundled-skill staging",
+      "category": "skill",
+      "pathPatterns": [
+        "(^|/)skills/skills/\\.curated/hatch-pet/"
+      ],
+      "contentNeedles": [
+        "name: hatch-pet",
+        "spriteVersionNumber"
+      ],
+      "patchNamePatterns": [
+        "hatch.*pet",
+        "bundled.*skills"
+      ],
+      "requiredEvidence": [
+        {
+          "id": "hatch-pet-skill-root",
+          "pathPatterns": [
+            "(^|/)skills/skills/\\.curated/hatch-pet/SKILL\\.md$"
+          ],
+          "contentNeedles": [
+            "name: hatch-pet",
+            "spriteVersionNumber"
+          ]
+        }
+      ],
+      "linuxSubstrate": {
+        "requiredPaths": [
+          "scripts/lib/bundled-plugins.sh",
+          "tests/scripts_smoke.sh"
+        ]
+      }
+    },
+    {
       "id": "browser_use_plugin",
       "title": "Browser Use plugin manifest, client script, and skill shell",
       "category": "plugin",

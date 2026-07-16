@@ -49,6 +49,7 @@ const {
 } = require("./patches/impl/keybinds-settings.js");
 const {
   applyLinuxAvatarOverlayMousePassthroughPatch,
+  applyLinuxQueryCacheInvalidationBroadcastPatch,
 } = require("./patches/impl/avatar-overlay.js");
 const {
   applyBrowserUseNodeReplApprovalPatch,
@@ -65,6 +66,7 @@ const {
 } = require("./patches/impl/chrome-plugin.js");
 const {
   applyLinuxAboutDialogPatch,
+  applyLinuxAppReloadShortcutsPatch,
   applyLinuxApplicationMenuPatch,
   applyLinuxMenuPatch,
   applyLinuxNativeTitlebarPatch,
@@ -164,7 +166,10 @@ const {
   applyAutomationUpdateEagerToolPatch,
   applyLinuxAppSunsetPatch,
   applyLinuxBrowserUseAvailabilityPatch,
+  applyLinuxBrowserUseWebviewAttachRecoveryPatch,
   applyLinuxBrowserUseExternalAvailabilityPatch,
+  applyLinuxBrowserUseWebviewHostRecoveryPatch,
+  applyLinuxBrowserUseWebviewRemountStorePatch,
   applyLinuxBrowserUseNonLocalNavigationPatch,
   applyLinuxChatSearchHydrationPatch,
   applyLinuxConfigWriteVersionConflictPatch,
@@ -178,6 +183,7 @@ const {
   applyLinuxTooltipWindowControlsCollisionPatch,
   applyLinuxWindowControlsSafeAreaPatch,
   applySubagentNicknameMetadataPatch,
+  codexLinuxWatchBrowserWebviewAttachment,
 } = require("./patches/impl/webview/index.js");
 const {
   findCodexRequestWebviewAsset,
@@ -918,9 +924,11 @@ test("default core patch descriptors are grouped and unique", () => {
     "linux-opaque-background",
     "linux-owl-feature-binding-fallback",
     "linux-avatar-overlay-mouse-passthrough",
+    "linux-avatar-settings-sync",
     "linux-browser-use-availability",
     "linux-browser-use-non-local-navigation",
     "linux-browser-use-external-availability",
+    "linux-browser-use-webview-attach-recovery",
     "linux-chat-search-hydration",
     "linux-file-manager",
     "linux-host-child-process-environment",
@@ -962,6 +970,7 @@ test("default core patch descriptors are grouped and unique", () => {
     "linux-skills-list-dedupe",
     "linux-config-write-version-conflict",
     "linux-application-menu",
+    "linux-app-reload-shortcuts",
     "linux-x11-project-picker",
     "opaque-window-default-general-settings",
     "opaque-window-default-webview-index",
@@ -1110,6 +1119,41 @@ test("window controls safe-area descriptor matches current app shell chunks", ()
   assert.equal(
     descriptor.pattern.test(
       "app-initial~app-main~hotkey-window-thread-page~thread-app-shell-chrome~header~remote-conver~current.js",
+    ),
+    false,
+  );
+});
+
+test("optional webview descriptors follow the current upstream chunk split", () => {
+  const descriptors = corePatchDescriptors();
+  const automationUpdate = descriptors.find(
+    (descriptor) => descriptor.id === "automation-update-eager-tool",
+  );
+  const tooltipCollision = descriptors.find(
+    (descriptor) => descriptor.id === "linux-tooltip-window-controls-collision",
+  );
+
+  assert.ok(automationUpdate);
+  assert.equal(
+    automationUpdate.pattern.test("app-initial~app-main~onboarding-page-CIkoyvFz.js"),
+    true,
+  );
+  assert.equal(
+    automationUpdate.pattern.test(
+      "app-initial~app-main~onboarding-page~hotkey-window-thread-page~quick-chat-window-page~chatg~legacy.js",
+    ),
+    false,
+  );
+  assert.ok(tooltipCollision);
+  assert.equal(
+    tooltipCollision.pattern.test(
+      "app-initial~app-main~hotkey-window-new-thread-page~hotkey-window-home-page~composer-utility-bar-D9zyQF1n.js",
+    ),
+    true,
+  );
+  assert.equal(
+    tooltipCollision.pattern.test(
+      "app-initial~app-main~onboarding-page~hotkey-window-thread-page~quick-chat-window-page~chatg~legacy.js",
     ),
     false,
   );
@@ -1425,7 +1469,7 @@ function keybindsIndexBundleFixture() {
   return [
     'import{n as routeModule,s as routeToESM}from"./rolldown-runtime-A.js";',
     'import{I as routeJsxFactory,R as routeReactFactory}from"./shared-runtime-A.js";',
-    "function SettingsRouteWrapper(){let t=(0,RouteReact.useState)(null);return (0,RouteJsx.jsx)(`div`,{children:t})}",
+    "function Z(e){let r=(0,RouteReact.lazy)(e);function SettingsRouteWrapper(){let t=(0,RouteReact.useState)(null);return (0,RouteJsx.jsx)(r,{children:t})}return SettingsRouteWrapper}",
     "var RouteReact,RouteJsx;routeModule(()=>{RouteReact=routeToESM(routeReactFactory(),1),RouteJsx=routeJsxFactory()})();",
     "var Kge={\"general-settings\":xh,appearance:Pf,\"git-settings\":t1};",
     "var i_e={\"general-settings\":Z(async()=>(await s(async()=>{let{GeneralSettings:e}=await import(`./general-settings-DsLl9t6Z.js`);return{GeneralSettings:e}},[],import.meta.url)).GeneralSettings),appearance:Z(async()=>(await s(async()=>{let{Appearance:e}=await import(`./appearance.js`);return{Appearance:e}},[],import.meta.url)).Appearance)};",
@@ -1459,7 +1503,7 @@ function linuxDesktopRouteBundleFixture() {
   return [
     'import{n as routeModule,s as routeToESM}from"./rolldown-runtime-A.js";',
     'import{I as routeJsxFactory,R as routeReactFactory}from"./shared-runtime-A.js";',
-    "function SettingsRouteWrapper(){let t=(0,RouteReact.useState)(null);return (0,RouteJsx.jsx)(`div`,{children:t})}",
+    "function $(e){let r=(0,RouteReact.lazy)(e);function SettingsRouteWrapper(){let t=(0,RouteReact.useState)(null);return (0,RouteJsx.jsx)(r,{children:t})}return SettingsRouteWrapper}",
     "var RouteReact,RouteJsx;routeModule(()=>{RouteReact=routeToESM(routeReactFactory(),1),RouteJsx=routeJsxFactory()})();",
     "var DE={",
     '"general-settings":$(async()=>(await Xr(async()=>{let{GeneralSettings:e}=await import(`./general-settings-A.js`);return{GeneralSettings:e}},[],import.meta.url)).GeneralSettings),',
@@ -1524,7 +1568,10 @@ function createModernNativeKeyboardShortcutsSettingsFixture() {
     [
       'import{n as routeModule,s as routeToESM}from"./rolldown-runtime-A.js";',
       'import{I as routeJsxFactory,R as routeReactFactory}from"./shared-runtime-A.js";',
-      "function SettingsRouteWrapper(){let t=(0,RouteReact.useState)(null);return (0,RouteJsx.jsx)(`div`,{children:t})}",
+      "function DecoyState(){let t=(0,DecoyReact.useState)(null);return t}",
+      "function DecoyView(){return (0,DecoyJsx.jsx)(`div`,{})}",
+      "var DecoyReact,DecoyJsx;routeModule(()=>{DecoyReact=routeToESM(routeReactFactory(),1)});routeModule(()=>{DecoyJsx=routeJsxFactory()})();",
+      "function Ya(e){let r=(0,RouteReact.lazy)(e);function SettingsRouteWrapper(){let t=(0,RouteReact.useState)(null);return (0,RouteJsx.jsx)(r,{children:t})}return SettingsRouteWrapper}",
       "var RouteReact,RouteJsx;routeModule(()=>{RouteReact=routeToESM(routeReactFactory(),1),RouteJsx=routeJsxFactory()})();",
       'var Zn={"general-settings":Ya(async()=>(await Pr(async()=>{let{GeneralSettings:e}=await import(`./general-settings-A.js`);return{GeneralSettings:e}},[],import.meta.url)).GeneralSettings),"keyboard-shortcuts":Ya(async()=>(await Pr(async()=>{let{KeyboardShortcutsSettings:e}=await import(`./keyboard-shortcuts-settings-A.js`);return{KeyboardShortcutsSettings:e}},[],import.meta.url)).KeyboardShortcutsSettings)};',
       'var Hn={"general-settings":wt,"keyboard-shortcuts":xn};',
@@ -1645,7 +1692,7 @@ function createSplitRouteNativeKeyboardShortcutsSettingsFixture({
     [
       'import{n as routeModule,s as routeToESM}from"./rolldown-runtime-A.js";',
       'import{I as routeJsxFactory,R as routeReactFactory}from"./shared-runtime-A.js";',
-      "function SettingsRouteWrapper(){let t=(0,RouteReact.useState)(null);return (0,RouteJsx.jsx)(`div`,{children:t})}",
+      "function Ya(e){let r=(0,RouteReact.lazy)(e);function SettingsRouteWrapper(){let t=(0,RouteReact.useState)(null);return (0,RouteJsx.jsx)(r,{children:t})}return SettingsRouteWrapper}",
       "var RouteReact,RouteJsx;routeModule(()=>{RouteReact=routeToESM(routeReactFactory(),1),RouteJsx=routeJsxFactory()})();",
       "var Bn,Ya,Pr,FW,Xn=e((()=>{Bn=s(),Ya=t(f(),1),Pr=o(),",
       'FW={"general-settings":Ya(async()=>(await Pr(async()=>{let{GeneralSettings:e}=await import(`./general-settings-A.js`);return{GeneralSettings:e}},[],import.meta.url)).GeneralSettings),',
@@ -2791,6 +2838,217 @@ test("migrates a Linux-suppressed application menu back to the real menu", () =>
   assert.equal(patched, "let et=n.Menu.buildFromTemplate($e);n.Menu.setApplicationMenu(et);");
 });
 
+function nativeReloadHandlerSource(handlerAlias = "runReload", focusedWebContentsProvider = "webContents") {
+  return `${handlerAlias}=async(force=!1)=>{let target=await getWindow();if(!target)return;let manager=getBrowserSidebarManager(target);if(manager==null)return;let focused=${focusedWebContentsProvider}.getFocusedWebContents();if(force){manager.reloadActiveVisiblePageWithOptions(target,{ignoreCache:!0},focused);return}manager.reloadActiveVisiblePage(target,focused)}`;
+}
+
+function nativeReloadMenuSource(
+  handlerAlias = "runReload",
+  focusedWebContentsProvider = "webContents",
+) {
+  return `let focusedWindow=BrowserWindow.getFocusedWindow(),focusedWebContents=${focusedWebContentsProvider}.getFocusedWebContents(),reloadEnabled=focusedWindow!=null&&!focusedWindow.isDestroyed()&&!!getBrowserSidebarManager(focusedWindow)?.canReloadActiveVisiblePage(focusedWindow,focusedWebContents),${nativeReloadHandlerSource(handlerAlias, focusedWebContentsProvider)}`;
+}
+
+test("routes persisted native reload shortcuts to the Linux app webview without changing their mapping", async () => {
+  const decoy = "decoyReload=async(force=!1)=>{let target=await getWindow();if(!target)return;doSomething(target)}";
+  const persistedMenu = "persistedMenu={commandId:`reload`,mapping:settings.get(`nativeReloadShortcut`)}";
+  const source = `${decoy};${nativeReloadMenuSource()};${persistedMenu};this.runReload=runReload;`;
+  const patched = applyPatchTwice(applyLinuxAppReloadShortcutsPatch, source);
+  const reloads = [];
+  const context = {
+    BrowserWindow: { getFocusedWindow() { return null; } },
+    getBrowserSidebarManager() { throw new Error("Linux app reload must not use Browser Sidebar"); },
+    getWindow: async () => ({
+      reload() { reloads.push("reload"); },
+      webContents: { reloadIgnoringCache() { reloads.push("hard-reload"); } },
+    }),
+    process: { platform: "linux" },
+    settings: { get() { return "persisted-shortcut"; } },
+    webContents: { getFocusedWebContents() { return null; } },
+  };
+  vm.runInNewContext(patched, context);
+
+  await context.runReload(false);
+  await context.runReload(true);
+
+  assert.deepEqual(reloads, ["reload", "hard-reload"]);
+  assert.match(patched, /reloadEnabled=process\.platform===`linux`\|\|focusedWindow!=null/);
+  assert.match(patched, new RegExp(escapeRegExp(decoy)));
+  assert.match(patched, new RegExp(escapeRegExp(persistedMenu)));
+  assert.doesNotMatch(patched, /(?:Ctrl|Cmd|Alt)\+/);
+});
+
+test("keeps Browser Sidebar reload behavior outside Linux", async () => {
+  const source = `${nativeReloadMenuSource()};this.runReload=runReload;`;
+  const patched = applyPatchTwice(applyLinuxAppReloadShortcutsPatch, source);
+  const reloads = [];
+  const context = {
+    BrowserWindow: { getFocusedWindow() { return null; } },
+    getBrowserSidebarManager() {
+      return {
+        reloadActiveVisiblePageWithOptions(_window, options, focused) {
+          reloads.push(["hard-reload", options, focused]);
+        },
+        reloadActiveVisiblePage(_window, focused) { reloads.push(["reload", focused]); },
+      };
+    },
+    getWindow: async () => ({ reload() { throw new Error("non-Linux must use Browser Sidebar"); } }),
+    process: { platform: "darwin" },
+    webContents: { getFocusedWebContents() { return "focused-webcontents"; } },
+  };
+  vm.runInNewContext(patched, context);
+
+  await context.runReload(false);
+  await context.runReload(true);
+
+  assert.deepEqual(JSON.parse(JSON.stringify(reloads)), [
+    ["reload", "focused-webcontents"],
+    ["hard-reload", { ignoreCache: true }, "focused-webcontents"],
+  ]);
+});
+
+test("patches the current dotted webContents provider shape", async () => {
+  const source = `${nativeReloadMenuSource("runReload", "c.webContents")};this.runReload=runReload;`;
+  const patched = applyPatchTwice(applyLinuxAppReloadShortcutsPatch, source);
+  const reloads = [];
+  const context = {
+    BrowserWindow: { getFocusedWindow() { return null; } },
+    c: { webContents: { getFocusedWebContents() { return null; } } },
+    getBrowserSidebarManager() { throw new Error("Linux app reload must not use Browser Sidebar"); },
+    getWindow: async () => ({
+      reload() { reloads.push("reload"); },
+      webContents: { reloadIgnoringCache() { reloads.push("hard-reload"); } },
+    }),
+    process: { platform: "linux" },
+  };
+  vm.runInNewContext(patched, context);
+
+  await context.runReload(false);
+  await context.runReload(true);
+
+  assert.deepEqual(reloads, ["reload", "hard-reload"]);
+  assert.match(patched, /codexLinuxReloadAppWindow/);
+});
+
+test("fails soft when multiple semantic native reload handlers are present", () => {
+  const source = `${nativeReloadMenuSource()},${nativeReloadMenuSource("secondReload")};`;
+  const { value: patched, warnings } = captureWarns(() =>
+    applyLinuxAppReloadShortcutsPatch(source),
+  );
+
+  assert.equal(patched, source);
+  assert.deepEqual(warnings, [
+    "WARN: Could not find native browser reload menu actions — skipping Linux app reload shortcut patch",
+  ]);
+});
+
+test("fails soft when no semantic native reload handler is present", () => {
+  const source = "let focusedWindow=BrowserWindow.getFocusedWindow(),focusedWebContents=webContents.getFocusedWebContents(),reloadEnabled=focusedWindow!=null&&!focusedWindow.isDestroyed()&&!!getBrowserSidebarManager(focusedWindow)?.canReloadActiveVisiblePage(focusedWindow,focusedWebContents),runReload=async(force=!1)=>{let target=await getWindow();if(!target)return;doSomething(target)};";
+  const { value: patched, warnings } = captureWarns(() =>
+    applyLinuxAppReloadShortcutsPatch(source),
+  );
+
+  assert.equal(patched, source);
+  assert.deepEqual(warnings, [
+    "WARN: Could not find native browser reload menu actions — skipping Linux app reload shortcut patch",
+  ]);
+});
+
+test("fails soft when the semantic reload handler uses the wrong focused-webContents provider", () => {
+  const source = nativeReloadMenuSource().replace(
+    nativeReloadHandlerSource(),
+    nativeReloadHandlerSource("runReload", "otherWebContents"),
+  );
+  const { value: patched, warnings } = captureWarns(() =>
+    applyLinuxAppReloadShortcutsPatch(source),
+  );
+
+  assert.equal(patched, source);
+  assert.deepEqual(warnings, [
+    "WARN: Could not find native browser reload menu actions — skipping Linux app reload shortcut patch",
+  ]);
+});
+
+test("fails soft when dotted enablement and handler providers differ", () => {
+  const source = nativeReloadMenuSource("runReload", "c.webContents").replace(
+    nativeReloadHandlerSource("runReload", "c.webContents"),
+    nativeReloadHandlerSource("runReload", "d.webContents"),
+  );
+  const { value: patched, warnings } = captureWarns(() =>
+    applyLinuxAppReloadShortcutsPatch(source),
+  );
+
+  assert.equal(patched, source);
+  assert.deepEqual(warnings, [
+    "WARN: Could not find native browser reload menu actions — skipping Linux app reload shortcut patch",
+  ]);
+});
+
+test("patches the correlated reload handler but leaves a wrong-provider semantic decoy untouched", () => {
+  const wrongProviderDecoy = nativeReloadHandlerSource("wrongProviderReload", "d.webContents");
+  const source = `${nativeReloadMenuSource("runReload", "c.webContents")},${wrongProviderDecoy};`;
+  const patched = applyPatchTwice(applyLinuxAppReloadShortcutsPatch, source);
+
+  assert.match(patched, /runReload=async\(force=!1\)=>\{let target=await getWindow\(\);if\(!target\)return;if\(process\.platform===`linux`\)/);
+  assert.match(patched, new RegExp(escapeRegExp(wrongProviderDecoy)));
+});
+
+test("patches a valid reload pair despite an orphan enablement anchor", () => {
+  const orphanAnchor = "orphanFocused=orphanWebContents.getFocusedWebContents(),orphanEnabled=focusedWindow!=null&&!focusedWindow.isDestroyed()&&!!getBrowserSidebarManager(focusedWindow)?.canReloadActiveVisiblePage(focusedWindow,orphanFocused)";
+  const source = `${nativeReloadMenuSource()},${orphanAnchor};`;
+  const patched = applyPatchTwice(applyLinuxAppReloadShortcutsPatch, source);
+
+  assert.match(patched, /reloadEnabled=process\.platform===`linux`\|\|focusedWindow!=null/);
+  assert.match(patched, new RegExp(escapeRegExp(orphanAnchor)));
+});
+
+test("patches the selected enablement anchor by range when an identical orphan appears first", () => {
+  const enablementAnchor = "reloadEnabled=focusedWindow!=null&&!focusedWindow.isDestroyed()&&!!getBrowserSidebarManager(focusedWindow)?.canReloadActiveVisiblePage(focusedWindow,focusedWebContents)";
+  const validProviderAssignment = "focusedWebContents=c.webContents.getFocusedWebContents()";
+  const source = `let focusedWindow=BrowserWindow.getFocusedWindow(),focusedWebContents=orphan.webContents.getFocusedWebContents(),${enablementAnchor},${validProviderAssignment},${enablementAnchor},${nativeReloadHandlerSource("runReload", "c.webContents")};`;
+  const patched = applyPatchTwice(applyLinuxAppReloadShortcutsPatch, source);
+  const validProviderIndex = source.indexOf(validProviderAssignment);
+
+  assert.equal(
+    patched.slice(0, patched.indexOf(validProviderAssignment)),
+    source.slice(0, validProviderIndex),
+  );
+  assert.match(
+    patched.slice(patched.indexOf(validProviderAssignment)),
+    /reloadEnabled=process\.platform===`linux`\|\|focusedWindow!=null/,
+  );
+});
+
+test("fails soft when multiple fully correlated native reload pairs are present", () => {
+  const secondPair = nativeReloadMenuSource("secondReload", "d.webContents")
+    .replaceAll("focusedWindow", "secondFocusedWindow")
+    .replaceAll("focusedWebContents", "secondFocusedWebContents")
+    .replaceAll("getBrowserSidebarManager", "secondGetBrowserSidebarManager");
+  const source = `${nativeReloadMenuSource("runReload", "c.webContents")};${secondPair};`;
+  const { value: patched, warnings } = captureWarns(() =>
+    applyLinuxAppReloadShortcutsPatch(source),
+  );
+
+  assert.equal(patched, source);
+  assert.deepEqual(warnings, [
+    "WARN: Could not find native browser reload menu actions — skipping Linux app reload shortcut patch",
+  ]);
+});
+
+test("fails soft for computed and call focused-webContents providers", () => {
+  for (const provider of ["c[`webContents`]", "getElectron().webContents"]) {
+    const source = nativeReloadMenuSource("runReload", provider);
+    const { value: patched, warnings } = captureWarns(() =>
+      applyLinuxAppReloadShortcutsPatch(source),
+    );
+
+    assert.equal(patched, source, provider);
+    assert.deepEqual(warnings, [
+      "WARN: Could not find native browser reload menu actions — skipping Linux app reload shortcut patch",
+    ], provider);
+  }
+});
+
 test("patches current opaque window surface background helper shape for Linux", () => {
   const patched = applyPatchTwice(applyLinuxOpaqueBackgroundPatch, currentOpaqueWindowSurfaceBackgroundBundle);
 
@@ -3099,6 +3357,28 @@ test("adds Linux avatar overlay mouse passthrough recovery", () => {
   assert.match(patched, /e\.moveTop\(\),e\.showInactive\(\),process\.platform===`linux`&&this\.codexLinuxApplyAvatarCompositorHints\(e\),process\.platform===`linux`&&this\.applyPointerInteractivityPolicy\(\)/);
   assert.doesNotMatch(patched, /codexLinuxRecoverAvatarPointerInteractivity/);
   assert.match(patched, /if\(this\.window!==e\)return;let t=this\.presentationVisibility!=null;this\.codexLinuxStopAvatarPassthroughRecovery\(\),this\.codexLinuxAvatarInputShapeKey=null,this\.codexLinuxAvatarCompositorHintsApplied=!1,this\.codexLinuxAvatarCompositorHintsApplying=!1,this\.cancelMomentum\(\)/);
+});
+
+test("broadcasts query cache invalidations to the avatar overlay window", () => {
+  const source = [
+    "const n={fc:e=>1};",
+    "class Handler{constructor(){this.hostId=`local`,this.windowManager={sendMessageToAllRegisteredWindows(){}}}getAppServerConnection(){return null}getIpcClientForWebContents(){return{sendBroadcast:async()=>{}}}async handle(e,t){switch(t.type){case`query-cache-invalidate`:{t.queryKey[0]===`plugins`&&Sr(this.getAppServerConnection(this.hostId));let n=this.getIpcClientForWebContents(e);n&&await n.sendBroadcast(`query-cache-invalidate`,{queryKey:t.queryKey});break}}}}",
+    "let config={version:n.fc(`query-cache-invalidate`)};",
+  ].join("");
+
+  const patched = applyPatchTwice(
+    applyLinuxQueryCacheInvalidationBroadcastPatch,
+    source,
+  );
+
+  assert.match(
+    patched,
+    /let r=this\.getIpcClientForWebContents\(e\);r&&await r\.sendBroadcast\(`query-cache-invalidate`,\{queryKey:t\.queryKey\}\);process\.platform===`linux`&&this\.windowManager\.sendMessageToAllRegisteredWindows\(/,
+  );
+  assert.match(
+    patched,
+    /sourceClientId:`desktop`,version:n\.fc\(`query-cache-invalidate`\),params:\{queryKey:t\.queryKey\}/,
+  );
 });
 
 test("keeps the avatar overlay core patch idempotent after pet overlay composition", () => {
@@ -4780,7 +5060,6 @@ test("adds Linux desktop settings route when upstream owns Keyboard Shortcuts", 
   assert.match(patched, /slugs:\[`general-settings`,`linux-desktop`,`appearance`/);
   assert.match(patched, /case`linux-desktop`:return l===`electron`/);
   assert.match(patched, /case`linux-desktop`:k=!1;break bb0;/);
-  assert.doesNotMatch(patched, /codexLinuxKeybindOverridesRuntime/);
 });
 
 test("adds physical-key fallback for current native shortcut runtime", () => {
@@ -5032,6 +5311,10 @@ test("renders the generated Linux desktop settings page with working switches", 
       routeSettingsSource,
       /RouteReact as codexLinuxReact,RouteJsx as codexLinuxJsx/,
     );
+    assert.doesNotMatch(
+      routeSettingsSource,
+      /DecoyReact as codexLinuxReact|DecoyJsx as codexLinuxJsx/,
+    );
     const nativeRuntime = { React, $: jsxRuntime };
     assert.equal(nativeRuntime.React, React);
     assert.equal(nativeRuntime.$, jsxRuntime);
@@ -5182,15 +5465,19 @@ test("writes only missing Linux settings fallback components after required chec
     assert.equal(fs.existsSync(path.join(assetsDir, "linux-settings-group-linux.js")), false);
     assert.match(
       fs.readFileSync(path.join(assetsDir, linuxDesktopSettingsAsset), "utf8"),
-      /import\{n as SettingsRow\}from"\.\/linux-settings-row-linux\.js"/,
+      /import\{n as SettingsRow\}from"\.\/linux-settings-row-linux\.js\?v=[a-f0-9]{12}"/,
     );
 
     const settingsPageSource = fs.readFileSync(
       path.join(assetsDir, "linux-settings-page-linux.js"),
       "utf8",
     );
-    assert.match(settingsPageSource, /h-full min-h-0 w-full overflow-y-auto/);
-    assert.match(settingsPageSource, /mx-auto flex w-full max-w-4xl flex-col gap-6 px-4 py-6/);
+    assert.match(settingsPageSource, /main-surface flex h-full min-h-0 flex-col/);
+    assert.match(settingsPageSource, /draggable flex items-center px-panel electron:h-toolbar extension:h-toolbar-sm/);
+    assert.match(settingsPageSource, /scrollbar-stable flex-1 overflow-y-auto p-panel/);
+    assert.match(settingsPageSource, /mx-auto flex w-full max-w-3xl flex-col/);
+    assert.match(settingsPageSource, /heading-lg[^"\n]*font-normal/);
+    assert.match(settingsPageSource, /gap-10/);
   } finally {
     fs.rmSync(extractedDir, { recursive: true, force: true });
   }
@@ -5211,7 +5498,7 @@ test("uses a themed fallback toggle when upstream settings toggle is unavailable
       path.join(assetsDir, linuxDesktopSettingsAsset),
       "utf8",
     );
-    assert.match(linuxDesktopSource, /import\{t as Toggle\}from"\.\/linux-settings-toggle-linux\.js"/);
+    assert.match(linuxDesktopSource, /import\{t as Toggle\}from"\.\/linux-settings-toggle-linux\.js\?v=[a-f0-9]{12}"/);
     assert.match(
       linuxDesktopSource,
       /control:\$\.jsx\(Toggle,\{checked:value,disabled:isLoading,onChange:this\.update,ariaLabel:label\}\)/,
@@ -5224,14 +5511,59 @@ test("uses a themed fallback toggle when upstream settings toggle is unavailable
       path.join(assetsDir, "linux-settings-toggle-linux.js"),
       "utf8",
     );
-    assert.match(toggleSource, /--color-token-radio-active-foreground/);
-    assert.match(toggleSource, /width:"32px"/);
-    assert.match(toggleSource, /height:"20px"/);
-    assert.match(toggleSource, /translateX\(12px\)/);
+    assert.match(toggleSource, /cursor-interaction/);
+    assert.match(toggleSource, /bg-token-charts-blue/);
+    assert.match(toggleSource, /bg-token-foreground\/10/);
+    assert.match(toggleSource, /h-5 w-8/);
+    assert.match(toggleSource, /h-4 w-4/);
+    assert.match(toggleSource, /data-\[state=checked\]:translate-x-\[14px\]/);
+    assert.doesNotMatch(toggleSource, /--color-token-radio-active-foreground/);
+    assert.doesNotMatch(toggleSource, /style:/);
 
     const secondResult = patchKeybindsSettingsAssets(extractedDir);
     assert.equal(secondResult.matched, true);
     assert.equal(secondResult.changed, 0);
+  } finally {
+    fs.rmSync(extractedDir, { recursive: true, force: true });
+  }
+});
+
+test("generated Linux settings controls match the current native settings visual contract", () => {
+  const { extractedDir, assetsDir } = createModernNativeKeyboardShortcutsSettingsFixture();
+  try {
+    for (const asset of [
+      "settings-row-A.js",
+      "settings-content-layout-A.js",
+      "settings-group-A.js",
+      "settings-surface-A.js",
+    ]) {
+      fs.rmSync(path.join(assetsDir, asset));
+    }
+
+    const { value: result, warnings } = captureWarns(() => patchKeybindsSettingsAssets(extractedDir));
+
+    assert.equal(result.matched, true);
+    assert.deepEqual(warnings, []);
+
+    const rowSource = fs.readFileSync(path.join(assetsDir, "linux-settings-row-linux.js"), "utf8");
+    assert.match(rowSource, /flex items-center justify-between gap-6 px-4 py-3/);
+    assert.match(rowSource, /text-xs leading-4 text-balance text-token-text-secondary/);
+
+    const sectionSource = fs.readFileSync(path.join(assetsDir, "linux-settings-section-linux.js"), "utf8");
+    assert.match(sectionSource, /min-h-toolbar/);
+    assert.match(sectionSource, /pb-1\.5/);
+    assert.match(sectionSource, /flex flex-col gap-1\.5/);
+
+    const groupSource = fs.readFileSync(path.join(assetsDir, "linux-settings-group-linux.js"), "utf8");
+    assert.match(groupSource, /overflow-hidden rounded-2xl border border-token-border/);
+    assert.match(groupSource, /--color-background-panel, var\(--color-token-bg-fog\)/);
+    assert.match(groupSource, /after:bg-token-border/);
+
+    const pageSource = fs.readFileSync(path.join(assetsDir, "linux-settings-page-linux.js"), "utf8");
+    assert.match(pageSource, /draggable flex items-center px-panel electron:h-toolbar extension:h-toolbar-sm/);
+    assert.match(pageSource, /max-w-3xl/);
+    assert.match(pageSource, /heading-lg[^"\n]*font-normal/);
+    assert.match(pageSource, /text-base text-token-text-secondary/);
   } finally {
     fs.rmSync(extractedDir, { recursive: true, force: true });
   }
@@ -5266,11 +5598,11 @@ test("ignores settings row and toggle icon decoys from the current DMG", () => {
     );
     assert.match(
       linuxDesktopSource,
-      /import\{n as SettingsRow\}from"\.\/linux-settings-row-linux\.js"/,
+      /import\{n as SettingsRow\}from"\.\/linux-settings-row-linux\.js\?v=[a-f0-9]{12}"/,
     );
     assert.match(
       linuxDesktopSource,
-      /import\{t as Toggle\}from"\.\/linux-settings-toggle-linux\.js"/,
+      /import\{t as Toggle\}from"\.\/linux-settings-toggle-linux\.js\?v=[a-f0-9]{12}"/,
     );
     assert.doesNotMatch(linuxDesktopSource, /settings-row-disclosure-A\.js/);
     assert.doesNotMatch(linuxDesktopSource, /toggle-left-A\.js/);
@@ -5302,7 +5634,7 @@ test("does not import an upstream settings toggle with private lazy initializati
     );
     assert.match(
       linuxDesktopSource,
-      /import\{t as Toggle\}from"\.\/linux-settings-toggle-linux\.js"/,
+      /import\{t as Toggle\}from"\.\/linux-settings-toggle-linux\.js\?v=[a-f0-9]{12}"/,
     );
     assert.doesNotMatch(linuxDesktopSource, /shared-toggle-A\.js/);
     assert.match(
@@ -5376,11 +5708,33 @@ test("adds Linux desktop settings when native shortcuts use a consolidated setti
     );
     assert.match(
       linuxDesktopSource,
-      /import\{t as Toggle\}from"\.\/linux-settings-toggle-linux\.js"/,
+      /import\{t as Toggle\}from"\.\/linux-settings-toggle-linux\.js\?v=[a-f0-9]{12}"/,
     );
     assert.doesNotMatch(linuxDesktopSource, /function LinuxSwitch/);
 
     const settingsPageSource = fs.readFileSync(path.join(assetsDir, "settings-page-A.js"), "utf8");
+    const linuxDesktopDigest = crypto
+      .createHash("sha256")
+      .update(linuxDesktopSource)
+      .digest("hex")
+      .slice(0, 12);
+    assert.match(
+      settingsPageSource,
+      new RegExp(`linux-desktop-settings-linux\\.js\\?v=${linuxDesktopDigest}`),
+    );
+    const fallbackToggleSource = fs.readFileSync(
+      path.join(assetsDir, "linux-settings-toggle-linux.js"),
+      "utf8",
+    );
+    const fallbackToggleDigest = crypto
+      .createHash("sha256")
+      .update(fallbackToggleSource)
+      .digest("hex")
+      .slice(0, 12);
+    assert.match(
+      linuxDesktopSource,
+      new RegExp(`linux-settings-toggle-linux\\.js\\?v=${fallbackToggleDigest}`),
+    );
     assert.match(settingsPageSource, /linux-desktop-settings-linux\.js/);
     assert.match(settingsPageSource, /"linux-desktop":[A-Za-z_$][\w$]*,"general-settings"/);
     assert.match(settingsPageSource, /=\[`general-settings`,`linux-desktop`,`profile`/);
@@ -5427,7 +5781,7 @@ test("adds Linux desktop settings when the lazy route map is hoisted into a sepa
     );
     assert.match(
       linuxDesktopSource,
-      /import\{t as Toggle\}from"\.\/linux-settings-toggle-linux\.js"/,
+      /import\{t as Toggle\}from"\.\/linux-settings-toggle-linux\.js\?v=[a-f0-9]{12}"/,
     );
     assert.doesNotMatch(linuxDesktopSource, /function LinuxSwitch/);
 
@@ -5450,7 +5804,7 @@ test("adds Linux desktop settings when the lazy route map is hoisted into a sepa
     );
     assert.match(
       routeChunkSource,
-      /"linux-desktop":Ya\(async\(\)=>\(await Pr\(async\(\)=>\{let\{LinuxDesktopSettings:e\}=await import\(`\.\/linux-desktop-settings-linux\.js`\);return\{LinuxDesktopSettings:e\}\},\[\],import\.meta\.url\)\)\.LinuxDesktopSettings\),"general-settings":/,
+      /"linux-desktop":Ya\(async\(\)=>\(await Pr\(async\(\)=>\{let\{LinuxDesktopSettings:e\}=await import\(`\.\/linux-desktop-settings-linux\.js\?v=[a-f0-9]{12}`\);return\{LinuxDesktopSettings:e\}\},\[\],import\.meta\.url\)\)\.LinuxDesktopSettings\),"general-settings":/,
     );
 
     const secondResult = patchKeybindsSettingsAssets(extractedDir);
@@ -5486,7 +5840,7 @@ test("composes Linux desktop section metadata and route patches in the same asse
     const routeChunkSource = fs.readFileSync(routeChunkPath, "utf8");
     assert.match(
       routeChunkSource,
-      /"linux-desktop":Ya\(async\(\)=>\(await Pr\(async\(\)=>\{let\{LinuxDesktopSettings:e\}=await import\(`\.\/linux-desktop-settings-linux\.js`\);return\{LinuxDesktopSettings:e\}\},\[\],import\.meta\.url\)\)\.LinuxDesktopSettings\),"general-settings":/,
+      /"linux-desktop":Ya\(async\(\)=>\(await Pr\(async\(\)=>\{let\{LinuxDesktopSettings:e\}=await import\(`\.\/linux-desktop-settings-linux\.js\?v=[a-f0-9]{12}`\);return\{LinuxDesktopSettings:e\}\},\[\],import\.meta\.url\)\)\.LinuxDesktopSettings\),"general-settings":/,
     );
     assert.match(routeChunkSource, /Bj=`general-settings\.linux-desktop\.import\.profile\.keyboard-shortcuts/);
     assert.match(routeChunkSource, /Uj=\[\{slug:`general-settings`\},\{slug:`linux-desktop`\},\{slug:`import`\}/);
@@ -5514,7 +5868,7 @@ test("finds Linux desktop settings route map in hashed settings-page chunks", ()
     const routeChunkSource = fs.readFileSync(path.join(assetsDir, routeChunkName), "utf8");
     assert.match(
       routeChunkSource,
-      /"linux-desktop":Ya\(async\(\)=>\(await Pr\(async\(\)=>\{let\{LinuxDesktopSettings:e\}=await import\(`\.\/linux-desktop-settings-linux\.js`\);return\{LinuxDesktopSettings:e\}\},\[\],import\.meta\.url\)\)\.LinuxDesktopSettings\),"general-settings":/,
+      /"linux-desktop":Ya\(async\(\)=>\(await Pr\(async\(\)=>\{let\{LinuxDesktopSettings:e\}=await import\(`\.\/linux-desktop-settings-linux\.js\?v=[a-f0-9]{12}`\);return\{LinuxDesktopSettings:e\}\},\[\],import\.meta\.url\)\)\.LinuxDesktopSettings\),"general-settings":/,
     );
 
     const settingsPageSource = fs.readFileSync(path.join(assetsDir, "settings-page-A.js"), "utf8");
@@ -7274,6 +7628,853 @@ test("patches later Browser Use navigation dispatches when an earlier one is alr
   assert.doesNotMatch(patched, /browser-use-non-local-sites-allowed-changed`,\{allowed:p\}/);
 });
 
+test("remounts a delayed active Browser webview exactly once and preserves its logical tab", () => {
+  const timers = [];
+  const timerApi = {
+    clearTimeout(timer) {
+      timer.cleared = true;
+    },
+    setTimeout(callback) {
+      const timer = { callback, cleared: false };
+      timers.push(timer);
+      return timer;
+    },
+  };
+  const warnings = [];
+  const errors = [];
+  const logger = {
+    error: (message, details) => errors.push({ details, message }),
+    warn: (message, details) => warnings.push({ details, message }),
+  };
+  const recoveryRef = { current: { attempt: 0, key: "conversation-1\0tab-1" } };
+  const logicalTab = {
+    browserTabId: "tab-1",
+    conversationId: "conversation-1",
+    url: "http://localhost:4173/demo",
+  };
+  let currentHost = null;
+  let hostGeneration = 0;
+  let remounts = 0;
+  const createHost = () => {
+    const host = {
+      generation: ++hostGeneration,
+      listener: null,
+      logicalTab,
+      listenForDidAttach(listener) {
+        this.listener = listener;
+        return () => {
+          if (this.listener === listener) this.listener = null;
+        };
+      },
+    };
+    currentHost = host;
+    return host;
+  };
+  const firstHost = createHost();
+
+  const inactiveCleanup = codexLinuxWatchBrowserWebviewAttachment({
+    active: false,
+    browserTabId: logicalTab.browserTabId,
+    conversationId: logicalTab.conversationId,
+    host: firstHost,
+    logger,
+    recoveryRef,
+    remount: () => false,
+    timerApi,
+  });
+  inactiveCleanup();
+  assert.equal(timers.length, 0);
+
+  codexLinuxWatchBrowserWebviewAttachment({
+    active: true,
+    browserTabId: logicalTab.browserTabId,
+    conversationId: logicalTab.conversationId,
+    host: firstHost,
+    logger,
+    recoveryRef,
+    remount: () => {
+      remounts += 1;
+      createHost();
+      return true;
+    },
+    timerApi,
+  });
+  timers[0].callback();
+
+  assert.equal(remounts, 1);
+  assert.equal(currentHost.generation, 2);
+  assert.equal(currentHost.logicalTab, logicalTab);
+  assert.equal(currentHost.logicalTab.url, "http://localhost:4173/demo");
+  assert.equal(recoveryRef.current.attempt, 1);
+  assert.equal(warnings.length, 1);
+
+  codexLinuxWatchBrowserWebviewAttachment({
+    active: true,
+    browserTabId: logicalTab.browserTabId,
+    conversationId: logicalTab.conversationId,
+    host: currentHost,
+    logger,
+    recoveryRef,
+    remount: () => {
+      remounts += 1;
+      return true;
+    },
+    timerApi,
+  });
+  currentHost.listener();
+  timers[1].callback();
+
+  assert.equal(remounts, 1);
+  assert.equal(recoveryRef.current.attempt, 2);
+  assert.equal(errors.length, 0);
+});
+
+test("does not remount a retained Browser webview that is already attached", () => {
+  const timers = [];
+  const recoveryRef = { current: { attempt: 0, key: "conversation-1\0tab-1" } };
+  let listenerCount = 0;
+  let remounts = 0;
+  let completions = 0;
+  const cleanup = codexLinuxWatchBrowserWebviewAttachment({
+    active: true,
+    browserTabId: "tab-1",
+    completeRecovery: () => {
+      completions += 1;
+    },
+    conversationId: "conversation-1",
+    host: {
+      listenForDidAttach() {
+        listenerCount += 1;
+        return () => {};
+      },
+      webview: {
+        getWebContentsId: () => 42,
+        isConnected: true,
+      },
+    },
+    recoveryRef,
+    remount: () => {
+      remounts += 1;
+      return true;
+    },
+    timerApi: {
+      clearTimeout() {},
+      setTimeout(callback) {
+        timers.push(callback);
+        return callback;
+      },
+    },
+  });
+
+  cleanup();
+  assert.equal(listenerCount, 0);
+  assert.equal(timers.length, 0);
+  assert.equal(remounts, 0);
+  assert.equal(completions, 1);
+  assert.equal(recoveryRef.current.attempt, 2);
+
+  codexLinuxWatchBrowserWebviewAttachment({
+    active: true,
+    browserTabId: "tab-1",
+    completeRecovery: () => {
+      completions += 1;
+    },
+    conversationId: "conversation-1",
+    host: recoveryRef.current.host,
+    recoveryRef,
+    recoveryState: { attempt: 0, deadlineAt: 5_000 },
+    remount: () => true,
+    timerApi: {
+      clearTimeout() {},
+      setTimeout() {
+        throw new Error("attached host must not schedule recovery");
+      },
+    },
+  });
+  assert.equal(completions, 2);
+});
+
+test("closes the attachment race after registering the Browser webview listener", () => {
+  const timers = [];
+  const recoveryRef = { current: { attempt: 0, key: "conversation-1\0tab-1" } };
+  const webview = {
+    getWebContentsId: () => 0,
+    isConnected: true,
+  };
+  let removed = 0;
+  const cleanup = codexLinuxWatchBrowserWebviewAttachment({
+    active: true,
+    browserTabId: "tab-1",
+    conversationId: "conversation-1",
+    host: {
+      listenForDidAttach() {
+        webview.getWebContentsId = () => 43;
+        return () => {
+          removed += 1;
+        };
+      },
+      webview,
+    },
+    recoveryRef,
+    remount: () => true,
+    timerApi: {
+      clearTimeout() {},
+      setTimeout(callback) {
+        timers.push(callback);
+        return callback;
+      },
+    },
+  });
+
+  assert.equal(timers.length, 0);
+  assert.equal(recoveryRef.current.attempt, 2);
+  assert.equal(removed, 1);
+  cleanup();
+  assert.equal(removed, 2);
+});
+
+test("watches a replacement Browser webview host for the same logical tab", () => {
+  const timers = [];
+  const recoveryRef = { current: null };
+  let remounts = 0;
+  const attachedHost = {
+    webview: {
+      getWebContentsId: () => 44,
+      isConnected: true,
+    },
+  };
+
+  codexLinuxWatchBrowserWebviewAttachment({
+    active: true,
+    browserTabId: "tab-1",
+    conversationId: "conversation-1",
+    host: attachedHost,
+    recoveryRef,
+    remount: () => true,
+    timerApi: {
+      clearTimeout() {},
+      setTimeout(callback) {
+        timers.push(callback);
+        return callback;
+      },
+    },
+  });
+  assert.equal(recoveryRef.current.attempt, 2);
+
+  const replacementHost = { listenForDidAttach: () => () => {} };
+  codexLinuxWatchBrowserWebviewAttachment({
+    active: true,
+    browserTabId: "tab-1",
+    conversationId: "conversation-1",
+    host: replacementHost,
+    recoveryRef,
+    remount: () => {
+      remounts += 1;
+      return true;
+    },
+    timerApi: {
+      clearTimeout() {},
+      setTimeout(callback) {
+        timers.push(callback);
+        return callback;
+      },
+    },
+  });
+  assert.equal(recoveryRef.current.attempt, 0);
+  assert.equal(recoveryRef.current.host, replacementHost);
+  timers[0]();
+  assert.equal(remounts, 1);
+  assert.equal(recoveryRef.current.attempt, 1);
+});
+
+test("keeps Browser webview attachment deadlines bounded across effect restarts", () => {
+  let clock = 1_000;
+  const timers = [];
+  const timerApi = {
+    clearTimeout(timer) {
+      timer.cleared = true;
+    },
+    setTimeout(callback, delay) {
+      const timer = { callback, cleared: false, delay };
+      timers.push(timer);
+      return timer;
+    },
+  };
+  const recoveryRef = { current: { attempt: 0, key: "conversation-1\0tab-1" } };
+  const host = { listenForDidAttach: () => () => {} };
+  const replacementHost = { listenForDidAttach: () => () => {} };
+  let remounts = 0;
+  const watch = (
+    conversationId = "conversation-1",
+    browserTabId = "tab-1",
+    watchedHost = host,
+  ) =>
+    codexLinuxWatchBrowserWebviewAttachment({
+      active: true,
+      browserTabId,
+      conversationId,
+      host: watchedHost,
+      now: () => clock,
+      recoveryRef,
+      remount: () => {
+        remounts += 1;
+        return true;
+      },
+      timerApi,
+    });
+
+  let cleanup = watch();
+  assert.equal(timers[0].delay, 5_000);
+  clock = 4_000;
+  cleanup();
+  cleanup = watch("conversation-1", "tab-1", replacementHost);
+  assert.equal(timers[1].delay, 2_000);
+  clock = 6_000;
+  timers[1].callback();
+  assert.equal(remounts, 1);
+  assert.equal(recoveryRef.current.attempt, 1);
+  assert.equal(recoveryRef.current.deadlineAt, 11_000);
+
+  clock = 9_000;
+  cleanup();
+  cleanup = watch("conversation-2", "tab-2", replacementHost);
+  assert.equal(timers[2].delay, 2_000);
+  assert.equal(recoveryRef.current.attempt, 1);
+  assert.equal(recoveryRef.current.deadlineAt, 11_000);
+  assert.equal(recoveryRef.current.key, "conversation-2\0tab-2");
+  cleanup();
+});
+
+test("starts a fresh Browser recovery window for a different logical tab", () => {
+  const oldHost = { listenForDidAttach: () => () => {} };
+  const newHost = { listenForDidAttach: () => () => {} };
+  const recoveryRef = {
+    current: {
+      attempt: 1,
+      deadlineAt: 11_000,
+      host: oldHost,
+      key: "conversation-1\0tab-1",
+    },
+  };
+  const timers = [];
+
+  codexLinuxWatchBrowserWebviewAttachment({
+    active: true,
+    browserTabId: "tab-2",
+    conversationId: "conversation-1",
+    host: newHost,
+    now: () => 9_000,
+    recoveryRef,
+    remount: () => true,
+    timerApi: {
+      clearTimeout() {},
+      setTimeout(callback, delay) {
+        timers.push({ callback, delay });
+        return callback;
+      },
+    },
+  });
+
+  assert.equal(recoveryRef.current.attempt, 0);
+  assert.equal(recoveryRef.current.deadlineAt, 14_000);
+  assert.equal(recoveryRef.current.host, newHost);
+  assert.equal(recoveryRef.current.key, "conversation-1\0tab-2");
+  assert.equal(timers[0].delay, 5_000);
+});
+
+test("inherits the initial Browser recovery deadline in a fresh component", () => {
+  const timers = [];
+  const recoveryRef = { current: null };
+  const recoveryState = { attempt: 0, deadlineAt: 11_000 };
+
+  codexLinuxWatchBrowserWebviewAttachment({
+    active: true,
+    browserTabId: "tab-2",
+    conversationId: "conversation-2",
+    host: { listenForDidAttach: () => () => {} },
+    now: () => 9_000,
+    recoveryRef,
+    recoveryState,
+    remount: () => true,
+    timerApi: {
+      clearTimeout() {},
+      setTimeout(callback, delay) {
+        timers.push({ callback, delay });
+        return callback;
+      },
+    },
+  });
+
+  assert.equal(recoveryRef.current.attempt, 0);
+  assert.equal(recoveryRef.current.deadlineAt, 11_000);
+  assert.equal(timers[0].delay, 2_000);
+});
+
+test("fails Browser webview attachment deterministically after one remount", () => {
+  const timers = [];
+  const timerApi = {
+    clearTimeout(timer) {
+      timer.cleared = true;
+    },
+    setTimeout(callback) {
+      const timer = { callback, cleared: false };
+      timers.push(timer);
+      return timer;
+    },
+  };
+  const errors = [];
+  const logger = {
+    error: (message, details) => errors.push({ details, message }),
+    warn: () => {},
+  };
+  const recoveryRef = { current: { attempt: 0, key: "conversation-1\0tab-1" } };
+  const createHost = () => ({ listenForDidAttach: () => () => {} });
+  let remounts = 0;
+
+  codexLinuxWatchBrowserWebviewAttachment({
+    active: true,
+    browserTabId: "tab-1",
+    conversationId: "conversation-1",
+    host: createHost(),
+    logger,
+    recoveryRef,
+    remount: () => {
+      remounts += 1;
+      return true;
+    },
+    timerApi,
+  });
+  timers[0].callback();
+  codexLinuxWatchBrowserWebviewAttachment({
+    active: true,
+    browserTabId: "tab-1",
+    conversationId: "conversation-1",
+    host: createHost(),
+    logger,
+    recoveryRef,
+    remount: () => {
+      remounts += 1;
+      return true;
+    },
+    timerApi,
+  });
+  timers[1].callback();
+
+  assert.equal(remounts, 1);
+  assert.equal(recoveryRef.current.attempt, 2);
+  assert.equal(errors.length, 1);
+  assert.equal(
+    errors[0].message,
+    "IAB_LIFECYCLE Linux Browser webview attachment failed after one remount",
+  );
+  assert.deepEqual(errors[0].details, {
+    browserTabId: "tab-1",
+    conversationId: "conversation-1",
+  });
+});
+
+test("fails Browser webview attachment deterministically when remount is rejected", () => {
+  const timers = [];
+  const errors = [];
+  const recoveryRef = { current: { attempt: 0, key: "conversation-2\0tab-2" } };
+  let remounts = 0;
+
+  codexLinuxWatchBrowserWebviewAttachment({
+    active: true,
+    browserTabId: "tab-2",
+    conversationId: "conversation-2",
+    host: { listenForDidAttach: () => () => {} },
+    logger: {
+      error: (message, details) => errors.push({ details, message }),
+      warn: () => {},
+    },
+    recoveryRef,
+    remount: () => {
+      remounts += 1;
+      return false;
+    },
+    timerApi: {
+      clearTimeout() {},
+      setTimeout(callback) {
+        timers.push(callback);
+        return callback;
+      },
+    },
+  });
+  timers[0]();
+
+  assert.equal(remounts, 1);
+  assert.equal(recoveryRef.current.attempt, 2);
+  assert.equal(recoveryRef.current.deadlineAt, null);
+  assert.equal(recoveryRef.current.key, "conversation-2\0tab-2");
+  assert.equal(errors.length, 1);
+  assert.equal(
+    errors[0].message,
+    "IAB_LIFECYCLE Linux Browser webview attachment recovery remount was rejected",
+  );
+  assert.deepEqual(errors[0].details, {
+    browserTabId: "tab-2",
+    conversationId: "conversation-2",
+  });
+});
+
+test("keeps shared Browser recovery active when another watcher wins remount", () => {
+  let clock = 5_000;
+  let sharedState = { attempt: 0, deadlineAt: 5_000 };
+  let failures = 0;
+  const timers = [];
+  const host = { listenForDidAttach: () => () => {} };
+  const remount = (deadlineAt) => {
+    if (sharedState.attempt >= 1) {
+      return { started: false, state: sharedState };
+    }
+    sharedState = { attempt: 1, deadlineAt };
+    return { started: true, state: sharedState };
+  };
+  const watch = (recoveryRef, recoveryState = { attempt: 0, deadlineAt: 5_000 }) =>
+    codexLinuxWatchBrowserWebviewAttachment({
+      active: true,
+      browserTabId: "tab-1",
+      conversationId: "conversation-1",
+      failRecovery: () => {
+        failures += 1;
+        sharedState = { attempt: 2, deadlineAt: null };
+      },
+      host,
+      logger: { error() {}, warn() {} },
+      now: () => clock,
+      recoveryRef,
+      recoveryState,
+      remount,
+      timerApi: {
+        clearTimeout() {},
+        setTimeout(callback, delay) {
+          timers.push({ callback, delay });
+          return callback;
+        },
+      },
+    });
+
+  const firstRef = { current: null };
+  const secondRef = { current: null };
+  watch(firstRef);
+  watch(secondRef);
+  timers[0].callback();
+  timers[1].callback();
+
+  assert.equal(failures, 0);
+  assert.deepEqual(sharedState, { attempt: 1, deadlineAt: 10_000 });
+  assert.equal(firstRef.current.attempt, 1);
+  assert.equal(secondRef.current.attempt, 1);
+
+  clock = 9_000;
+  const replacementRef = { current: null };
+  watch(replacementRef, sharedState);
+  assert.equal(replacementRef.current.deadlineAt, 10_000);
+  assert.equal(timers[2].delay, 1_000);
+});
+
+test("does not poison shared Browser recovery when a stale host timer fires", () => {
+  let failures = 0;
+  let errors = 0;
+  const timers = [];
+  const recoveryRef = { current: null };
+
+  codexLinuxWatchBrowserWebviewAttachment({
+    active: true,
+    browserTabId: "tab-1",
+    conversationId: "conversation-1",
+    failRecovery: () => {
+      failures += 1;
+    },
+    host: { listenForDidAttach: () => () => {} },
+    logger: {
+      error() {
+        errors += 1;
+      },
+      warn() {},
+    },
+    recoveryRef,
+    recoveryState: { attempt: 0, deadlineAt: 5_000 },
+    remount: () => null,
+    timerApi: {
+      clearTimeout() {},
+      setTimeout(callback) {
+        timers.push(callback);
+        return callback;
+      },
+    },
+  });
+  timers[0]();
+
+  assert.equal(failures, 0);
+  assert.equal(errors, 0);
+  assert.equal(recoveryRef.current.attempt, 2);
+});
+
+test("patches the current Browser webview store and host atomically", () => {
+  const storeSource =
+    "function Af(e,t){return t??e}function Ef(e,t){return`${e}\\0${t}`}var Pf=class{webviews=new Map;snapshots=new Map;tabPersistenceStates=new Map;browserUseActiveTabKeys=new Set;browserUseViewportSizes=new Map;transferredWebviewKeys=new Set;registrationAttempts=new WeakMap;nextHostGeneration=0;getSnapshot(e,t){return this.snapshots.get(Ef(e,t))??null}setBrowserUseActive(e,...t){let n=typeof t[0]==`boolean`?Af(e,void 0):t[0],r=typeof t[0]==`boolean`?t[0]:t[1],i=Ef(e,n),a=this.browserUseActiveTabKeys.has(i);if(r){let t=`${e}\\0`;for(let e of Array.from(this.browserUseActiveTabKeys)){if(e===i||!e.startsWith(t))continue;this.browserUseActiveTabKeys.delete(e);let n=null}this.browserUseActiveTabKeys.add(i)}else this.browserUseActiveTabKeys.delete(i);return a}releaseBrowserUseTab(e,t){let n=Ef(e,t),r=this.browserUseActiveTabKeys.delete(n);return r}removeTab(e,t){let n=Ef(e,t),r=this.webviews.get(n);this.webviews.delete(n)}registerWebviewHost(e,t){return true}removeConversationTabs(e){let t=`${e}\\0`;for(let e of this.snapshots.keys())e.startsWith(t)&&this.snapshots.delete(e)}reassociateTabState(e,...t){let n=t[0],r=t[1],i=t[2],o=`transfer`,s=Ef(e,n),c=Ef(r,i);if(s===c||this.transferredWebviewKeys.has(o))return;if(this.webviews.has(c))return;let m=this.browserUseViewportSizes.get(s)??null,h=this.browserUseActiveTabKeys.delete(s);h&&this.browserUseActiveTabKeys.add(c);return m}disposeAll(){this.electronPageHandoff.disposeAll(),this.webviews.clear()}disposeWebviewHost(e,t,n,r){this.webviews.delete(n)}emitChange(){for(let e of this.listeners)e()}}";
+  const hostSource =
+    "function hT({adoptionLease:e,adoptedWebContentsId:t,bounds:n,browserTabId:r,children:i,conversationId:a,hostKind:o=`right-panel`,initialUrl:s,isVisible:c,persistedTabsEnabled:l=!1,scale:u,shouldBootstrapWhenHidden:d,shouldPaint:f,webviewRef:p,windowZoom:m}){let h=(0,vT.useRef)(null),g=(0,vT.useId)(),y=(0,vT.useRef)(Up.getMountGeneration(a,r)),x=(0,vT.useSyncExternalStore)(Up.subscribe,()=>Up.getCursorOverlayHost(a,r),()=>null);let S=c&&n!=null;return(0,vT.useLayoutEffect)(()=>{let _=Up.getWebview(a,r,s,{adoptionLease:e,adoptedWebContentsId:t,hostKind:o,persistedTabsEnabled:l});h.current=_,Up.syncElectronWebview(_,{bounds:n,isVisible:S,mountGeneration:y.current,scale:u,shouldBootstrap:d,shouldPaint:f,windowZoom:m},p,o)},[r,a,o,s,e,t,n,S,g,l,u,f,d,p,m]),x==null||i==null?null:createPortal(i,x)}";
+  const source = `${storeSource};${hostSource}`;
+  const patched = applyPatchTwice(
+    applyLinuxBrowserUseWebviewAttachRecoveryPatch,
+    source,
+  );
+
+  assert.match(patched, /linuxRemountWebview\(e,t,n,r\)/);
+  assert.match(
+    patched,
+    /let i=Ef\(e,t\),a=this\.linuxBrowserUseRecoveryStates\.get\(i\);if\(a\?\.attempt>=1\)return\{started:!1,state:a\};if\(this\.webviews\.get\(i\)!==n\)return null/,
+  );
+  assert.match(patched, /linuxBrowserUseRecoveryStates\.get\(i\)/);
+  assert.match(patched, /linuxStartWebviewRecovery\(e,t,n\)/);
+  assert.match(patched, /linuxCompleteWebviewRecovery\(e,t,n\)/);
+  assert.match(patched, /linuxFailWebviewRecovery\(e,t,n\)/);
+  assert.match(
+    patched,
+    /r\|\|this\.linuxBrowserUseRecoveryStates\.delete\(Ef\(e,n\)\)/,
+  );
+  assert.match(
+    patched,
+    /removeTab\(e,t\)\{let n=Ef\(e,t\);this\.linuxBrowserUseRecoveryStates\.delete\(n\);let r=/,
+  );
+  assert.match(
+    patched,
+    /removeConversationTabs\(e\)\{let t=`\$\{e\}\\0`;for\(let e of this\.linuxBrowserUseRecoveryStates\.keys\(\)\)/,
+  );
+  assert.match(
+    patched,
+    /releaseBrowserUseTab\(e,t\)\{let n=Ef\(e,t\);this\.linuxBrowserUseRecoveryStates\.delete\(n\);let r=/,
+  );
+  assert.match(
+    patched,
+    /browserUseActiveTabKeys\.delete\(e\);this\.linuxBrowserUseRecoveryStates\.delete\(e\);let n=/,
+  );
+  assert.match(
+    patched,
+    /linuxBrowserUseRecoveryStates\.delete\(s\),this\.linuxBrowserUseRecoveryStates\.set\(c,codexLinuxRecoveryState\)/,
+  );
+  assert.match(patched, /disposeAll\(\)\{this\.electronPageHandoff\.disposeAll\(\),this\.linuxBrowserUseRecoveryStates\.clear\(\),/);
+  assert.match(patched, /function codexLinuxWatchBrowserWebviewAttachment/);
+  assert.match(
+    patched,
+    /Up\.linuxRemountWebview\(a,r,_,codexLinuxRemountDeadline\)/,
+  );
+  assert.match(patched, /typeof Up\.linuxRemountWebview==`function`/);
+  assert.match(patched, /Up\.linuxStartWebviewRecovery\(a,r,Date\.now\(\)\+5e3\)/);
+  assert.match(patched, /Up\.linuxCompleteWebviewRecovery\(a,r,_\)/);
+  assert.match(patched, /Up\.linuxFailWebviewRecovery\(a,r,_\)/);
+  assert.match(
+    patched,
+    /Up\.getWebview\(a,r,s,\{adoptionLease:e,adoptedWebContentsId:t,hostKind:o,persistedTabsEnabled:l\}\)/,
+  );
+  assert.match(
+    patched,
+    /useSyncExternalStore\)\(Up\.subscribe,\(\)=>Up\.isBrowserUseActive\(a,r\),\(\)=>!1\)/,
+  );
+  assert.match(patched, /codexLinuxBrowserUseActive,x\]\)/);
+  assert.match(
+    patched,
+    /useEffect\)\(\(\)=>\{codexLinuxBrowserUseActive\|\|\(codexLinuxBrowserWebviewRecoveryRef\.current=\{attempt:0,deadlineAt:null,host:null,key:a\+`\\0`\+r\}\)\},\[codexLinuxBrowserUseActive,a,r\]\)/,
+  );
+  assert.doesNotThrow(() => new vm.Script(patched));
+
+  const Store = vm.runInNewContext(`${patched};Pf`);
+  const store = new Store();
+  store.listeners = new Set();
+  const firstHost = { generation: 1 };
+  const secondHost = { generation: 2 };
+  const snapshot = { url: "http://localhost:4173/demo" };
+  const persistence = { browserStorageId: "browser-1", mode: "persistent" };
+  store.webviews.set("conversation-1\0tab-1", firstHost);
+  store.snapshots.set("conversation-1\0tab-1", snapshot);
+  store.tabPersistenceStates.set("conversation-1\0tab-1", persistence);
+  assert.equal(
+    store.linuxRemountWebview("conversation-1", "tab-1", firstHost).started,
+    true,
+  );
+  assert.equal(store.snapshots.get("conversation-1\0tab-1"), snapshot);
+  assert.equal(
+    store.tabPersistenceStates.get("conversation-1\0tab-1"),
+    persistence,
+  );
+  const losingWatcherResult = store.linuxRemountWebview(
+    "conversation-1",
+    "tab-1",
+    firstHost,
+  );
+  assert.equal(losingWatcherResult.started, false);
+  assert.equal(losingWatcherResult.state.attempt, 1);
+  store.webviews.set("conversation-1\0tab-1", secondHost);
+  store.linuxCompleteWebviewRecovery("conversation-1", "tab-1", firstHost);
+  assert.equal(
+    store.linuxBrowserUseRecoveryStates.get("conversation-1\0tab-1").attempt,
+    1,
+  );
+  store.linuxFailWebviewRecovery("conversation-1", "tab-1", firstHost);
+  assert.equal(
+    store.linuxBrowserUseRecoveryStates.get("conversation-1\0tab-1").attempt,
+    1,
+  );
+  assert.equal(
+    store.linuxRemountWebview("conversation-1", "tab-1", secondHost).started,
+    false,
+  );
+  store.setBrowserUseActive("conversation-1", "tab-1", false);
+  assert.equal(
+    store.linuxRemountWebview("conversation-1", "tab-1", secondHost).started,
+    true,
+  );
+  store.webviews.set("conversation-1\0tab-1", secondHost);
+  store.removeTab("conversation-1", "tab-1");
+  store.webviews.set("conversation-1\0tab-1", secondHost);
+  assert.equal(
+    store.linuxRemountWebview("conversation-1", "tab-1", secondHost).started,
+    true,
+  );
+  const thirdHost = { generation: 3 };
+  store.webviews.set("conversation-2\0tab-2", thirdHost);
+  assert.equal(
+    store.linuxRemountWebview("conversation-2", "tab-2", thirdHost).started,
+    true,
+  );
+  store.removeConversationTabs("conversation-2");
+  store.webviews.set("conversation-2\0tab-2", thirdHost);
+  assert.equal(
+    store.linuxRemountWebview("conversation-2", "tab-2", thirdHost).started,
+    true,
+  );
+  store.webviews.set("conversation-1\0tab-1", secondHost);
+  store.browserUseActiveTabKeys.add("conversation-1\0tab-1");
+  store.setBrowserUseActive("conversation-1", "tab-2", true);
+  store.webviews.set("conversation-1\0tab-1", secondHost);
+  assert.equal(
+    store.linuxRemountWebview("conversation-1", "tab-1", secondHost).started,
+    true,
+  );
+  store.webviews.set("conversation-1\0tab-1", secondHost);
+  store.releaseBrowserUseTab("conversation-1", "tab-1");
+  store.webviews.set("conversation-1\0tab-1", secondHost);
+  assert.equal(
+    store.linuxRemountWebview("conversation-1", "tab-1", secondHost).started,
+    true,
+  );
+  store.linuxBrowserUseRecoveryStates.set("conversation-1\0tab-1", {
+    attempt: 1,
+    deadlineAt: 11_000,
+  });
+  store.reassociateTabState(
+    "conversation-1",
+    "tab-1",
+    "conversation-2",
+    "tab-2",
+  );
+  assert.equal(store.linuxBrowserUseRecoveryStates.has("conversation-1\0tab-1"), false);
+  assert.deepEqual(store.linuxStartWebviewRecovery("conversation-2", "tab-2", 14_000), {
+    attempt: 1,
+    deadlineAt: 11_000,
+  });
+  const reassociatedHost = { listenForDidAttach: () => () => {} };
+  const reassociatedTimers = [];
+  const reassociatedRecoveryRef = { current: null };
+  let reassociatedClock = 9_000;
+  store.webviews.set("conversation-2\0tab-2", reassociatedHost);
+  codexLinuxWatchBrowserWebviewAttachment({
+    active: true,
+    browserTabId: "tab-2",
+    conversationId: "conversation-2",
+    host: reassociatedHost,
+    failRecovery: () =>
+      store.linuxFailWebviewRecovery(
+        "conversation-2",
+        "tab-2",
+        reassociatedHost,
+      ),
+    logger: { error() {}, warn() {} },
+    now: () => reassociatedClock,
+    recoveryRef: reassociatedRecoveryRef,
+    recoveryState: store.linuxStartWebviewRecovery(
+      "conversation-2",
+      "tab-2",
+      14_000,
+    ),
+    remount: (deadlineAt) =>
+      store.linuxRemountWebview(
+        "conversation-2",
+        "tab-2",
+        reassociatedHost,
+        deadlineAt,
+      ),
+    timerApi: {
+      clearTimeout() {},
+      setTimeout(callback, delay) {
+        reassociatedTimers.push({ callback, delay });
+        return callback;
+      },
+    },
+  });
+  assert.equal(reassociatedRecoveryRef.current.attempt, 1);
+  assert.equal(reassociatedRecoveryRef.current.deadlineAt, 11_000);
+  assert.equal(reassociatedTimers[0].delay, 2_000);
+  reassociatedClock = 11_000;
+  reassociatedTimers[0].callback();
+  assert.equal(reassociatedRecoveryRef.current.attempt, 2);
+  assert.equal(
+    store.linuxStartWebviewRecovery("conversation-2", "tab-2", 20_000).attempt,
+    2,
+  );
+  assert.equal(store.webviews.get("conversation-2\0tab-2"), reassociatedHost);
+  store.linuxBrowserUseRecoveryStates.set("conversation-3\0tab-3", {
+    attempt: 0,
+    deadlineAt: 15_000,
+  });
+  store.reassociateTabState(
+    "conversation-3",
+    "tab-3",
+    "conversation-4",
+    "tab-4",
+  );
+  assert.deepEqual(
+    store.linuxStartWebviewRecovery("conversation-4", "tab-4", 20_000),
+    { attempt: 0, deadlineAt: 15_000 },
+  );
+  store.electronPageHandoff = { disposeAll() {} };
+  store.disposeAll();
+  assert.equal(store.linuxBrowserUseRecoveryStates.size, 0);
+});
+
+test("Browser webview recovery descriptor targets the current combined renderer chunk", () => {
+  const descriptor = require("./patches/core/all-linux/webview/browser-use-attach-recovery/patch.js");
+
+  assert.match(
+    "app-initial~app-main~onboarding-page-current.js",
+    descriptor.pattern,
+  );
+  assert.doesNotMatch(
+    "app-initial~artifact-tab-content.electron~app-main~new-thread-panel-page-current.js",
+    descriptor.pattern,
+  );
+});
+
+test("Browser webview recovery stays fail-soft when only the host seam matches", () => {
+  const hostOnlySource =
+    "function hT({adoptionLease:e,adoptedWebContentsId:t,bounds:n,browserTabId:r,children:i,conversationId:a,hostKind:o=`right-panel`,initialUrl:s,isVisible:c,persistedTabsEnabled:l=!1,scale:u,shouldBootstrapWhenHidden:d,shouldPaint:f,webviewRef:p,windowZoom:m}){let h=(0,vT.useRef)(null),g=(0,vT.useId)(),y=(0,vT.useRef)(Up.getMountGeneration(a,r)),x=(0,vT.useSyncExternalStore)(Up.subscribe,()=>Up.getCursorOverlayHost(a,r),()=>null);let S=c&&n!=null;return(0,vT.useLayoutEffect)(()=>{let _=Up.getWebview(a,r,s,{adoptionLease:e,adoptedWebContentsId:t,hostKind:o,persistedTabsEnabled:l});h.current=_,Up.syncElectronWebview(_,{bounds:n,isVisible:S,mountGeneration:y.current,scale:u,shouldBootstrap:d,shouldPaint:f,windowZoom:m},p,o)},[r,a,o,s,e,t,n,S,g,l,u,f,d,p,m]),x==null||i==null?null:createPortal(i,x)}";
+  const warnings = [];
+  const originalWarn = console.warn;
+  console.warn = (message) => warnings.push(message);
+  try {
+    assert.equal(
+      applyLinuxBrowserUseWebviewAttachRecoveryPatch(hostOnlySource),
+      hostOnlySource,
+    );
+  } finally {
+    console.warn = originalWarn;
+  }
+  assert.ok(warnings.some((message) => message.includes("did not patch atomically")));
+});
+
 test("hydrates local chat search results before navigating", () => {
   const source = [
     "function FS(e,t,n){let r=A(e);if(r!=null){t(r);return}n(L(e))}",
@@ -7517,6 +8718,8 @@ test("does not give synthetic Computer Use plugin cards an invalid marketplace d
 
   const patched = applyPatchTwice(applyLinuxComputerUseRendererAvailabilityPatch, source);
 
+  assert.match(patched, /marketplaceName:`openai-bundled`/);
+  assert.doesNotMatch(patched, /marketplaceName:`openai-curated`/);
   assert.match(patched, /marketplacePath:marketplacePath/);
   assert.doesNotMatch(patched, /marketplacePath:`openai-bundled\/plugins\/computer-use`/);
 });

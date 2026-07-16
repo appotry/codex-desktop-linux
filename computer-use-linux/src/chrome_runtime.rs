@@ -1326,16 +1326,20 @@ fn validate_trusted_parent_chain(path: &Path) -> RuntimeResult<()> {
         if metadata.uid() != euid && metadata.uid() != 0 {
             return Err(required_path_error("parent"));
         }
-        if has_unsafe_write_permissions(&metadata) && !is_root_owned_sticky_directory(&metadata) {
+        if has_unsafe_write_permissions(&metadata)
+            && !is_root_owned_sticky_directory(metadata.uid(), metadata.permissions().mode())
+        {
             return Err(required_path_error("parent"));
         }
     }
     Ok(())
 }
 
-fn is_root_owned_sticky_directory(metadata: &fs::Metadata) -> bool {
-    let mode = metadata.permissions().mode();
-    metadata.uid() == 0 && mode & libc::S_ISVTX != 0 && mode & 0o002 != 0
+fn is_root_owned_sticky_directory(uid: u32, mode: u32) -> bool {
+    // Sticky-directory semantics protect existing entries regardless of whether
+    // write access is granted through the group bit (for example, a 1775 Nix
+    // store) or the world bit (the usual 1777 /tmp case).
+    uid == 0 && mode & libc::S_ISVTX != 0
 }
 
 fn current_executable_identity() -> RuntimeResult<FileIdentity> {
@@ -2967,6 +2971,14 @@ mod tests {
         assert!(validate_owned_file(&executable, true).is_ok());
         assert!(validate_owned_dir(&root, true).is_ok());
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn root_owned_sticky_directory_accepts_nix_store_permissions() {
+        assert!(is_root_owned_sticky_directory(0, 0o1775));
+        assert!(is_root_owned_sticky_directory(0, 0o1777));
+        assert!(!is_root_owned_sticky_directory(0, 0o0775));
+        assert!(!is_root_owned_sticky_directory(1, 0o1775));
     }
 
     #[test]

@@ -18,7 +18,48 @@ It:
 Codex CLI preflight preserves the detected CLI install type. npm-managed
 installs continue to update through npm, while official standalone installs
 under `~/.codex/packages/standalone` are updated with the official standalone
-installer instead of being replaced through npm.
+installer instead of being replaced through npm. Homebrew/Linuxbrew installs
+are reused and reported, but the updater does not replace them with an
+npm-managed install.
+
+The updater scopes permission hardening to the official standalone installer
+process. New managed releases use the caller's existing umask plus the
+group/world write restrictions from `0022`; stricter policies such as `0027`
+and `0077` remain intact, and the launcher, Electron, app-server, hooks, and
+unrelated child processes keep the caller's original mask.
+
+Launcher and updater CLI launch validation is intentionally small: the selected
+path is resolved to a canonical regular executable before it is run. They do
+not reject a CLI because its file, parent directory, home path, or standalone
+tree is group-writable, symlinked, or outside a previously recorded standalone
+home. Existing `~/.codex-standalone-provenance` files are ignored.
+
+Standalone mutation paths still keep destructive-operation guards. Recovery
+requires absolute paths without `.` or `..`, refuses to overwrite an existing
+standalone tree, runs the official installer child with the safe umask above,
+uses root-controlled system `sh`/`curl`/`wget`, and checks that the installer
+left an executable `codex` command.
+
+To recover a missing or broken standalone tree, stop any active updater or
+Codex installer, remove the old `~/.codex/packages/standalone` tree if one is
+present, and run:
+
+```bash
+codex-update-manager recover-standalone-cli --print-path
+```
+
+If the standalone installer link belongs in a non-default directory, add
+`--install-dir /absolute/path/to/bin`. If the standalone home is not
+the default `~/.codex`, also add `--codex-home /absolute/path/to/codex-home`.
+Recovery refuses to overwrite any
+existing standalone tree. It downloads the official installer and runs only
+that child with the caller's umask plus the `0022` write restrictions, so the
+flow remains safe even when the desktop session uses `umask 0002`. Both update
+and recovery resolve the installer shell, downloader, and child commands only
+from root-controlled system tool directories; they never reuse programs already
+present in a user install directory. AppImage, Nix, and native packages built
+without the updater do not provide the recovery command; reinstall the CLI
+manually for those formats.
 
 System-package-managed CLI installs are reused but not mutated through npm or
 the standalone installer flow. On Arch-like hosts, when the resolved CLI lives

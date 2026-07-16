@@ -114,6 +114,7 @@ It currently protects the surfaces Linux mirrors or patches most aggressively:
 - `event_stream_mcp`
 - `record_and_replay_plugin`
 - `computer_use_plugin`
+- `hatch_pet_skill`
 - `chrome_native_messaging`
 - `dictation_transcript_finalization`
 - `browser_window_metadata`

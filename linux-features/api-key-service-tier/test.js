@@ -20,7 +20,8 @@ const {
   applyApiKeyModelMarkerPatch,
   applyApiKeyServiceTierPatch,
   applyApiKeyServiceTierGatePatch,
-  applyCurrentGateAndModelPatch,
+  applyCurrentGatePatch,
+  applyCurrentModelPatch,
   applyCurrentFallbackFastTierPatch,
   applyFallbackFastTierPatch,
   descriptors,
@@ -76,42 +77,66 @@ test("api-key-service-tier stays disabled until listed in features.json", () => 
     assert.deepEqual(
       loaded.map((descriptor) => [descriptor.id, descriptor.phase, descriptor.ciPolicy]),
       [
-        ["feature:api-key-service-tier:api-key-service-tier-gate-model", "webview-asset", "optional"],
+        ["feature:api-key-service-tier:api-key-service-tier-gate", "webview-asset", "optional"],
+        ["feature:api-key-service-tier:api-key-service-tier-model", "webview-asset", "optional"],
         ["feature:api-key-service-tier:api-key-service-tier-fallback", "webview-asset", "optional"],
       ],
     );
   });
 });
 
-test("descriptors are optional and target only the two current app bundles", () => {
+test("current DMG descriptors target the three owning app bundles", () => {
   assert.deepEqual(
-    descriptors.map((descriptor) => [descriptor.id, descriptor.phase, descriptor.ciPolicy]),
+    descriptors.map((descriptor) => descriptor.id),
     [
-      ["api-key-service-tier-gate-model", "webview-asset", "optional"],
-      ["api-key-service-tier-fallback", "webview-asset", "optional"],
+      "api-key-service-tier-gate",
+      "api-key-service-tier-model",
+      "api-key-service-tier-fallback",
     ],
   );
   assert.equal(
-    descriptors[0].pattern.test(
-      "app-initial~app-main~onboarding-page~hotkey-window-thread-page~quick-chat-window-page~chatg~k0ede4gb-C17KDkOa.js",
-    ),
+    descriptors[0].pattern.test("app-initial~app-main~onboarding-page-DjTNhJXu.js"),
     true,
   );
   assert.equal(
     descriptors[1].pattern.test(
-      "app-initial~app-main~pull-request-code-review~onboarding-page~hotkey-window-thread-page~cha~b76hmflu-y0KJWbm3.js",
+      "app-initial~app-main~hotkey-window-thread-page~keyboard-shortcuts-settings~thread-app-shell~cf704xib-BpnUyB2R.js",
     ),
     true,
   );
-  assert.equal(descriptors[0].pattern.test("app-initial~app-main~onboarding-page-abc.js"), false);
-  assert.equal(descriptors[1].pattern.test("app-initial~app-main~onboarding-page-abc.js"), false);
+  assert.equal(
+    descriptors[2].pattern.test(
+      "app-initial~app-main~quick-chat-window-page~work-home-page~chatgpt-conversation-page-BqLP6EDd.js",
+    ),
+    true,
+  );
+  assert.equal(
+    descriptors.some((descriptor) =>
+      descriptor.pattern.test(
+        "app-initial~app-main~onboarding-page~hotkey-window-thread-page~quick-chat-window-page~chatg~k0ede4gb-C17KDkOa.js",
+      ),
+    ),
+    false,
+  );
+  assert.equal(
+    descriptors.some((descriptor) =>
+      descriptor.pattern.test(
+        "app-initial~app-main~pull-request-code-review~onboarding-page~hotkey-window-thread-page~cha~b76hmflu-y0KJWbm3.js",
+      ),
+    ),
+    false,
+  );
 });
 
 test("current target wrappers warn when an exact contract disappears", () => {
   assert.deepEqual(captureWarnings(() => {
-    assert.equal(applyCurrentGateAndModelPatch("function driftedGateAndModel(){}"), "function driftedGateAndModel(){}");
+    assert.equal(applyCurrentGatePatch("function driftedGate(){}"), "function driftedGate(){}");
   }), [
     "WARN: Could not identify current service tier auth gate - skipping API key service tier gate patch",
+  ]);
+  assert.deepEqual(captureWarnings(() => {
+    assert.equal(applyCurrentModelPatch("function driftedModel(){}"), "function driftedModel(){}");
+  }), [
     "WARN: Could not identify current model list mapping - skipping API key model service tier marker patch",
   ]);
   assert.deepEqual(captureWarnings(() => {
@@ -128,16 +153,20 @@ test("partial current drift is reported when the other exact target still applie
       const assetsDir = path.join(tempApp, "webview", "assets");
       fs.mkdirSync(assetsDir, { recursive: true });
       fs.writeFileSync(
-        path.join(
-          assetsDir,
-          "app-initial~app-main~onboarding-page~hotkey-window-thread-page~quick-chat-window-page~chatg~k0ede4gb-drifted.js",
-        ),
-        "function driftedGateAndModel(){return `priority_mode reasoningEfforts`}",
+        path.join(assetsDir, "app-initial~app-main~onboarding-page-drifted.js"),
+        "function driftedGate(){return `priority_mode`}",
       );
       fs.writeFileSync(
         path.join(
           assetsDir,
-          "app-initial~app-main~pull-request-code-review~onboarding-page~hotkey-window-thread-page~cha~b76hmflu-current.js",
+          "app-initial~app-main~hotkey-window-thread-page~keyboard-shortcuts-settings~thread-app-shell~cf704xib-current.js",
+        ),
+        "function vbe({authMethod:e,availableModels:t,defaultModel:n,enabledReasoningEfforts:r,includeUltraReasoningEffort:i,models:a,useHiddenModels:o}){let s=[],c=null,l=o&&e!==`amazonBedrock`,u=a.some(e=>e.supportedReasoningEfforts.some(({reasoningEffort:e})=>e===`max`)),d=i&&a.some(e=>e.supportedReasoningEfforts.some(({reasoningEffort:e})=>e===`ultra`));return a.forEach(n=>{if(l?t.has(n.model):!n.hidden){let t=i?n.supportedReasoningEfforts:n.supportedReasoningEfforts.filter(({reasoningEffort:e})=>e!==`ultra`),a=(e===`copilot`?[t.find(e=>e.reasoningEffort===`medium`)??{reasoningEffort:`medium`,description:`medium effort`}]:t).filter(({reasoningEffort:e})=>Gx(e)&&r.has(e)),o={...n,supportedReasoningEfforts:a};s.push(o),n.isDefault&&(c=o)}}),c??=s.find(e=>e.model===n)??null,{models:s,defaultModel:c}}",
+      );
+      fs.writeFileSync(
+        path.join(
+          assetsDir,
+          "app-initial~app-main~quick-chat-window-page~work-home-page~chatgpt-conversation-page-current.js",
         ),
         [
           "let defaultServiceTier=null;",
@@ -149,59 +178,20 @@ test("partial current drift is reported when the other exact target still applie
 
       const report = createPatchReport();
       const warnings = captureWarnings(() => patchExtractedApp(tempApp, { report }));
-      const gateModel = report.patches.find(
-        (entry) => entry.name === "feature:api-key-service-tier:api-key-service-tier-gate-model",
+      const gate = report.patches.find(
+        (entry) => entry.name === "feature:api-key-service-tier:api-key-service-tier-gate",
+      );
+      const model = report.patches.find(
+        (entry) => entry.name === "feature:api-key-service-tier:api-key-service-tier-model",
       );
       const fallback = report.patches.find(
         (entry) => entry.name === "feature:api-key-service-tier:api-key-service-tier-fallback",
       );
 
       assert.ok(warnings.some((warning) => warning.includes("current service tier auth gate")));
-      assert.ok(warnings.some((warning) => warning.includes("current model list mapping")));
-      assert.equal(gateModel?.status, "skipped-optional");
+      assert.equal(gate?.status, "skipped-optional");
+      assert.equal(model?.status, "applied");
       assert.equal(fallback?.status, "applied");
-    } finally {
-      fs.rmSync(tempApp, { recursive: true, force: true });
-    }
-  });
-});
-
-test("gate and model current contract fails closed when either side is missing", () => {
-  withFeatureConfig(["api-key-service-tier"], () => {
-    const tempApp = fs.mkdtempSync(path.join(os.tmpdir(), "api-key-service-tier-internal-partial-"));
-    try {
-      const assetsDir = path.join(tempApp, "webview", "assets");
-      const targetPath = path.join(
-        assetsDir,
-        "app-initial~app-main~onboarding-page~hotkey-window-thread-page~quick-chat-window-page~chatg~k0ede4gb-partial.js",
-      );
-      const gateOnlySource =
-        "const diagnostic=`codexLinuxApiKeyServiceTierModel`;function sxe(e){let t=(0,cxe.c)(6),n=X(os),r=e?.hostId??n,i=Cf(r),a=i?.authMethod===`chatgpt`,o=i?.authMethod??null,s;t[0]!==r||t[1]!==o?(s={authMethod:o,hostId:r},t[0]=r,t[1]=o,t[2]=s):s=t[2];let{data:c,isPending:l}=ye(is,s),u=!!i?.isLoading||a&&l,d=a&&!u&&c!=null&&c?.requirements?.featureRequirements?.fast_mode!==!1,f;return t[3]!==u||t[4]!==d?(f={isServiceTierAllowed:d,isLoading:u},t[3]=u,t[4]=d,t[5]=f):f=t[5],f}";
-      fs.mkdirSync(assetsDir, { recursive: true });
-      fs.writeFileSync(targetPath, gateOnlySource);
-
-      const report = createPatchReport();
-      const warnings = captureWarnings(() => patchExtractedApp(tempApp, { report }));
-      const gateModel = report.patches.find(
-        (entry) => entry.name === "feature:api-key-service-tier:api-key-service-tier-gate-model",
-      );
-
-      assert.ok(warnings.some((warning) => warning.includes("current model list mapping")));
-      assert.equal(gateModel?.status, "skipped-optional");
-      assert.equal(fs.readFileSync(targetPath, "utf8"), gateOnlySource);
-
-      const modelOnlySource =
-        "function vbe({authMethod:e,availableModels:t,defaultModel:n,enabledReasoningEfforts:r,includeUltraReasoningEffort:i,models:a,useHiddenModels:o}){let s=[],c=null,l=o&&e!==`amazonBedrock`,u=a.some(e=>e.supportedReasoningEfforts.some(({reasoningEffort:e})=>e===`max`)),d=i&&a.some(e=>e.supportedReasoningEfforts.some(({reasoningEffort:e})=>e===`ultra`));return a.forEach(n=>{if(l?t.has(n.model):!n.hidden){let t=i?n.supportedReasoningEfforts:n.supportedReasoningEfforts.filter(({reasoningEffort:e})=>e!==`ultra`),a=(e===`copilot`?[t.find(e=>e.reasoningEffort===`medium`)??{reasoningEffort:`medium`,description:`medium effort`}]:t).filter(({reasoningEffort:e})=>Gx(e)&&r.has(e)),o={...n,supportedReasoningEfforts:a};s.push(o),n.isDefault&&(c=o)}}),c??=s.find(e=>e.model===n)??null,{models:s,defaultModel:c}}";
-      fs.writeFileSync(targetPath, modelOnlySource);
-      const modelOnlyReport = createPatchReport();
-      const modelOnlyWarnings = captureWarnings(() => patchExtractedApp(tempApp, { report: modelOnlyReport }));
-      const modelOnlyGateModel = modelOnlyReport.patches.find(
-        (entry) => entry.name === "feature:api-key-service-tier:api-key-service-tier-gate-model",
-      );
-
-      assert.ok(modelOnlyWarnings.some((warning) => warning.includes("current service tier auth gate")));
-      assert.equal(modelOnlyGateModel?.status, "skipped-optional");
-      assert.equal(fs.readFileSync(targetPath, "utf8"), modelOnlySource);
     } finally {
       fs.rmSync(tempApp, { recursive: true, force: true });
     }
@@ -215,16 +205,21 @@ test("a missing exact current target gets its own skipped report entry", () => {
       fs.mkdirSync(path.join(tempApp, "webview", "assets"), { recursive: true });
       const report = createPatchReport();
       const warnings = captureWarnings(() => patchExtractedApp(tempApp, { report }));
-      const gateModel = report.patches.find(
-        (entry) => entry.name === "feature:api-key-service-tier:api-key-service-tier-gate-model",
+      const gate = report.patches.find(
+        (entry) => entry.name === "feature:api-key-service-tier:api-key-service-tier-gate",
+      );
+      const model = report.patches.find(
+        (entry) => entry.name === "feature:api-key-service-tier:api-key-service-tier-model",
       );
       const fallback = report.patches.find(
         (entry) => entry.name === "feature:api-key-service-tier:api-key-service-tier-fallback",
       );
 
-      assert.ok(warnings.some((warning) => warning.includes("current API key service tier gate/model bundle")));
+      assert.ok(warnings.some((warning) => warning.includes("current API key service tier gate bundle")));
+      assert.ok(warnings.some((warning) => warning.includes("current API key service tier model bundle")));
       assert.ok(warnings.some((warning) => warning.includes("current API key service tier fallback bundle")));
-      assert.equal(gateModel?.status, "skipped-optional");
+      assert.equal(gate?.status, "skipped-optional");
+      assert.equal(model?.status, "skipped-optional");
       assert.equal(fallback?.status, "skipped-optional");
     } finally {
       fs.rmSync(tempApp, { recursive: true, force: true });
@@ -329,6 +324,52 @@ test("fallback fast tier is synthesized only for API-key model catalog entries",
   assert.match(patched, /\?e\.serviceTiers:\[codexLinuxApiKeyFastTier\(e\)\]\)\.filter\(Boolean\)\)\.map/);
   assert.doesNotMatch(patched, /\(e\?\.serviceTiers\?\?\[\]\)\.map/);
   assert.doesNotMatch(patched, /\)\?\?null\}function nEe/);
+});
+
+test("fallback fast tier leaves the asset byte-identical when one insertion point drifts", () => {
+  const source = [
+    "let defaultServiceTier=null;",
+    "function Tdt(e,t){return t==null?null:t===`fast`?Odt(e):e?.serviceTiers?.find(e=>e.id===t)??null}",
+    "function Odt(e){return e?.serviceTiers?.find(e=>gz(e.id,e.name)===`fast`||e.name.trim().toLowerCase()===`priority`)??null}",
+  ].join("");
+
+  assert.deepEqual(captureWarnings(() => {
+    assert.equal(applyCurrentFallbackFastTierPatch(source), source);
+  }), [
+    "WARN: Could not apply all current service tier option helpers - skipping API key fallback fast tier patch",
+  ]);
+});
+
+test("fallback descriptor reports skipped when one insertion point drifts", () => {
+  withFeatureConfig(["api-key-service-tier"], () => {
+    const tempApp = fs.mkdtempSync(path.join(os.tmpdir(), "api-key-service-tier-fallback-drift-"));
+    try {
+      const assetsDir = path.join(tempApp, "webview", "assets");
+      const targetPath = path.join(
+        assetsDir,
+        "app-initial~app-main~quick-chat-window-page~work-home-page~chatgpt-conversation-page-drifted.js",
+      );
+      const source = [
+        "let defaultServiceTier=null;",
+        "function Tdt(e,t){return t==null?null:t===`fast`?Odt(e):e?.serviceTiers?.find(e=>e.id===t)??null}",
+        "function Odt(e){return e?.serviceTiers?.find(e=>gz(e.id,e.name)===`fast`||e.name.trim().toLowerCase()===`priority`)??null}",
+      ].join("");
+      fs.mkdirSync(assetsDir, { recursive: true });
+      fs.writeFileSync(targetPath, source);
+
+      const report = createPatchReport();
+      const warnings = captureWarnings(() => patchExtractedApp(tempApp, { report }));
+      const fallback = report.patches.find(
+        (entry) => entry.name === "feature:api-key-service-tier:api-key-service-tier-fallback",
+      );
+
+      assert.ok(warnings.some((warning) => warning.includes("all current service tier option helpers")));
+      assert.equal(fallback?.status, "skipped-optional");
+      assert.equal(fs.readFileSync(targetPath, "utf8"), source);
+    } finally {
+      fs.rmSync(tempApp, { recursive: true, force: true });
+    }
+  });
 });
 
 test("combined patch updates both service tier gate and fallback options", () => {
