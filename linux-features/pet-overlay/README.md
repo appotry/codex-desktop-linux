@@ -46,8 +46,13 @@ Feature settings can be overridden in the gitignored `features.json` file:
 ```
 
 `lockPosition: false` preserves manual pet moves when the existing window
-position is visible. Set it to `true` only when you want the mascot pinned to
-the configured screen corner on every layout pass.
+position is visible. In this default unlocked mode the overlay is frameless:
+transparent space moves the native `356×320` window, while the mascot is a
+`no-drag` region so its renderer gesture can reposition the mascot within the
+view. Existing tray controls keep their own interactive regions. Set
+`lockPosition` to `true` only when you want the mascot pinned to the configured
+screen corner on every layout pass; that mode removes the full-surface
+drag/input opt-in.
 
 ## Options
 
@@ -164,6 +169,10 @@ node --test linux-features/pet-overlay/test.js
 For a manual check, enable the feature, rebuild, and launch the app:
 
 - The pet overlay should remain transparent.
+- With `lockPosition: false`, it should be frameless; drag transparent space
+  to move the window, and drag the mascot to reposition it inside the view.
+  Tray controls should remain clickable, and the window position lasts only
+  for the running session.
 - Selecting a different pet should update the open overlay without restarting Codex.
 - On Hyprland, the pet should have no visible compositor border or shadow.
 - On Niri, the pet should open floating, avoid initial focus, and move by

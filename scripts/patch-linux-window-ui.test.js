@@ -3403,6 +3403,7 @@ test("adds Linux avatar overlay mouse passthrough recovery", () => {
   assert.match(patched, /codexLinuxSyncAvatarPointerInteractivity\(e\)/);
   assert.match(patched, /codexLinuxBuildAvatarInputShape\(e\)/);
   assert.match(patched, /codexLinuxApplyAvatarInputShape\(e\)/);
+  assert.match(patched, /codexLinuxShouldUseWholeWindowInput\(\)\{return this\.codexLinuxWholeWindowInput===!0\}/);
   assert.match(patched, /codexLinuxIsI3Session\(\)/);
   assert.match(patched, /process\.env\.I3SOCK/);
   assert.match(patched, /codexLinuxApplyAvatarCompositorHints\(e\)/);
@@ -3489,6 +3490,126 @@ test("keeps the avatar overlay core patch idempotent after pet overlay compositi
   assert.notEqual(petPatched, corePatched);
   assert.equal(rerun, petPatched);
   assert.deepEqual(warnings, []);
+});
+
+test("pet overlay opts into full-window input on X11 and Wayland", () => {
+  const patched = applyPetOverlayPatch(
+    applyLinuxOpaqueBackgroundPatch(
+      applyLinuxAvatarOverlayMousePassthroughPatch(
+        `${latestAvatarOverlayBundleFixture()}${currentOpaqueWindowSurfaceBackgroundBundle}`,
+      ),
+    ),
+  );
+  const cursor = { x: 100, y: 100 };
+  let ozonePlatform = "x11";
+  const context = {
+    globalThis: {},
+    clearInterval() {},
+    process: { env: {}, platform: "linux" },
+    require(moduleName) {
+      if (moduleName === "node:child_process") return { execFile() {} };
+      assert.equal(moduleName, "electron");
+      return {
+        app: { commandLine: { getSwitchValue: () => ozonePlatform }, getName: () => "Codex" },
+        screen: { getCursorScreenPoint: () => cursor },
+      };
+    },
+    setInterval() {
+      return { unref() {} };
+    },
+  };
+  vm.runInNewContext(`${patched};globalThis.AvatarOverlayController=fV;`, context);
+  const controller = new context.globalThis.AvatarOverlayController(
+    { sendMessageToAllRegisteredWindows() {} },
+    { set() {} },
+  );
+  controller.layout = {
+    mascot: { left: 220, top: 190, width: 113, height: 122 },
+    tray: { left: 57, top: 55, width: 276, height: 131 },
+  };
+  const window = {
+    getContentBounds: () => ({ x: 0, y: 0, width: 356, height: 320 }),
+    isDestroyed: () => false,
+    isVisible: () => true,
+    setIgnoreMouseEvents() {},
+    setShape() {},
+  };
+
+  controller.codexPetOverlaySyncWindow(window);
+  assert.equal(controller.codexLinuxWholeWindowInput, true);
+
+  assert.deepEqual(JSON.parse(JSON.stringify(controller.codexLinuxBuildAvatarInputShape(window))), [
+    { x: 0, y: 0, width: 356, height: 320 },
+  ]);
+  cursor.x = 10;
+  cursor.y = 300;
+  assert.equal(controller.codexLinuxIsCursorInAvatarInteractiveRegion(window), true);
+  ozonePlatform = "wayland";
+  controller.pointerInteractive = false;
+  assert.equal(controller.codexLinuxIsAvatarShapeBackend(), false);
+  assert.equal(controller.codexLinuxSyncAvatarPointerInteractivity(window), true);
+  assert.equal(controller.pointerInteractive, true);
+});
+
+test("locked pet overlay keeps only mascot and tray interactive on X11 and Wayland", () => {
+  const patched = applyPetOverlayPatch(
+    applyLinuxOpaqueBackgroundPatch(
+      applyLinuxAvatarOverlayMousePassthroughPatch(
+        `${latestAvatarOverlayBundleFixture()}${currentOpaqueWindowSurfaceBackgroundBundle}`,
+      ),
+    ),
+    { feature: { manifest: { petOverlay: { lockPosition: true } }, settings: {} } },
+  );
+  const cursor = { x: 10, y: 300 };
+  let ozonePlatform = "x11";
+  const context = {
+    globalThis: {},
+    clearInterval() {},
+    process: { env: {}, platform: "linux" },
+    require(moduleName) {
+      if (moduleName === "node:child_process") return { execFile() {} };
+      assert.equal(moduleName, "electron");
+      return {
+        app: { commandLine: { getSwitchValue: () => ozonePlatform }, getName: () => "Codex" },
+        screen: { getCursorScreenPoint: () => cursor },
+      };
+    },
+    setInterval() {
+      return { unref() {} };
+    },
+  };
+  vm.runInNewContext(`${patched};globalThis.AvatarOverlayController=fV;`, context);
+  const controller = new context.globalThis.AvatarOverlayController(
+    { sendMessageToAllRegisteredWindows() {} },
+    { set() {} },
+  );
+  controller.layout = {
+    mascot: { left: 220, top: 190, width: 113, height: 122 },
+    tray: { left: 57, top: 55, width: 276, height: 131 },
+  };
+  const ignored = [];
+  const window = {
+    getContentBounds: () => ({ x: 0, y: 0, width: 356, height: 320 }),
+    isDestroyed: () => false,
+    isVisible: () => true,
+    setIgnoreMouseEvents: (...args) => ignored.push(args),
+    setShape() {},
+  };
+
+  controller.codexPetOverlaySyncWindow(window);
+  assert.equal(controller.codexLinuxWholeWindowInput, false);
+  assert.deepEqual(JSON.parse(JSON.stringify(controller.codexLinuxBuildAvatarInputShape(window))), [
+    { x: 220, y: 190, width: 113, height: 122 },
+    { x: 57, y: 55, width: 276, height: 131 },
+  ]);
+
+  ozonePlatform = "wayland";
+  controller.window = window;
+  controller.pointerInteractive = true;
+  assert.equal(controller.codexLinuxIsAvatarShapeBackend(), false);
+  assert.equal(controller.codexLinuxIsCursorInAvatarInteractiveRegion(window), false);
+  controller.applyPointerInteractivityPolicy();
+  assert.deepEqual(JSON.parse(JSON.stringify(ignored)), [[true, { forward: true }]]);
 });
 
 test("keeps Linux avatar overlay above the app while reply inputs are focusable", () => {
@@ -3593,6 +3714,18 @@ test("Linux avatar overlay interactivity is bounded to avatar regions", () => {
     { x: 0, y: 0, width: 356, height: 320 },
   ]);
   controller.dragState = null;
+  assert.equal(controller.codexLinuxShouldUseWholeWindowInput(), false);
+  controller.codexLinuxWholeWindowInput = true;
+  assert.deepEqual(serializeShape(controller.codexLinuxBuildAvatarInputShape(overlayWindow)), [
+    { x: 0, y: 0, width: 356, height: 320 },
+  ]);
+  assert.equal(
+    controller.codexLinuxIsCursorInAvatarInteractiveRegion({
+      getContentBounds: () => ({ x: 5743, y: 936, width: 356, height: 320 }),
+    }),
+    true,
+  );
+  controller.codexLinuxWholeWindowInput = false;
   context.process.env.WAYLAND_DISPLAY = "wayland-0";
   assert.equal(controller.codexLinuxIsAvatarShapeBackend(), false);
   assert.equal(controller.codexLinuxApplyAvatarInputShape(overlayWindow), false);

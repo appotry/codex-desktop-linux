@@ -215,6 +215,7 @@ workarounds.
 | Wrapper updater button | Opt-in | `codex-wrapper-updater` | [Docs](linux-features/codex-wrapper-updater/README.md) |
 | Conversation mode | Opt-in | `conversation-mode` | [Docs](linux-features/conversation-mode/README.md) |
 | Copilot reasoning effort defaults | Opt-in | `copilot-reasoning-effort` | [Docs](linux-features/copilot-reasoning-effort/README.md) |
+| Directory-only working-tree watch | Opt-in | `directory-only-working-tree-watch` | [Docs](linux-features/directory-only-working-tree-watch/README.md) |
 | Example Linux Feature | Developer example | `example-feature` | [Docs](linux-features/example-feature/README.md) |
 | Frameless titlebar | Opt-in | `frameless-titlebar` | [Docs](linux-features/frameless-titlebar/README.md) |
 | Global Dictation | Opt-in | `global-dictation` | [Docs](linux-features/global-dictation/README.md) |
@@ -224,6 +225,7 @@ workarounds.
 | Open Target Discovery | Opt-in | `open-target-discovery` | [Docs](linux-features/open-target-discovery/README.md) |
 | Persistent status panel | Opt-in | `persistent-status-panel` | [Docs](linux-features/persistent-status-panel/README.md) |
 | Pet overlay | Opt-in | `pet-overlay` | [Docs](linux-features/pet-overlay/README.md) |
+| Project group Last updated sorting | Opt-in | `project-group-last-updated-sort` | [Docs](linux-features/project-group-last-updated-sort/README.md) |
 | Project task Created sorting | Opt-in | `project-task-sort` | [Docs](linux-features/project-task-sort/README.md) |
 | Read Aloud button | Opt-in | `read-aloud` | [Docs](linux-features/read-aloud/README.md) |
 | Read Aloud MCP | Opt-in | `read-aloud-mcp` | [Docs](linux-features/read-aloud-mcp/README.md) |
