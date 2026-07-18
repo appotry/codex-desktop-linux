@@ -276,5 +276,9 @@ Users can opt in locally with:
 cachix use codex-desktop-linux
 ```
 
-The scheduled `Populate Cachix` workflow builds the default package,
-feature-specific package variants, and `.#installer`.
+When a merge to `main` changes the pinned `Codex.dmg` hash, the `Populate
+Cachix` workflow builds the default package, feature-specific package variants,
+the watchdog feature check, and `.#installer`. It uploads and garbage-collects
+each output before starting the next one so the hosted runner does not retain
+every large app variant at once. Maintainers can dispatch the workflow manually
+to backfill the current `main` pin after a skipped or interrupted run.

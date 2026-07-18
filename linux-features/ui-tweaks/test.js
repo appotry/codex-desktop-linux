@@ -18,7 +18,8 @@ const {
   INLINE_MODEL_LIST_RUNTIME_MARKER,
   MODEL_ALLOWLIST_MARKER,
   MODEL_PICKER_ALLOWLIST_ASSET_PATTERN,
-  MODEL_PICKER_MENU_ASSET_PATTERN,
+  MODEL_PICKER_EFFORT_ASSET_PATTERN,
+  MODEL_PICKER_INLINE_ASSET_PATTERN,
   MODEL_PICKER_STATE_ASSET_PATTERN,
   SIMPLE_MENU_VIEW_PATTERN,
   applyDefaultAdvancedViewPatch,
@@ -62,10 +63,10 @@ function modelPickerMenuBundleFixture() {
     "function menu(){",
     "id:`composer.intelligenceDropdown.model.title`;",
     `const allowed=${MODEL_ALLOWLIST_MARKER};`,
-    "let ue=fragment;let de=ue,fe;",
+    "let ue=fragment,ie=ue;let fe;",
     "id:`composer.intelligenceDropdown.model.rowLabel`;",
     "id:`composer.intelligenceDropdown.effort.title`;",
-    "let we=(0,c6.jsxs)(c6.Fragment,{children:[ye,effort]});",
+    "we=(0,c6.jsxs)(c6.Fragment,{children:[ye,effort]});",
     "}",
   ].join("");
 }
@@ -181,33 +182,38 @@ test("ui-tweaks is discoverable and disabled until listed in features.json", () 
 
 test("model picker descriptors target the current state and menu bundles", () => {
   const stateAsset =
-    "app-initial~app-main~new-thread-panel-page~appgen-library-page~hotkey-window-thread-page~ho~iufn7mg3-DRU9Ekz0.js";
+    "app-initial~app-main~settings-command-menu-section-items~new-thread-panel-page~settings-pag~unq8yzli-twtaboLE.js";
   const allowlistAsset =
-    "app-initial~app-main~onboarding-page~projects-index-page~hotkey-window-thread-page~quick-ch~iiv1g666-BjNKtmac.js";
-  const menuAsset = allowlistAsset;
+    "app-initial~avatarOverlayCompositionSurface~artifact-tab-content.electron~app-main~plugin-d~kw7nl1sl-Dt2LYVtU.js";
+  const effortAsset =
+    "app-initial~app-main~new-thread-panel-page~appgen-library-page~hotkey-window-thread-page~ho~jhj9i1pn-CLC3YBho.js";
 
   assert.match(stateAsset, MODEL_PICKER_STATE_ASSET_PATTERN);
+  assert.match(stateAsset, MODEL_PICKER_INLINE_ASSET_PATTERN);
   assert.match(allowlistAsset, MODEL_PICKER_ALLOWLIST_ASSET_PATTERN);
-  assert.match(menuAsset, MODEL_PICKER_MENU_ASSET_PATTERN);
+  assert.match(effortAsset, MODEL_PICKER_EFFORT_ASSET_PATTERN);
 
   assert.doesNotMatch(stateAsset, MODEL_PICKER_ALLOWLIST_ASSET_PATTERN);
-  assert.doesNotMatch(stateAsset, MODEL_PICKER_MENU_ASSET_PATTERN);
+  assert.doesNotMatch(stateAsset, MODEL_PICKER_EFFORT_ASSET_PATTERN);
   assert.doesNotMatch(allowlistAsset, MODEL_PICKER_STATE_ASSET_PATTERN);
-  assert.doesNotMatch(menuAsset, MODEL_PICKER_STATE_ASSET_PATTERN);
+  assert.doesNotMatch(effortAsset, MODEL_PICKER_STATE_ASSET_PATTERN);
 
-  // The previous DMG split these patches across different chunks.
-  // Current-DMG-only targeting must not retain those chunks as fallbacks.
+  // Current-DMG-only targeting must not retain previous chunks as fallbacks.
   assert.doesNotMatch(
     "app-initial~app-main~page-CMpPiY3-.js",
     MODEL_PICKER_STATE_ASSET_PATTERN,
+  );
+  assert.doesNotMatch(
+    "app-initial~artifact-tab-content.electron~app-main~settings-command-menu-section-items~firs~mknl0a7l-BXBV9E7p.js",
+    MODEL_PICKER_ALLOWLIST_ASSET_PATTERN,
   );
   assert.doesNotMatch(
     "app-initial~app-main~new-thread-panel-page~onboarding-page~login-route~appgen-library-page~~gpgl9un5-_t04Xpau.js",
     MODEL_PICKER_ALLOWLIST_ASSET_PATTERN,
   );
   assert.doesNotMatch(
-    "app-initial~app-main~new-thread-panel-page~onboarding-page~projects-index-page~appgen-libra~lpb6mnim-Bawo32lF.js",
-    MODEL_PICKER_MENU_ASSET_PATTERN,
+    "app-initial~app-main~onboarding-page~projects-index-page~hotkey-window-thread-page~quick-ch~iiv1g666-BjNKtmac.js",
+    MODEL_PICKER_EFFORT_ASSET_PATTERN,
   );
   assert.doesNotMatch(
     "app-initial~app-main~hotkey-window-thread-page~keyboard-shortcuts-settings~thread-app-shell~cf704xib-BpnUyB2R.js",
@@ -215,7 +221,7 @@ test("model picker descriptors target the current state and menu bundles", () =>
   );
   assert.doesNotMatch(
     "app-initial~app-main~onboarding-page-qmFVRsFx.js",
-    MODEL_PICKER_MENU_ASSET_PATTERN,
+    MODEL_PICKER_EFFORT_ASSET_PATTERN,
   );
 });
 
@@ -231,7 +237,7 @@ test("model picker opens advanced view and renders model choices inline", () => 
   assert.match(patchedMenu, new RegExp(GPT_56_ALLOWLIST_MARKER.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.doesNotMatch(patchedMenu, new RegExp(MODEL_ALLOWLIST_MARKER.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.match(patchedMenu, new RegExp(INLINE_MODEL_LIST_RUNTIME_MARKER));
-  assert.match(patchedMenu, /children:\[de,\/\*codex-linux-inline-model-list\*\//);
+  assert.match(patchedMenu, /children:\[ie,\/\*codex-linux-inline-model-list\*\//);
   assert.equal(applyDefaultAdvancedViewPatch(patchedState), patchedState);
   assert.equal(applyGpt56AllowlistPatch(patchedMenu), patchedMenu);
   assert.equal(applyInlineModelListPatch(patchedMenu), patchedMenu);
@@ -396,11 +402,11 @@ test("English reasoning effort labels can be disabled", () => {
 
 test("sidebar project descriptor targets only the current project sidebar asset", () => {
   assert.match(
-    "app-initial~app-main~page-kMhXWEru.js",
+    "app-initial~notebook-preview-panel~app-main~pull-request-route~projects-index-page~cloud-en~lpx9dmpy-CMWaEe8R.js",
     PROJECTS_SIDEBAR_ASSET_PATTERN,
   );
   assert.doesNotMatch(
-    "app-initial~app-main~projects-index-page~remote-conversation-page-CFT2LLOB.js",
+    "app-initial~app-main~page-kMhXWEru.js",
     PROJECTS_SIDEBAR_ASSET_PATTERN,
   );
   assert.doesNotMatch(

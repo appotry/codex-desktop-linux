@@ -5,7 +5,8 @@ use crate::{
     cli::{Cli, Commands},
     codex_cli,
     config::{RuntimeConfig, RuntimePaths},
-    diagnostics, feature_picker, install, install_rollback, liveness, logging, notify, rollback,
+    diagnostics, feature_picker, install, install_rollback, liveness, logging, notify, restart,
+    rollback,
     state::{CliStatus, PersistedState, UpdateStatus},
     upstream, wrapper, wrapper_apply,
 };
@@ -28,6 +29,8 @@ const CLI_MISSING_NOTIFICATION_EVENT: &str = "cli_missing";
 const CLI_MISSING_PROMPT_DISMISS_TTL: ChronoDuration = ChronoDuration::minutes(10);
 const PROMPT_INSTALL_CLI_CANCELLED_EXIT_CODE: i32 = 10;
 const PROMPT_INSTALL_CLI_NO_BACKEND_EXIT_CODE: i32 = 11;
+// Nonzero so `Restart=on-failure` relaunches the daemon on the new binary.
+const BINARY_REPLACED_RESTART_EXIT_CODE: i32 = 12;
 const POLKIT_AUTH_AGENT_PROCESS_TOKENS: &[&str] = &[
     "budgie-polkit",
     "cinnamon-polkit",
@@ -467,6 +470,14 @@ async fn run_daemon(
         if packaged_runtime_removed(config) {
             info!("packaged app files are gone; stopping updater daemon");
             break;
+        }
+
+        if let Some(installed_binary) = restart::replacement_binary() {
+            info!(
+                installed_binary = %installed_binary.display(),
+                "updater binary was replaced on disk; exiting so systemd restarts the daemon"
+            );
+            std::process::exit(BINARY_REPLACED_RESTART_EXIT_CODE);
         }
 
         tokio::select! {

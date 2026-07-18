@@ -35,6 +35,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- The updater daemon now detects that a package upgrade replaced its binary
+  on disk and exits with a nonzero status so systemd's `Restart=on-failure`
+  relaunches it on the new binary. Previously a running daemon survived every
+  upgrade and kept staging rebuild workspaces with outdated logic, failing
+  each periodic update until the next reboot.
 - Launcher startup no longer requires Python's pidfd wrappers for normal
   launcher lock acquire and release. Pidfd remains reserved for the
   identity-verified stale Electron termination path.

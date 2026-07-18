@@ -10,6 +10,7 @@ const {
   applyLinuxBundledPluginCopyPermissionsPatch,
   applyLinuxBundledPluginReconcileStaleSnapshotPatch,
   applyLinuxBrowserUseRouteLivenessPatch,
+  applyLinuxBrowserUseSocketDirectoryPatch,
   applyLinuxChromeExtensionStatusPatch,
 } = require("../../../../impl/main-process/browser.js");
 const { applyLinuxChromePluginAutoInstallPatch } = require("../../../../impl/chrome-plugin.js");
@@ -52,6 +53,13 @@ module.exports = [
     order: 165,
     ciPolicy: "optional",
     apply: applyLinuxBundledPluginCopyPermissionsPatch,
+  }),
+  mainBundlePatch({
+    id: "linux-browser-use-socket-directory",
+    phase: "main-bundle",
+    order: 168,
+    ciPolicy: "optional",
+    apply: applyLinuxBrowserUseSocketDirectoryPatch,
   }),
   mainBundlePatch({
     id: "linux-browser-use-route-liveness",

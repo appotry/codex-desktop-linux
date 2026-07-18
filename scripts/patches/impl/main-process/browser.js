@@ -371,6 +371,64 @@ function applyLinuxBrowserUseRouteLivenessPatch(currentSource) {
   return currentSource.replace(original, replacement);
 }
 
+function applyLinuxBrowserUseSocketDirectoryPatch(currentSource) {
+  const helperName = "codexLinuxBrowserUseSocketDir";
+  const socketModeMarker = "/*codexLinuxBrowserUseSocketMode*/";
+  const hasHelper = currentSource.includes(`function ${helperName}(`);
+  const hasSocketModePatch = currentSource.includes(socketModeMarker);
+  if (hasHelper && hasSocketModePatch) {
+    return currentSource;
+  }
+  if (hasHelper || hasSocketModePatch) {
+    console.warn(
+      "WARN: Browser Use socket directory patch is only partially present — leaving main bundle unchanged",
+    );
+    return currentSource;
+  }
+
+  const socketDirectoryPattern =
+    /([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)=>\2===`win32`\?(`(?:\\.|[^`\\])*codex-browser-use`):`\/tmp\/codex-browser-use`/g;
+  const socketDirectoryMatches = [...currentSource.matchAll(socketDirectoryPattern)];
+  const socketListenPattern =
+    /this\.server\.listen\(this\.pipePath,\(\)=>\{this\.server\.off\(`error`,([A-Za-z_$][\w$]*)\),([A-Za-z_$][\w$]*)\(\)\}\)/g;
+  const socketListenMatches = [...currentSource.matchAll(socketListenPattern)];
+  if (socketDirectoryMatches.length !== 1 || socketListenMatches.length !== 1) {
+    if (currentSource.includes("codex-browser-use")) {
+      console.warn(
+        `WARN: Expected one Browser Use socket directory and listener, found ${socketDirectoryMatches.length}/${socketListenMatches.length} — skipping Linux IAB socket alignment patch`,
+      );
+    }
+    return currentSource;
+  }
+
+  const [directoryTarget, resolverName, platformName, windowsSocket] =
+    socketDirectoryMatches[0];
+  const [listenTarget, errorHandlerName, resolveName] = socketListenMatches[0];
+  const helper =
+    `function ${helperName}(){let e=process.env.CODEX_BROWSER_USE_SOCKET_DIR,t=typeof e===\`string\`&&e.length>0?e:null,n=typeof process.getuid===\`function\`?process.getuid():null;` +
+    `if(t==null){if(!Number.isInteger(n)||n<0)throw Error(\`Browser Use cannot resolve a per-user Linux socket directory\`);t=\`/tmp/codex-browser-use-\${n}\`}` +
+    `let r=require(\`node:fs\`);r.mkdirSync(t,{recursive:!0,mode:448});let i=r.lstatSync(t);` +
+    `if(i.isSymbolicLink()||!i.isDirectory())throw Error(\`Browser Use socket directory is not a directory\`);` +
+    `if(Number.isInteger(n)&&i.uid!==n)throw Error(\`Browser Use socket directory is not owned by the current user\`);` +
+    `r.chmodSync(t,448);return t}`;
+  const directoryReplacement = `${resolverName}=${platformName}=>${platformName}===\`win32\`?${windowsSocket}:${helperName}()`;
+  const listenReplacement =
+    `this.server.listen(this.pipePath,()=>{if(process.platform===\`linux\`)try{require(\`node:fs\`).chmodSync(this.pipePath,384)}catch(e){this.server.off(\`error\`,${errorHandlerName}),this.server.close(()=>{}),${errorHandlerName}(e);return}${socketModeMarker}` +
+    `this.server.off(\`error\`,${errorHandlerName}),${resolveName}()})`;
+
+  let patchedSource = currentSource.replace(directoryTarget, directoryReplacement);
+  patchedSource = patchedSource.replace(listenTarget, listenReplacement);
+  const strictDirective = '"use strict";';
+  const helperInsertionIndex = patchedSource.startsWith(strictDirective)
+    ? strictDirective.length
+    : 0;
+  return (
+    patchedSource.slice(0, helperInsertionIndex) +
+    helper +
+    patchedSource.slice(helperInsertionIndex)
+  );
+}
+
 function applyLinuxChromeExtensionStatusPatch(currentSource) {
   if (currentSource.includes("codexLinuxChromeProfileRoots")) {
     return currentSource;
@@ -517,5 +575,6 @@ module.exports = {
   applyLinuxBundledPluginReconcileStaleSnapshotPatch,
   applyLinuxExternalOpenEnvPatch,
   applyLinuxBrowserUseRouteLivenessPatch,
+  applyLinuxBrowserUseSocketDirectoryPatch,
   applyLinuxChromeExtensionStatusPatch,
 };

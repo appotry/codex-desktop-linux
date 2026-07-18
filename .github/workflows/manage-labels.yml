@@ -20,9 +20,6 @@ on:
 
 permissions: {}
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
 concurrency:
   group: repository-label-governance
   cancel-in-progress: false
@@ -39,7 +36,7 @@ jobs:
       pull-requests: read
     steps:
       - name: Check out trusted governance code
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
@@ -88,7 +85,7 @@ jobs:
       # A write-capable dispatch must run only code already reviewed on the
       # default branch, even when the dispatcher selects another ref in the UI.
       - name: Check out trusted governance code
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
@@ -125,7 +122,7 @@ jobs:
             --snapshot "$RUNNER_TEMP/repository-labels-before.json"
 
       - name: Preserve the pre-change audit snapshot
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: repository-labels-before-${{ github.run_id }}
           path: ${{ runner.temp }}/repository-labels-before.json

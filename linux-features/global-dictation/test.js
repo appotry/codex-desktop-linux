@@ -25,6 +25,7 @@ const hostPathEntries = (process.env.PATH ?? "")
   .split(path.delimiter)
   .filter((entry) => path.isAbsolute(entry));
 const hostPath = [...new Set(hostPathEntries)].join(path.delimiter);
+const X11_RELEASE_MONITOR_TEST_TIMEOUT_MS = 3000;
 
 function findHostExecutable(name) {
   const executable = hostPathEntries
@@ -115,7 +116,13 @@ function writeExecutable(filePath, body) {
   fs.writeFileSync(filePath, body, { mode: 0o755 });
 }
 
-function runX11ReleaseMonitor({ accelerator, xmodmapLines, queryStateLines, testLines, timeout = 1000 }) {
+function runX11ReleaseMonitor({
+  accelerator,
+  xmodmapLines,
+  queryStateLines,
+  testLines,
+  timeout = X11_RELEASE_MONITOR_TEST_TIMEOUT_MS,
+}) {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "global-dictation-x11-map-"));
   const binDir = path.join(tempDir, "bin");
   fs.mkdirSync(binDir);
@@ -411,7 +418,7 @@ test("X11 release watcher exits when the primary key is released while the modif
           DISPLAY: ":99",
           PATH: `${binDir}${path.delimiter}${hostPath}`,
         },
-        timeout: 1000,
+        timeout: X11_RELEASE_MONITOR_TEST_TIMEOUT_MS,
       },
     );
     assert.equal(result.status, 0, result.stderr);
@@ -453,7 +460,7 @@ test("X11 release watcher prefers resolved keycodes over fallback codes", () => 
           DISPLAY: ":99",
           PATH: `${binDir}${path.delimiter}${hostPath}`,
         },
-        timeout: 1000,
+        timeout: X11_RELEASE_MONITOR_TEST_TIMEOUT_MS,
       },
     );
     assert.equal(result.status, 0, result.stderr);

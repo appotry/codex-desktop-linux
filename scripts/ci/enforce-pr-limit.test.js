@@ -470,11 +470,11 @@ test("workflow uses the trusted pull_request_target configuration", () => {
   assert.match(workflow, /persist-credentials: false/);
   assert.match(
     workflow,
-    /actions\/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4/,
+    /actions\/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7\.0\.0/,
   );
   assert.match(
     workflow,
-    /actions\/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7/,
+    /actions\/github-script@d746ffe35508b1917358783b479e04febd2b8f71 # v9\.0\.0/,
   );
   assert.match(
     workflow,

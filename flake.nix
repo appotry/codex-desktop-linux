@@ -94,20 +94,20 @@
 
         codexDmg = pkgs.fetchurl {
           url = "https://persistent.oaistatic.com/codex-app-prod/ChatGPT.dmg";
-          hash = "sha256-QONIFOdOMJQ8IJ69TalM1N41gaUsW/++K88uSI1jYcY=";
+          hash = "sha256-/0WRUJkWEgB1SScNLSjF54zsa9asIAp62l7WwDE2m4c=";
         };
 
-        codexVersion = "26.707.72221";
-        electronVersion = "42.1.0";
+        codexVersion = "26.715.21425";
+        electronVersion = "42.3.0";
         electronPlatform =
           {
             x86_64-linux = {
               arch = "x64";
-              hash = "sha256-iCBHNDqeIDxs/F05sWbqngJd0laUPg03EfhnJa0OO9k=";
+              hash = "sha256-SHpmfKanNLlYwWz/HfdNnUTSwYpszNtN1R9jAaNWxCA=";
             };
             aarch64-linux = {
               arch = "arm64";
-              hash = "sha256-HnAPfz2u95TMRSNeUcEXJmSu1JpOdze4iW3cOYv/TX0=";
+              hash = "sha256-Kjdf+XP7e93FOKT2eyFBlH6dclE6G6or6r7Cp/Zc0PA=";
             };
           }.${system} or (throw "codex-desktop-linux Nix package is not supported on ${system}");
 
@@ -118,7 +118,7 @@
 
         electronHeaders = pkgs.fetchurl {
           url = "https://artifacts.electronjs.org/headers/dist/v${electronVersion}/node-v${electronVersion}-headers.tar.gz";
-          hash = "sha256-DPwdIPJS1sKb3RSx88qjDtxkd9uT5aZiBnRCSzjc3f0=";
+          hash = "sha256-ghAJ+cGDAFDYlK755hkGywpTeyAAstm77ZmF//HV4NA=";
         };
 
         browserUseNodeReplRuntime = pkgs.fetchurl {
@@ -345,6 +345,15 @@
           stdenv.cc.cc.lib
           zlib
         ]);
+        gsettingsSchemaPackages = with pkgs; [
+          gsettings-desktop-schemas
+          gtk3
+        ];
+        gsettingsSchemaRoot = pkg:
+          pkgs.lib.removeSuffix "/glib-2.0/schemas" (pkgs.glib.getSchemaPath pkg);
+        gsettingsSchemaDataDirs =
+          pkgs.lib.concatMapStringsSep ":" gsettingsSchemaRoot gsettingsSchemaPackages;
+        xdgDefaultDataDirs = "/usr/local/share:/usr/share";
         launcherPath = pkgs.lib.makeBinPath (with pkgs; [
           bash
           coreutils
@@ -464,10 +473,25 @@ PY
           fi
         '';
 
+        linuxFeaturesConfigFile = config:
+          pkgs.writeText "codex-linux-features.json" (builtins.toJSON config);
+
         linuxFeaturesConfig = linuxFeatureIds:
-          pkgs.writeText "codex-linux-features.json" (builtins.toJSON {
+          linuxFeaturesConfigFile {
             enabled = linuxFeatureIds;
-          });
+          };
+
+        normalizeLinuxFeaturesConfig = config:
+          let
+            enabled = nixLinuxFeatures.normalize (config.enabled or [ ]);
+          in
+          config // {
+            inherit enabled;
+          };
+
+        watchdogLinuxFeaturesConfig = normalizeLinuxFeaturesConfig (
+          builtins.fromJSON (builtins.readFile ./scripts/ci/watchdog-linux-features.json)
+        );
 
         enabledFeatureIds = { enableComputerUseUi ? false, linuxFeatureIds ? [ ] }:
           pkgs.lib.optionals enableComputerUseUi [ "computer-use-ui" ]
@@ -479,9 +503,17 @@ PY
           in
           if featureIds == [ ] then "" else "-${pkgs.lib.concatStringsSep "-" featureIds}";
 
-        mkCodexDesktopPayload = { enableComputerUseUi ? false, linuxFeatureIds ? [ ] }:
+        mkCodexDesktopPayload = { enableComputerUseUi ? false, linuxFeatureIds ? [ ], linuxFeaturesConfigOverride ? null }:
+        let
+          effectiveLinuxFeaturesConfig =
+            if linuxFeaturesConfigOverride == null then
+              normalizeLinuxFeaturesConfig { enabled = linuxFeatureIds; }
+            else
+              normalizeLinuxFeaturesConfig linuxFeaturesConfigOverride;
+          effectiveLinuxFeatureIds = effectiveLinuxFeaturesConfig.enabled;
+        in
         pkgs.stdenv.mkDerivation {
-          pname = "codex-desktop${packageSuffix { inherit enableComputerUseUi linuxFeatureIds; }}-payload";
+          pname = "codex-desktop${packageSuffix { inherit enableComputerUseUi; linuxFeatureIds = effectiveLinuxFeatureIds; }}-payload";
           version = codexVersion;
           src = sourceRoot;
           __structuredAttrs = true;
@@ -528,7 +560,7 @@ PY
             export CXXFLAGS="''${CXXFLAGS:-} -ffile-prefix-map=$TMPDIR=/build -fdebug-prefix-map=$TMPDIR=/build -fmacro-prefix-map=$TMPDIR=/build"
             export RUSTFLAGS="''${RUSTFLAGS:-} --remap-path-prefix=$TMPDIR=/build -C link-arg=-Wl,--build-id=none"
             export CODEX_MANAGED_NODE_SOURCE="${pkgs.nodejs}"
-            export CODEX_LINUX_FEATURES_CONFIG="${linuxFeaturesConfig linuxFeatureIds}"
+            export CODEX_LINUX_FEATURES_CONFIG="${linuxFeaturesConfigFile effectiveLinuxFeaturesConfig}"
             export CODEX_ELECTRON_ZIP_SOURCE="${electronZip}"
             export CODEX_NATIVE_MODULES_SOURCE="${codexNativeModules}"
             ${pkgs.lib.optionalString (browserUseNodeRepl != null) ''
@@ -538,10 +570,10 @@ PY
             export CODEX_LINUX_COMPUTER_USE_COSMIC_SOURCE="${codexComputerUseBinaries}/bin/codex-computer-use-cosmic"
             export CODEX_CHROME_EXTENSION_HOST_SOURCE="${codexComputerUseBinaries}/bin/codex-chrome-extension-host"
             export CODEX_NOTIFICATION_ACTIONS_SOURCE="${codexNotificationActionsBinary}/bin/codex-notification-actions-linux"
-            ${pkgs.lib.optionalString (builtins.elem "mcp-helper-reaper" linuxFeatureIds) ''
+            ${pkgs.lib.optionalString (builtins.elem "mcp-helper-reaper" effectiveLinuxFeatureIds) ''
             export CODEX_MCP_HELPER_REAPER_SOURCE="${codexMcpHelperReaper}/bin/codex-mcp-helper-reaper"
             ''}
-            ${pkgs.lib.optionalString (builtins.elem "global-dictation" linuxFeatureIds) ''
+            ${pkgs.lib.optionalString (builtins.elem "global-dictation" effectiveLinuxFeatureIds) ''
             export CODEX_GLOBAL_DICTATION_LINUX_SOURCE="${codexGlobalDictationBinary}/bin/codex-global-dictation-linux"
             ''}
             mkdir -p "$HOME" "$npm_config_cache" "$CARGO_HOME"
@@ -571,9 +603,14 @@ PY
           '';
         };
 
-        buildCodexDesktop = { enableComputerUseUi ? false, linuxFeatureIds ? [ ] }:
+        buildCodexDesktop = { enableComputerUseUi ? false, linuxFeatureIds ? [ ], linuxFeaturesConfigOverride ? null }:
         let
-          normalizedLinuxFeatureIds = nixLinuxFeatures.normalize linuxFeatureIds;
+          effectiveLinuxFeaturesConfig =
+            if linuxFeaturesConfigOverride == null then
+              normalizeLinuxFeaturesConfig { enabled = linuxFeatureIds; }
+            else
+              normalizeLinuxFeaturesConfig linuxFeaturesConfigOverride;
+          normalizedLinuxFeatureIds = effectiveLinuxFeaturesConfig.enabled;
           featureArgs = {
             inherit enableComputerUseUi;
             linuxFeatureIds = normalizedLinuxFeatureIds;
@@ -581,6 +618,7 @@ PY
           payload = mkCodexDesktopPayload {
             inherit enableComputerUseUi;
             linuxFeatureIds = normalizedLinuxFeatureIds;
+            linuxFeaturesConfigOverride = effectiveLinuxFeaturesConfig;
           };
           payloadLauncherPath = launcherPath + pkgs.lib.optionalString
             (builtins.elem "global-dictation" normalizedLinuxFeatureIds)
@@ -659,6 +697,8 @@ PY
 
             makeWrapper "$out/opt/codex-desktop/start.sh" "$out/bin/codex-desktop" \
               --prefix PATH : "${payloadLauncherPath}" \
+              --run 'export XDG_DATA_DIRS="''${XDG_DATA_DIRS:-${xdgDefaultDataDirs}}"' \
+              --prefix XDG_DATA_DIRS : "${gsettingsSchemaDataDirs}" \
               --prefix PATH : "/run/current-system/sw/bin" \
               --prefix PATH : "/etc/profiles/per-user/$(whoami)/bin"
 
@@ -696,16 +736,8 @@ PY
           linuxFeatureIds = [ "remote-mobile-control" ];
         };
 
-        codexDesktopNixFeatureCheck = codexDesktop.override {
-          linuxFeatureIds = [
-            "appshots"
-            "frameless-titlebar"
-            "global-dictation"
-            "mcp-helper-reaper"
-            "node-repl-reaper"
-            "open-target-discovery"
-            "persistent-status-panel"
-          ];
+        codexDesktopWatchdogFeatureCheck = codexDesktop.override {
+          linuxFeaturesConfigOverride = watchdogLinuxFeaturesConfig;
         };
 
         installer = pkgs.writeShellApplication {
@@ -766,10 +798,48 @@ PY
             grep -F 'CODEX_NOTIFICATION_ACTIONS_SOURCE=' ${installer}/bin/codex-desktop-installer >/dev/null
             touch "$out"
           '';
+          nix-gsettings-schema-wrapper = pkgs.runCommand "codex-desktop-nix-gsettings-schema-wrapper-check" { } ''
+            schema_data_dirs=${pkgs.lib.escapeShellArg gsettingsSchemaDataDirs}
+            default_data_dirs=${pkgs.lib.escapeShellArg xdgDefaultDataDirs}
+            explicit_data_dirs=/custom/share:/other/share
+
+            run_wrapper() {
+              case "$1" in
+                unset) unset XDG_DATA_DIRS ;;
+                empty) export XDG_DATA_DIRS= ;;
+                populated) export XDG_DATA_DIRS="$explicit_data_dirs" ;;
+                *) echo "unknown test case: $1" >&2; return 1 ;;
+              esac
+
+              exec() {
+                printf '%s\n' "$XDG_DATA_DIRS"
+              }
+
+              source ${codexDesktop}/bin/codex-desktop
+            }
+
+            assert_data_dirs() {
+              test_case="$1"
+              expected="$2"
+              actual="$(run_wrapper "$test_case")"
+              if [ "$actual" != "$expected" ]; then
+                printf '%s: expected <%s>, got <%s>\n' \
+                  "$test_case" "$expected" "$actual" >&2
+                return 1
+              fi
+            }
+
+            expected_defaults="$schema_data_dirs:$default_data_dirs"
+            assert_data_dirs unset "$expected_defaults"
+            assert_data_dirs empty "$expected_defaults"
+            assert_data_dirs populated "$schema_data_dirs:$explicit_data_dirs"
+            touch "$out"
+          '';
           nix-linux-features-evaluation = import ./nix/linux-features-test.nix {
             inherit pkgs self system;
           };
-          nix-linux-features-multi-feature = codexDesktopNixFeatureCheck;
+          watchdog-linux-features = codexDesktopWatchdogFeatureCheck;
+          nix-linux-features-multi-feature = codexDesktopWatchdogFeatureCheck;
         };
 
         apps.default = {

@@ -30,9 +30,15 @@ jobs:
       NIX_CONFIG: experimental-features = nix-command flakes
       CACHIX_CACHE_NAME: codex-desktop-linux
       CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+      NIX_VERIFY_OUTPUTS: |
+        .#codex-desktop
+        .#codex-desktop-computer-use-ui
+        .#codex-desktop-remote-mobile-control
+        .#codex-desktop-computer-use-ui-remote-mobile-control
+        .#checks.x86_64-linux.watchdog-linux-features
+        .#installer
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           fetch-depth: 0
           ref: ${{ inputs.expected_main_sha }}
@@ -69,17 +75,17 @@ jobs:
             echo "skip_refresh=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         if: steps.dedupe.outputs.skip_refresh != 'true'
         with:
           node-version: 24
 
-      - uses: cachix/install-nix-action@v31
+      - uses: cachix/install-nix-action@630ae543ea3a38a9a4166f03376c02c50f408342 # v31
         if: steps.dedupe.outputs.skip_refresh != 'true'
 
       - name: Configure Cachix for hash refresh builds
         if: steps.dedupe.outputs.skip_refresh != 'true' && env.CACHIX_AUTH_TOKEN != ''
-        uses: cachix/cachix-action@v17
+        uses: cachix/cachix-action@5f2d7c5294214f71b873db4b969586b980625e71 # v17
         with:
           name: ${{ env.CACHIX_CACHE_NAME }}
           authToken: ${{ env.CACHIX_AUTH_TOKEN }}
@@ -132,11 +138,12 @@ jobs:
             git config user.email "actions@github.com"
             git checkout -B "$REFRESH_BRANCH"
             git add "${pin_paths[@]}"
+            # GITHUB_TOKEN already suppresses branch push workflows. Do not add
+            # a skip marker: squash merges copy it to main and suppress Cachix.
             git commit \
               -m "fix(nix): refresh upstream Nix pins${CODEX_VERSION:+ for $CODEX_VERSION}" \
               -m "Refreshed Codex.dmg SRI hash to $CODEX_DMG_HASH and synced codexVersion / electronVersion / native-module pins to the current upstream DMG." \
               -m "Verified all ChatGPT Desktop Nix package outputs against the refreshed DMG." \
-              -m "[skip ci]" \
               -m "Source-Main-SHA: $EXPECTED_MAIN_SHA" \
               -m "Upstream-DMG-SHA256: $DMG_SHA256"
             git push --force-with-lease origin "$REFRESH_BRANCH"

@@ -14,10 +14,14 @@ on:
       - scripts/ci/upstream-dmg-*.js
       - scripts/validate-upstream-dmg.js
       - scripts/lib/candidate-install.sh
+      - scripts/lib/bundled-plugins.sh
+      - scripts/lib/browser-client-node-repl-runtime.test.js
+      - scripts/lib/patch-browser-client-iab-socket-scope.js
       - scripts/lib/patch-validation.js
       - scripts/lib/upstream-dmg-acceptance.js
       - scripts/lib/upstream-dmg-release-profile.js
       - scripts/lib/linux-features.js
+      - computer-use-linux/src/bin/codex-chrome-extension-host.rs
       - linux-features/**
       - .github/workflows/upstream-build-app.yml
   push:
@@ -33,10 +37,14 @@ on:
       - scripts/ci/upstream-dmg-*.js
       - scripts/validate-upstream-dmg.js
       - scripts/lib/candidate-install.sh
+      - scripts/lib/bundled-plugins.sh
+      - scripts/lib/browser-client-node-repl-runtime.test.js
+      - scripts/lib/patch-browser-client-iab-socket-scope.js
       - scripts/lib/patch-validation.js
       - scripts/lib/upstream-dmg-acceptance.js
       - scripts/lib/upstream-dmg-release-profile.js
       - scripts/lib/linux-features.js
+      - computer-use-linux/src/bin/codex-chrome-extension-host.rs
       - linux-features/**
       - .github/workflows/upstream-build-app.yml
   workflow_dispatch:
@@ -49,7 +57,6 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   UPSTREAM_DMG_URL: https://persistent.oaistatic.com/codex-app-prod/ChatGPT.dmg
   UPSTREAM_DMG_PATH: /tmp/codex-upstream-ci/Codex.dmg
   DMG_CACHE_SCHEMA_VERSION: v1
@@ -61,10 +68,10 @@ jobs:
     timeout-minutes: 60
 
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Set up Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
 
@@ -111,7 +118,7 @@ jobs:
 
       - name: Restore cached upstream DMG
         id: dmg-cache
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: /tmp/codex-upstream-ci/Codex.dmg
           key: upstream-dmg-${{ env.DMG_CACHE_SCHEMA_VERSION }}-${{ steps.upstream-metadata.outputs.cache_segment }}
@@ -165,11 +172,18 @@ jobs:
           REBUILD_REPORT_DIR: ${{ github.workspace }}/upstream-acceptance
         run: make build-app DMG=/tmp/codex-upstream-ci/Codex.dmg
 
+      - name: Import staged Browser clients through node_repl
+        if: steps.acceptance-build.outcome == 'success'
+        env:
+          CODEX_NODE_REPL_PATH: ${{ github.workspace }}/codex-app/resources/node_repl
+          CODEX_STAGED_BUNDLED_PLUGINS_ROOT: ${{ github.workspace }}/codex-app/resources/plugins/openai-bundled/plugins
+        run: node --test scripts/lib/browser-client-node-repl-runtime.test.js
+
       - name: Upload upstream DMG metadata artifact
         # The transactional installer records a decision before returning a
         # rejected status, so diagnostics remain available on failed runs.
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: upstream-dmg-metadata
           path: |
@@ -211,7 +225,7 @@ jobs:
 
     steps:
       - name: Check out trusted reconciliation code
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
@@ -219,7 +233,7 @@ jobs:
       - name: Download acceptance artifact
         id: download
         continue-on-error: true
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: upstream-dmg-metadata
           path: acceptance-artifact
@@ -250,7 +264,7 @@ jobs:
 
       - name: Create, update, or close the drift issue
         if: steps.current-identity.outcome == 'success'
-        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        uses: actions/github-script@d746ffe35508b1917358783b479e04febd2b8f71 # v9.0.0
         with:
           script: |
             const fs = require('fs');

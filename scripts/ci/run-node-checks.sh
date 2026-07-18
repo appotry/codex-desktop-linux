@@ -3,6 +3,8 @@ set -euo pipefail
 
 REPO_DIR="$(git rev-parse --show-toplevel)"
 MODE="${1:-all}"
+NODE_TEST_TIMEOUT_SECONDS="${NODE_TEST_TIMEOUT_SECONDS:-300}"
+NODE_TEST_KILL_AFTER_SECONDS="${NODE_TEST_KILL_AFTER_SECONDS:-30}"
 
 cd "$REPO_DIR"
 
@@ -23,10 +25,16 @@ run_node_syntax_checks() {
 
 run_node_tests() {
     local file
+    local status
     local -a node_test_args=(--test)
     local -a test_files=()
 
     node scripts/ci/manage-labels.js --check
+
+    if node --help | grep -q -- "--test-force-exit"; then
+        # All assertions must finish, but a leaked worker handle must not hold CI open.
+        node_test_args+=(--test-force-exit)
+    fi
 
     while IFS= read -r file; do
         test_files+=("$file")
@@ -39,10 +47,46 @@ run_node_tests() {
     if [ -n "${NODE_TEST_REPORTER:-}" ]; then
         node_test_args+=(--test-reporter="$NODE_TEST_REPORTER")
     elif [ "${GITHUB_ACTIONS:-}" = "true" ] && node --help | grep -q -- "--test-reporter"; then
-        node_test_args+=(--test-reporter=dot)
+        # Keep the last completed test visible when a worker leaks a handle.
+        node_test_args+=(--test-reporter=spec)
     fi
 
-    node "${node_test_args[@]}" "${test_files[@]}"
+    case "$NODE_TEST_TIMEOUT_SECONDS" in
+        *[!0-9]*|0)
+            echo "NODE_TEST_TIMEOUT_SECONDS must be a positive integer" >&2
+            return 2
+            ;;
+    esac
+    case "$NODE_TEST_KILL_AFTER_SECONDS" in
+        *[!0-9]*|0)
+            echo "NODE_TEST_KILL_AFTER_SECONDS must be a positive integer" >&2
+            return 2
+            ;;
+    esac
+
+    if ! command -v timeout >/dev/null 2>&1; then
+        if [ "${GITHUB_ACTIONS:-}" = "true" ]; then
+            echo "GNU timeout is required to bound Node tests in GitHub Actions" >&2
+            return 2
+        fi
+        node "${node_test_args[@]}" "${test_files[@]}"
+        return
+    fi
+
+    if timeout \
+        --signal=TERM \
+        --kill-after="${NODE_TEST_KILL_AFTER_SECONDS}s" \
+        "${NODE_TEST_TIMEOUT_SECONDS}s" \
+        node "${node_test_args[@]}" "${test_files[@]}"; then
+        return 0
+    else
+        status=$?
+    fi
+
+    if [ "$status" -eq 124 ] || [ "$status" -eq 137 ]; then
+        echo "Node test suite exited with status $status under the ${NODE_TEST_TIMEOUT_SECONDS}s watchdog; inspect the preceding output for a timeout or signal" >&2
+    fi
+    return "$status"
 }
 
 case "$MODE" in
