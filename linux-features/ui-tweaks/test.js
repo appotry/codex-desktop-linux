@@ -7,6 +7,8 @@ const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
 
+require("./dock-icon.test.js");
+
 const {
   discoverLinuxFeatureManifests,
   loadLinuxFeaturePatchDescriptors,
@@ -173,6 +175,9 @@ test("ui-tweaks is discoverable and disabled until listed in features.json", () 
           "optional",
         ],
         ["feature:ui-tweaks:reasoning-effort-labels-english", "webview-asset", "optional"],
+        ["feature:ui-tweaks:appearance-dock-icon-main-process", "main-bundle", "optional"],
+        ["feature:ui-tweaks:appearance-dock-icon-settings-row", "webview-asset", "optional"],
+        ["feature:ui-tweaks:appearance-dock-icon-settings-search", "webview-asset", "optional"],
       ],
     );
   } finally {
