@@ -144,15 +144,33 @@ function applyLinuxOpaqueWindowsDefaultPatch(currentSource) {
 function applyLinuxWindowControlsSafeAreaPatch(currentSource) {
   const currentInset = `applicationMenu:Object.freeze({left:0,right:${LINUX_WINDOW_CONTROLS_SAFE_AREA_RIGHT}})`;
   const defaultInset = "applicationMenu:Object.freeze({left:0,right:0})";
-  if (currentSource.includes(defaultInset)) {
-    return currentSource.split(defaultInset).join(currentInset);
+  const currentHeaderSlotPadding =
+    '"pe-2":n===`start`&&i,"pe-(--spacing-token-safe-header-right)":n===`end`';
+  const defaultHeaderSlotPadding = '"pe-2":n===`start`&&i||n===`end`';
+
+  let patchedSource = currentSource;
+  if (patchedSource.includes(defaultInset)) {
+    patchedSource = patchedSource.split(defaultInset).join(currentInset);
   }
 
-  if (currentSource.includes(currentInset)) {
-    return currentSource;
+  if (patchedSource.includes(defaultHeaderSlotPadding)) {
+    patchedSource = patchedSource.split(defaultHeaderSlotPadding).join(currentHeaderSlotPadding);
   }
 
-  if (currentSource.includes("applicationMenu:Object.freeze({left:0,right:")) {
+  if (
+    patchedSource !== currentSource ||
+    (
+      patchedSource.includes(currentInset) &&
+      patchedSource.includes(currentHeaderSlotPadding)
+    )
+  ) {
+    return patchedSource;
+  }
+
+  if (
+    currentSource.includes("applicationMenu:Object.freeze({left:0,right:") ||
+    currentSource.includes("spacing-token-safe-header-right")
+  ) {
     console.warn(
       "WARN: Could not find Linux window controls safe-area insertion point — skipping safe-area patch",
     );

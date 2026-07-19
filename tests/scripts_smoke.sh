@@ -4171,6 +4171,48 @@ SCRIPT
     [ ! -s "$launcher_stderr" ] || fail "Expected launcher leading-zero canonicalization to be quiet, got: $(cat "$launcher_stderr")"
 }
 
+test_launcher_uses_private_default_tmpdir() {
+    info "Checking launcher default TMPDIR isolation"
+    local workspace="$TMP_DIR/launcher-private-tmpdir"
+    local probe="$workspace/probe.sh"
+    local output="$workspace/output.log"
+    local runtime_dir="$workspace/runtime"
+    local state_dir="$workspace/state/codex-desktop"
+    local custom_tmp="$workspace/custom-tmp"
+
+    mkdir -p "$runtime_dir" "$state_dir" "$custom_tmp"
+    cat > "$probe" <<SCRIPT
+#!/bin/bash
+set -euo pipefail
+CODEX_LINUX_APP_ID=codex-desktop
+APP_STATE_DIR=$(printf '%q' "$state_dir")
+SCRIPT
+    awk '
+        /^configure_runtime_tmpdir\(\) \{/ { emit = 1 }
+        emit { print }
+        emit && /^}/ { exit }
+    ' "$REPO_DIR/launcher/start.sh.template" >> "$probe"
+    cat >> "$probe" <<'SCRIPT'
+configure_runtime_tmpdir
+printf '%s\n' "$TMPDIR"
+SCRIPT
+    chmod +x "$probe"
+
+    env -u TMPDIR XDG_RUNTIME_DIR="$runtime_dir" bash "$probe" > "$output"
+    [ "$(cat "$output")" = "$runtime_dir/codex-desktop/tmp" ] \
+        || fail "Expected runtime-scoped default TMPDIR, got: $(cat "$output")"
+    [ "$(stat -c '%a' "$runtime_dir/codex-desktop/tmp")" = "700" ] \
+        || fail "Expected runtime-scoped TMPDIR mode 700"
+
+    env -u TMPDIR -u XDG_RUNTIME_DIR bash "$probe" > "$output"
+    [ "$(cat "$output")" = "$state_dir/tmp" ] \
+        || fail "Expected state-scoped fallback TMPDIR, got: $(cat "$output")"
+
+    TMPDIR="$custom_tmp" XDG_RUNTIME_DIR="$runtime_dir" bash "$probe" > "$output"
+    [ "$(cat "$output")" = "$custom_tmp" ] \
+        || fail "Expected explicit TMPDIR to remain unchanged, got: $(cat "$output")"
+}
+
 test_managed_node_runtime_source_install() {
     info "Checking managed Node.js runtime source install"
     local workspace="$TMP_DIR/managed-node-runtime"
@@ -8222,7 +8264,7 @@ test_linux_file_manager_patch_smoke() {
     node "$REPO_DIR/scripts/patch-linux-window-ui.js" "$extracted" >"$output_log" 2>&1
     assert_contains "$extracted/.vite/build/main-test.js" 'detect:()=>`linux-file-manager`'
     assert_contains "$extracted/.vite/build/main-test.js" 'linux:{label:`File Manager`'
-    assert_contains "$extracted/.vite/build/main-test.js" 'process.platform===`linux`&&D.removeMenu(),process.platform===`win32`&&D.removeMenu(),'
+    assert_contains "$extracted/.vite/build/main-test.js" 'process.platform===`linux`&&(D.on(`system-context-menu`,e=>e.preventDefault()),D.removeMenu()),process.platform===`win32`&&D.removeMenu(),'
     assert_not_contains "$extracted/.vite/build/main-test.js" 'D.setMenuBarVisibility(!1)'
     assert_contains "$extracted/.vite/build/main-test.js" '&&D.setIcon('
     assert_contains "$extracted/webview/assets/app-server-manager-signals-test.js" '`subAgent`in e?e.subAgent:`subagent`in e?e.subagent:null'
@@ -10223,6 +10265,7 @@ main() {
     test_installer_detects_electron_version_from_plist
     test_installer_keeps_electron_fallback_for_bad_metadata
     test_port_validation_rejects_oversized_numeric_values
+    test_launcher_uses_private_default_tmpdir
     test_managed_node_runtime_source_install
     test_managed_node_runtime_rejects_version_only_stub
     test_better_sqlite3_electron_42_source_patch
