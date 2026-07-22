@@ -16,6 +16,7 @@ const LINUX_SAFE_MONOSPACE_FONT_STACK =
   "\"Noto Sans Mono\", \"DejaVu Sans Mono\", \"Liberation Mono\", \"Ubuntu Mono\", ui-monospace, \"SFMono-Regular\", \"SF Mono\", Menlo, Consolas, monospace";
 const LINUX_TOOLTIP_COLLISION_PADDING_TOP = 44;
 const LINUX_WINDOW_CONTROLS_SAFE_AREA_RIGHT = 138;
+const LINUX_WINDOW_CONTROLS_SAFE_AREA_PROP = "codexLinuxUseWindowControlsSafeArea";
 
 function applyLinuxSafeMonospaceFontStackPatch(currentSource) {
   const safeLinuxMonoFontPattern =
@@ -141,35 +142,118 @@ function applyLinuxOpaqueWindowsDefaultPatch(currentSource) {
   return currentSource;
 }
 
+function applyLinuxHeaderSlotSafeAreaPatch(currentSource) {
+  const prop = LINUX_WINDOW_CONTROLS_SAFE_AREA_PROP;
+  const alreadyPatched =
+    currentSource.includes(`${prop}:!`) &&
+    currentSource.includes(`,${prop}}){`) &&
+    currentSource.includes(`&&!${prop},"pe-(--spacing-token-safe-header-right)":`) &&
+    currentSource.includes(`&&${prop}`);
+  if (alreadyPatched) {
+    return currentSource;
+  }
+  if (currentSource.includes(prop)) {
+    return null;
+  }
+
+  const headerMatch = currentSource.match(
+    /function [A-Za-z_$][\w$]*\(\{isHeaderEdgeScroll:[A-Za-z_$][\w$]*,isApplicationMenuBarEnabled:([A-Za-z_$][\w$]*)\}\)\{/u,
+  );
+  if (headerMatch == null) {
+    return null;
+  }
+  const headerOpenBrace = headerMatch.index + headerMatch[0].length - 1;
+  const headerCloseBrace = findMatchingBrace(currentSource, headerOpenBrace);
+  if (headerCloseBrace === -1) {
+    return null;
+  }
+  const headerSource = currentSource.slice(headerMatch.index, headerCloseBrace + 1);
+  const endSlotPattern = /(slotWidth:[A-Za-z_$][\w$]*),side:`end`/gu;
+  const endSlotMatches = [...headerSource.matchAll(endSlotPattern)];
+  if (endSlotMatches.length !== 1) {
+    return null;
+  }
+
+  const slotMatches = [...currentSource.matchAll(
+    /function [A-Za-z_$][\w$]*\(\{entries:[A-Za-z_$][\w$]*,fitWidth:[A-Za-z_$][\w$]*,side:([A-Za-z_$][\w$]*),slotWidth:[A-Za-z_$][\w$]*\}\)\{/gu,
+  )];
+  if (slotMatches.length !== 1) {
+    return null;
+  }
+  const slotMatch = slotMatches[0];
+  const slotOpenBrace = slotMatch.index + slotMatch[0].length - 1;
+  const slotCloseBrace = findMatchingBrace(currentSource, slotOpenBrace);
+  if (slotCloseBrace === -1) {
+    return null;
+  }
+  const slotSource = currentSource.slice(slotMatch.index, slotCloseBrace + 1);
+  const sideAlias = slotMatch[1];
+  const paddingPattern = new RegExp(
+    `"pe-2":${escapeRegExp(sideAlias)}===\`start\`&&([A-Za-z_$][\\w$]*)\\|\\|${escapeRegExp(sideAlias)}===\`end\``,
+    "u",
+  );
+  const paddingMatch = slotSource.match(paddingPattern);
+  if (paddingMatch == null) {
+    return null;
+  }
+
+  const menuEnabledAlias = headerMatch[1];
+  const hasEndEntriesAlias = paddingMatch[1];
+  const patchedHeaderSource = headerSource.replace(
+    endSlotPattern,
+    `$1,${prop}:!${menuEnabledAlias},side:\`end\``,
+  );
+  const patchedSlotSource = slotSource
+    .replace(
+      slotMatch[0],
+      slotMatch[0].replace("}){", `,${prop}}){`),
+    )
+    .replace(
+      paddingPattern,
+      `"pe-2":${sideAlias}===\`start\`&&${hasEndEntriesAlias}||${sideAlias}===\`end\`&&!${prop},"pe-(--spacing-token-safe-header-right)":${sideAlias}===\`end\`&&${prop}`,
+    );
+
+  return currentSource
+    .replace(headerSource, patchedHeaderSource)
+    .replace(slotSource, patchedSlotSource);
+}
+
 function applyLinuxWindowControlsSafeAreaPatch(currentSource) {
   const currentInset = `applicationMenu:Object.freeze({left:0,right:${LINUX_WINDOW_CONTROLS_SAFE_AREA_RIGHT}})`;
   const defaultInset = "applicationMenu:Object.freeze({left:0,right:0})";
-  const currentHeaderSlotPadding =
-    '"pe-2":n===`start`&&i,"pe-(--spacing-token-safe-header-right)":n===`end`';
-  const defaultHeaderSlotPadding = '"pe-2":n===`start`&&i||n===`end`';
 
   let patchedSource = currentSource;
   if (patchedSource.includes(defaultInset)) {
     patchedSource = patchedSource.split(defaultInset).join(currentInset);
   }
 
-  if (patchedSource.includes(defaultHeaderSlotPadding)) {
-    patchedSource = patchedSource.split(defaultHeaderSlotPadding).join(currentHeaderSlotPadding);
+  let warnedHeaderSlotDrift = false;
+  const headerSlotSource = applyLinuxHeaderSlotSafeAreaPatch(patchedSource);
+  if (headerSlotSource != null) {
+    patchedSource = headerSlotSource;
+  } else if (currentSource.includes("isApplicationMenuBarEnabled")) {
+    console.warn(
+      "WARN: Could not connect the Linux window controls safe area to the current app header layout",
+    );
+    warnedHeaderSlotDrift = true;
   }
 
   if (
     patchedSource !== currentSource ||
     (
       patchedSource.includes(currentInset) &&
-      patchedSource.includes(currentHeaderSlotPadding)
+      patchedSource.includes(LINUX_WINDOW_CONTROLS_SAFE_AREA_PROP)
     )
   ) {
     return patchedSource;
   }
 
   if (
-    currentSource.includes("applicationMenu:Object.freeze({left:0,right:") ||
-    currentSource.includes("spacing-token-safe-header-right")
+    !warnedHeaderSlotDrift &&
+    (
+      currentSource.includes("applicationMenu:Object.freeze({left:0,right:") ||
+      currentSource.includes("spacing-token-safe-header-right")
+    )
   ) {
     console.warn(
       "WARN: Could not find Linux window controls safe-area insertion point — skipping safe-area patch",
@@ -756,14 +840,9 @@ function applyLinuxBrowserUseWebviewRemountStorePatch(currentSource) {
     !classSource.includes("disposeWebviewHost(") ||
     !classSource.includes("emitChange()")
   ) {
-    if (
-      currentSource.includes("registrationAttempts=new WeakMap") ||
-      currentSource.includes("registerWebviewHost(")
-    ) {
-      console.warn(
-        "WARN: Could not find Browser webview store remount insertion point — skipping Linux attachment recovery store patch",
-      );
-    }
+    console.warn(
+      "WARN: Could not find Browser webview store remount insertion point — skipping Linux attachment recovery store patch",
+    );
     return currentSource;
   }
 
@@ -844,20 +923,15 @@ function applyLinuxBrowserUseWebviewHostRecoveryPatch(currentSource) {
   }
 
   const componentPattern =
-    /function ([A-Za-z_$][\w$]*)\(\{adoptionLease:([A-Za-z_$][\w$]*),adoptedWebContentsId:([A-Za-z_$][\w$]*),bounds:([A-Za-z_$][\w$]*),browserTabId:([A-Za-z_$][\w$]*),children:([A-Za-z_$][\w$]*),conversationId:([A-Za-z_$][\w$]*),hostKind:([A-Za-z_$][\w$]*)=`right-panel`,initialUrl:([A-Za-z_$][\w$]*),isVisible:([A-Za-z_$][\w$]*),persistedTabsEnabled:([A-Za-z_$][\w$]*)=!1,scale:([A-Za-z_$][\w$]*),shouldBootstrapWhenHidden:([A-Za-z_$][\w$]*),shouldPaint:([A-Za-z_$][\w$]*),webviewRef:([A-Za-z_$][\w$]*),windowZoom:([A-Za-z_$][\w$]*)\}\)\{/u;
+    /function ([A-Za-z_$][\w$]*)\(\{adoptionLease:([A-Za-z_$][\w$]*),adoptedWebContentsId:([A-Za-z_$][\w$]*),bounds:([A-Za-z_$][\w$]*),browserTabId:([A-Za-z_$][\w$]*),children:([A-Za-z_$][\w$]*),conversationId:([A-Za-z_$][\w$]*),hostKind:([A-Za-z_$][\w$]*)=`right-panel`,initialUrl:([A-Za-z_$][\w$]*),isVisible:([A-Za-z_$][\w$]*),scale:([A-Za-z_$][\w$]*),shouldBootstrapWhenHidden:([A-Za-z_$][\w$]*),shouldPaint:([A-Za-z_$][\w$]*),webviewRef:([A-Za-z_$][\w$]*),windowZoom:([A-Za-z_$][\w$]*)\}\)\{/u;
   const match = componentPattern.exec(currentSource);
   const openBraceIndex = match == null ? -1 : match.index + match[0].length - 1;
   const closeBraceIndex =
     openBraceIndex === -1 ? -1 : findMatchingBrace(currentSource, openBraceIndex);
   if (match == null || openBraceIndex === -1 || closeBraceIndex === -1) {
-    if (
-      currentSource.includes("shouldBootstrapWhenHidden") &&
-      currentSource.includes("claimMountGeneration")
-    ) {
-      console.warn(
-        "WARN: Could not find Browser webview host component — skipping Linux attachment recovery host patch",
-      );
-    }
+    console.warn(
+      "WARN: Could not find Browser webview host component — skipping Linux attachment recovery host patch",
+    );
     return currentSource;
   }
 
@@ -960,33 +1034,66 @@ function applyLinuxBrowserUseWebviewHostRecoveryPatch(currentSource) {
   );
 }
 
-function applyLinuxBrowserUseWebviewAttachRecoveryPatch(currentSource) {
-  const hasHostPatch = (source) =>
-    source.includes("function codexLinuxWatchBrowserWebviewAttachment(");
-  if (
-    hasCompleteLinuxBrowserUseWebviewRemountStorePatch(currentSource) &&
-    hasHostPatch(currentSource)
-  ) {
+function applyLinuxBrowserUseHiddenHostOwnershipPatch(currentSource) {
+  const keyMatch = /browserUseTabIdsKey:([A-Za-z_$][\w$]*)/u.exec(currentSource);
+  if (keyMatch == null) {
+    console.warn(
+      "WARN: Could not find hidden Browser Use host tab ownership key — skipping Linux inactive-route host patch",
+    );
     return currentSource;
   }
 
-  const patchedStore = applyLinuxBrowserUseWebviewRemountStorePatch(currentSource);
-  const patchedSource = applyLinuxBrowserUseWebviewHostRecoveryPatch(patchedStore);
+  const browserUseTabIdsKeyVar = keyMatch[1];
+  const componentStartIndex = currentSource.lastIndexOf("function ", keyMatch.index);
+  const componentOpenIndex = currentSource.indexOf("{", componentStartIndex);
+  const componentCloseIndex =
+    componentOpenIndex === -1
+      ? -1
+      : findMatchingBrace(currentSource, componentOpenIndex);
+  const componentSource =
+    componentStartIndex === -1 || componentCloseIndex === -1
+      ? ""
+      : currentSource.slice(componentStartIndex, componentCloseIndex + 1);
+  const parsedTabIdsMatch = new RegExp(
+    `${escapeRegExp(browserUseTabIdsKeyVar)}\\.split\\(\`\\\\0\`\\)\\.map\\(([A-Za-z_$][\\w$]*)\\)\\.filter`,
+    "u",
+  ).exec(componentSource);
+  const guardMatch =
+    /if\(!([A-Za-z_$][\w$]*)&&([A-Za-z_$][\w$]*)\.size>0(?:&&([A-Za-z_$][\w$]*)\.split\(`\\0`\)\.map\(([A-Za-z_$][\w$]*)\)\.every\(([A-Za-z_$][\w$]*)=>\2\.has\(\5\)\))?\)return null;/u.exec(
+      componentSource,
+    );
+
   if (
-    !hasCompleteLinuxBrowserUseWebviewRemountStorePatch(patchedSource) ||
-    !hasHostPatch(patchedSource)
+    guardMatch != null &&
+    guardMatch[3] === browserUseTabIdsKeyVar &&
+    guardMatch[4] === parsedTabIdsMatch?.[1]
   ) {
-    if (
-      currentSource.includes("registrationAttempts=new WeakMap") ||
-      currentSource.includes("shouldBootstrapWhenHidden")
-    ) {
-      console.warn(
-        "WARN: Browser webview store and host recovery seams did not patch atomically — skipping Linux attachment recovery patch",
-      );
-    }
     return currentSource;
   }
-  return patchedSource;
+  if (
+    componentStartIndex === -1 ||
+    componentCloseIndex === -1 ||
+    parsedTabIdsMatch == null ||
+    guardMatch == null
+  ) {
+    console.warn(
+      "WARN: Could not find hidden Browser Use host ownership guard — skipping Linux inactive-route host patch",
+    );
+    return currentSource;
+  }
+
+  const [guardNeedle, routeOwnerVar, visibleTabIdsVar] = guardMatch;
+  const parseBrowserTabIdVar = parsedTabIdsMatch[1];
+  const visibleTabIdVar = "codexLinuxBrowserUseTabId";
+  const guardPatch =
+    `if(!${routeOwnerVar}&&${visibleTabIdsVar}.size>0&&` +
+    `${browserUseTabIdsKeyVar}.split(\`\\0\`).map(${parseBrowserTabIdVar}).every(` +
+    `${visibleTabIdVar}=>${visibleTabIdsVar}.has(${visibleTabIdVar})))return null;`;
+  const patchedComponent = componentSource.replace(guardNeedle, guardPatch);
+  return (
+    `${currentSource.slice(0, componentStartIndex)}${patchedComponent}` +
+    `${currentSource.slice(componentCloseIndex + 1)}`
+  );
 }
 
 function applyLinuxBrowserUseExternalAvailabilityPatch(currentSource) {
@@ -2327,8 +2434,8 @@ module.exports = {
   applyAutomationUpdateEagerToolPatch,
   applyLinuxChatSearchHydrationPatch,
   applyLinuxBrowserUseAvailabilityPatch,
-  applyLinuxBrowserUseWebviewAttachRecoveryPatch,
   applyLinuxBrowserUseExternalAvailabilityPatch,
+  applyLinuxBrowserUseHiddenHostOwnershipPatch,
   applyLinuxBrowserUseNonLocalNavigationPatch,
   applyLinuxBrowserUseWebviewHostRecoveryPatch,
   applyLinuxBrowserUseWebviewRemountStorePatch,

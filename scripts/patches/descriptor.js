@@ -74,6 +74,9 @@ function webviewAssetPatch(descriptor) {
   if (pattern == null) {
     throw new Error(`Webview asset patch '${id ?? "unknown"}' must define assetPattern or pattern`);
   }
+  if (descriptor.assetMatch != null && typeof descriptor.assetMatch !== "function") {
+    throw new Error(`Webview asset patch '${id ?? "unknown"}' assetMatch must be a function`);
+  }
   return patchDescriptor(PHASE_WEBVIEW_ASSET, descriptor);
 }
 

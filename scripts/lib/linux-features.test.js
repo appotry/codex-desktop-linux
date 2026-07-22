@@ -8,6 +8,7 @@ const path = require("node:path");
 const test = require("node:test");
 
 const {
+  loadLinuxFeaturePatchDescriptors,
   stageEnabledLinuxFeatureInstall,
 } = require("./linux-features.js");
 
@@ -34,6 +35,41 @@ function writeStagedManifest(appDir, manifest) {
   fs.mkdirSync(path.dirname(manifestPath), { recursive: true });
   fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 }
+
+test("Linux feature asset matchers receive feature settings", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "codex-feature-asset-match-context-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  const { featureDir, featuresRoot } = makeFeatureRoot(root, {
+    id: "unsafe-link",
+    title: "Unsafe Link",
+    entrypoints: { patchDescriptors: "./patch.js" },
+  });
+  fs.writeFileSync(
+    path.join(featuresRoot, "features.json"),
+    JSON.stringify({
+      enabled: ["unsafe-link"],
+      settings: { "unsafe-link": { expectedContract: "current-contract" } },
+    }),
+  );
+  fs.writeFileSync(
+    path.join(featureDir, "patch.js"),
+    [
+      "module.exports = [{",
+      "  id: 'settings-aware-asset',",
+      "  phase: 'webview-asset',",
+      "  pattern: /^app-.*\\.js$/,",
+      "  assetMatch: (source, assetName, context) =>",
+      "    source === context.feature.settings.expectedContract && assetName === 'app-current.js',",
+      "  apply: (source) => source,",
+      "}];",
+      "",
+    ].join("\n"),
+  );
+
+  const [descriptor] = loadLinuxFeaturePatchDescriptors({ featuresRoot });
+  assert.equal(descriptor.assetMatch("current-contract", "app-current.js", {}), true);
+});
 
 test("Linux feature staging rejects duplicate resource targets", (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "codex-feature-duplicate-resource-"));

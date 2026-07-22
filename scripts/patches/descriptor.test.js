@@ -63,6 +63,15 @@ test("descriptor factories validate the fresh descriptor contract", () => {
     /must define assetPattern or pattern/,
   );
   assert.throws(
+    () => webviewAssetPatch({
+      id: "invalid-asset-match",
+      pattern: /^app-.*\.js$/,
+      assetMatch: "current contract",
+      apply: (source) => source,
+    }),
+    /assetMatch must be a function/,
+  );
+  assert.throws(
     () => extractedAppPatch({ id: "old-extracted", phase: "extracted-app", apply: () => ({ changed: false }) }),
     /must use phase 'extracted-app:pre-webview' or 'extracted-app:post-webview'/,
   );

@@ -21,6 +21,11 @@
         "enabled": false
       }
     },
+    "home": {
+      "suggestedPrompts": {
+        "enabled": false
+      }
+    },
     "modelPicker": {
       "showModelsByDefault": {
         "enabled": true

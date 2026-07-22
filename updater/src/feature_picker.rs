@@ -15,15 +15,18 @@
 //!    (the saved `linux-features.json`, else `--enabled`).
 //! 3. Shows a zenity/kdialog checklist pre-checked with the enabled set, plus a
 //!    sentinel "(Don't ask again …)" row.
-//! 4. Writes the chosen `{"enabled":[…]}` to [`config::feature_config_path`] so
-//!    the rebuild (which points `CODEX_LINUX_FEATURES_CONFIG` at that path) uses
-//!    the selection. If the sentinel row was checked, persists
+//! 4. Validates the chosen set against each manifest's `requires` and
+//!    `conflicts`, then writes `{"enabled":[…]}` to
+//!    [`config::feature_config_path`] so the rebuild (which points
+//!    `CODEX_LINUX_FEATURES_CONFIG` at that path) uses the selection. If the
+//!    sentinel row was checked, persists
 //!    `codex-linux-feature-picker-on-update=false` so future updates skip the
 //!    prompt.
 //!
-//! Every failure mode (no display, no dialog tool, no catalog, cancelled dialog,
-//! or dialog launch failure) is a graceful skip that leaves the current feature
-//! set unchanged — the picker must never block or fail the update it precedes.
+//! Every failure mode (no display, no dialog tool, no catalog, cancelled or
+//! invalid selection, or dialog launch failure) is a graceful skip that leaves
+//! the current feature set unchanged — the picker must never block or fail the
+//! update it precedes.
 
 use anyhow::{Context, Result};
 use std::{
@@ -44,10 +47,12 @@ use crate::{
 const DONT_ASK_SENTINEL: &str = "__dont_ask_again__";
 const DONT_ASK_LABEL: &str = "(Don't ask again on future updates)";
 
-/// A catalog feature row (id + human title) read from `--features-json`.
+/// A catalog feature row read from `--features-json`.
 struct CatalogEntry {
     id: String,
     title: String,
+    requires: Vec<String>,
+    conflicts: Vec<String>,
 }
 
 /// Outcome of `run_pick_features`, surfaced as JSON when `--json` is passed.
@@ -130,6 +135,12 @@ fn pick(config: &RuntimeConfig, paths: &RuntimePaths) -> Result<PickOutcome> {
             );
             picked.sort();
             picked.dedup();
+
+            if let Err(message) = validate_selection(&catalog, &picked) {
+                warn!(%message, "feature picker rejected invalid selection");
+                show_selection_error(&tool, &message);
+                return Ok(PickOutcome::Skipped("invalid-selection"));
+            }
 
             write_feature_config(&picked)?;
             if dont_ask {
@@ -248,9 +259,68 @@ fn read_catalog(config: &RuntimeConfig, source: &Path) -> Result<Vec<CatalogEntr
         entries.push(CatalogEntry {
             id: id.to_string(),
             title: sanitize_label(&title),
+            requires: read_catalog_id_list(item, "requires", id)?,
+            conflicts: read_catalog_id_list(item, "conflicts", id)?,
         });
     }
     Ok(entries)
+}
+
+/// Reads a normalized feature-id list from the catalog. The JavaScript catalog
+/// generator always emits both fields, but accepting an absent field keeps the
+/// updater compatible with older installed builder bundles. A present malformed
+/// field is rejected rather than silently dropping a constraint.
+fn read_catalog_id_list(
+    item: &serde_json::Value,
+    field: &str,
+    feature_id: &str,
+) -> Result<Vec<String>> {
+    let Some(value) = item.get(field) else {
+        return Ok(Vec::new());
+    };
+    let array = value
+        .as_array()
+        .with_context(|| format!("Feature '{feature_id}' catalog {field} must be an array"))?;
+    array
+        .iter()
+        .map(|value| {
+            value.as_str().map(str::to_string).with_context(|| {
+                format!("Feature '{feature_id}' catalog {field} entries must be strings")
+            })
+        })
+        .collect()
+}
+
+/// Mirrors `validateEnabledFeatureDependencies` from linux-features.js before
+/// the picker persists a selection. Unknown existing ids remain preserved; a
+/// known feature may still require or conflict with one of those ids.
+fn validate_selection(
+    catalog: &[CatalogEntry],
+    picked: &[String],
+) -> std::result::Result<(), String> {
+    let enabled: std::collections::HashSet<&str> = picked.iter().map(String::as_str).collect();
+    for entry in catalog {
+        if !enabled.contains(entry.id.as_str()) {
+            continue;
+        }
+        for required in &entry.requires {
+            if !enabled.contains(required.as_str()) {
+                return Err(format!(
+                    "Linux feature '{}' requires '{}' to be enabled.",
+                    entry.id, required
+                ));
+            }
+        }
+        for conflict in &entry.conflicts {
+            if enabled.contains(conflict.as_str()) {
+                return Err(format!(
+                    "Linux feature '{}' conflicts with '{}'. Select only one of these features.",
+                    entry.id, conflict
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Reads the currently-enabled feature ids. Prefers the saved picker config,
@@ -369,6 +439,35 @@ fn show_picker(
     Ok(Some(ids))
 }
 
+/// Best-effort explanation for a rejected selection. Dialog failures are
+/// intentionally ignored so invalid picker input still degrades to a skip and
+/// never blocks the update.
+fn show_selection_error(tool: &DialogTool, message: &str) {
+    let result = match tool {
+        DialogTool::Zenity => Command::new("zenity")
+            .args([
+                "--error",
+                "--title=Invalid Linux feature selection",
+                &format!("--text={message}"),
+            ])
+            .status(),
+        DialogTool::Kdialog => Command::new("kdialog")
+            .args([
+                "--error",
+                message,
+                "--title",
+                "Invalid Linux feature selection",
+            ])
+            .status(),
+    };
+    if let Err(error) = result {
+        warn!(
+            ?error,
+            "feature picker could not show invalid-selection dialog"
+        );
+    }
+}
+
 /// Writes the chosen enabled set to the stable feature-config path.
 fn write_feature_config(enabled: &[String]) -> Result<()> {
     let path = config::feature_config_path().context("could not resolve feature config path")?;
@@ -459,6 +558,59 @@ if (arg === "--features-json") {
         .unwrap();
     }
 
+    fn write_constrained_catalog_script(source: &Path) {
+        let script_dir = source.join("scripts/lib");
+        std::fs::create_dir_all(&script_dir).unwrap();
+        std::fs::write(
+            script_dir.join("linux-features.js"),
+            r#"
+const arg = process.argv[2];
+if (arg === "--features-json") {
+  process.stdout.write(JSON.stringify([
+    {
+      "id":"directory-only-working-tree-watch",
+      "title":"Directory-Only Working-Tree Watch",
+      "requires":[],
+      "conflicts":[]
+    },
+    {
+      "id":"shallow-repository-watches",
+      "title":"Shallow Linux Repository Watches",
+      "requires":[],
+      "conflicts":["directory-only-working-tree-watch"]
+    }
+  ]));
+} else if (arg === "--enabled") {
+  process.stdout.write("directory-only-working-tree-watch\n");
+}
+"#,
+        )
+        .unwrap();
+    }
+
+    fn constrained_catalog() -> Vec<CatalogEntry> {
+        vec![
+            CatalogEntry {
+                id: "directory-only-working-tree-watch".to_string(),
+                title: "Directory-Only Working-Tree Watch".to_string(),
+                requires: Vec::new(),
+                conflicts: Vec::new(),
+            },
+            CatalogEntry {
+                id: "shallow-repository-watches".to_string(),
+                title: "Shallow Linux Repository Watches".to_string(),
+                requires: Vec::new(),
+                conflicts: vec!["directory-only-working-tree-watch".to_string()],
+            },
+            CatalogEntry {
+                id: "sidebar-watch-consumer".to_string(),
+                title: "Sidebar Watch Consumer".to_string(),
+                requires: vec!["shallow-repository-watches".to_string()],
+                conflicts: Vec::new(),
+            },
+        ]
+    }
+
     fn git(repo: &Path, args: &[&str]) {
         let status = Command::new("git")
             .current_dir(repo)
@@ -495,7 +647,9 @@ if (arg === "--features-json") {
         let bin = dir.path().join(name);
         std::fs::write(
             &bin,
-            format!("#!/bin/sh\nprintf '%s' \"{stdout_lines}\"\nexit {exit_code}\n"),
+            format!(
+                "#!/bin/sh\n[ \"$1\" = \"--error\" ] && exit 0\nprintf '%s' \"{stdout_lines}\"\nexit {exit_code}\n"
+            ),
         )
         .unwrap();
         std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -606,6 +760,82 @@ if (arg === "--features-json") {
         );
 
         std::env::remove_var("CODEX_LINUX_SETTINGS_FILE");
+    }
+
+    #[test]
+    fn selection_validation_honors_manifest_requires_and_conflicts() {
+        let catalog = constrained_catalog();
+
+        let incompatible = vec![
+            "directory-only-working-tree-watch".to_string(),
+            "shallow-repository-watches".to_string(),
+        ];
+        assert_eq!(
+            validate_selection(&catalog, &incompatible),
+            Err("Linux feature 'shallow-repository-watches' conflicts with 'directory-only-working-tree-watch'. Select only one of these features.".to_string())
+        );
+
+        let missing_requirement = vec!["sidebar-watch-consumer".to_string()];
+        assert_eq!(
+            validate_selection(&catalog, &missing_requirement),
+            Err("Linux feature 'sidebar-watch-consumer' requires 'shallow-repository-watches' to be enabled.".to_string())
+        );
+
+        let valid = vec![
+            "shallow-repository-watches".to_string(),
+            "sidebar-watch-consumer".to_string(),
+        ];
+        assert_eq!(validate_selection(&catalog, &valid), Ok(()));
+    }
+
+    #[test]
+    fn incompatible_watch_selection_is_not_saved() {
+        let _g = env_lock();
+        let root = tempdir().unwrap();
+        let settings = tempdir().unwrap();
+        write_constrained_catalog_script(root.path());
+        let config = base_config(root.path());
+        let paths = runtime_paths(root.path());
+
+        let settings_file = settings.path().join("settings.json");
+        let feature_config = settings.path().join("linux-features.json");
+        let original_config = "{\n  \"enabled\": [\"directory-only-working-tree-watch\"]\n}\n";
+        std::fs::write(&feature_config, original_config).unwrap();
+        std::env::set_var("CODEX_LINUX_SETTINGS_FILE", &settings_file);
+        std::env::set_var("DISPLAY", ":99");
+        std::env::remove_var("WAYLAND_DISPLAY");
+
+        let selection = concat!(
+            "directory-only-working-tree-watch\n",
+            "shallow-repository-watches\n",
+            "__dont_ask_again__"
+        );
+        let (_d, fake_path) = fake_dialog("zenity", selection, 0);
+        let prev_path = std::env::var_os("PATH");
+        let mut joined = fake_path.clone();
+        if let Some(prev) = &prev_path {
+            joined.push(":");
+            joined.push(prev);
+        }
+        std::env::set_var("PATH", &joined);
+
+        run_pick_features(&config, &paths, false).unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(&feature_config).unwrap(),
+            original_config,
+            "an invalid selection must leave the previous feature config unchanged"
+        );
+        assert!(
+            !settings_file.exists(),
+            "an invalid selection must not persist the don't-ask setting"
+        );
+
+        if let Some(prev) = prev_path {
+            std::env::set_var("PATH", prev);
+        }
+        std::env::remove_var("CODEX_LINUX_SETTINGS_FILE");
+        std::env::remove_var("DISPLAY");
     }
 
     #[test]
@@ -835,6 +1065,8 @@ if (arg === "--features-json") {
         let catalog = vec![CatalogEntry {
             id: "alpha".to_string(),
             title: "Alpha".to_string(),
+            requires: Vec::new(),
+            conflicts: Vec::new(),
         }];
         let enabled = std::collections::HashSet::new();
         let result = show_picker(&DialogTool::Zenity, &catalog, &enabled).unwrap();

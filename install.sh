@@ -346,6 +346,7 @@ main() {
     stage_linux_notification_actions_bridge
     install_bundled_plugin_resources "$app_dir"
     run_linux_feature_stage_hooks "$app_dir"
+    harden_bundled_plugin_source_tree
     create_start_script
     if [ -n "${CODEX_PATCH_REPORT_RESOLVED:-}" ] && [ -f "$CODEX_PATCH_REPORT_RESOLVED" ]; then
         cp "$CODEX_PATCH_REPORT_RESOLVED" "$INSTALL_DIR/.codex-linux/patch-report.json"

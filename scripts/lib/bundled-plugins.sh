@@ -1732,6 +1732,15 @@ fs.writeFileSync(destinationPath, `${JSON.stringify(marketplace, null, 2)}\n`);
 NODE
 }
 
+harden_bundled_plugin_source_tree() {
+    local resources_dir="$INSTALL_DIR/resources"
+    local bundled_plugins_dir="$resources_dir/plugins/openai-bundled"
+
+    [ -d "$bundled_plugins_dir" ] || return 0
+    chmod go-w "$INSTALL_DIR" "$resources_dir" "$resources_dir/plugins"
+    chmod -R u+rwX,go-w "$bundled_plugins_dir"
+}
+
 install_bundled_plugin_resources() {
     local app_dir="$1"
     local upstream_resources="$app_dir/Contents/Resources"
@@ -1804,11 +1813,6 @@ install_bundled_plugin_resources() {
 
     install_linux_executable_resource "$upstream_resources/node" "$resources_dir/node" "node runtime" "info" || true
     install_browser_use_node_repl_resource "$upstream_resources" "$resources_dir/node_repl" || true
-
-    # These files become the trust root for user-cache refreshes at runtime.
-    # Normalize them while staging from the accepted DMG instead of blessing a
-    # potentially modified installed tree during launcher startup.
-    chmod -R u+rwX,go-w "$bundled_plugins_dir"
 
     info "Linux-safe bundled plugins installed"
 }

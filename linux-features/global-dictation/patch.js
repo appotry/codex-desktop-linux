@@ -1,6 +1,6 @@
 "use strict";
 
-const PATCH_MARKER = "codex-linux-global-dictation-v1";
+const PATCH_MARKER = "codex-linux-global-dictation-v2";
 const IDENT = "[A-Za-z_$][\\w$]*";
 
 function warn(message) {
@@ -69,6 +69,21 @@ async function codexLinuxGlobalDictationPaste() {
     if (registration.ready()) return registration.paste();
   }
   throw new Error("No ready Wayland global dictation helper is available.");
+}
+
+function codexLinuxGlobalDictationPasteX11() {
+  return new Promise((resolve, reject) => {
+    try {
+      require("node:child_process").execFile(
+        "xdotool",
+        ["key", "--clearmodifiers", "ctrl+v"],
+        { windowsHide: true },
+        (error) => (error ? reject(error) : resolve()),
+      );
+    } catch (error) {
+      reject(error);
+    }
+  });
 }
 
 function codexLinuxGlobalDictationPortalRegistration(accelerator, callbacks) {
@@ -208,13 +223,30 @@ function codexLinuxGlobalDictationPortalRegistration(accelerator, callbacks) {
   return registration;
 }
 
-function codexLinuxGlobalDictationReleaseWatcher(accelerator) {
+function codexLinuxGlobalDictationReleaseWatcher(accelerator, onReleased) {
   const helperPath = codexLinuxGlobalDictationNativePath("global-dictation-release-monitor");
   if (helperPath == null) return null;
-  return require("node:child_process").spawn(helperPath, ["--accelerator", accelerator], {
+  const child = require("node:child_process").spawn(helperPath, ["--accelerator", accelerator], {
     stdio: "ignore",
     windowsHide: true,
   });
+  let finished = false;
+  const finish = (error) => {
+    if (finished) return;
+    finished = true;
+    if (error != null) {
+      console.warn("[linux-global-dictation] Hotkey release watcher failed", error);
+    }
+    onReleased();
+  };
+  child.once("error", finish);
+  child.once("exit", () => finish());
+  return {
+    dispose: () => {
+      finished = true;
+      child.kill();
+    },
+  };
 }
 
 function helperSource() {
@@ -227,6 +259,7 @@ function helperSource() {
     codexLinuxGlobalDictationPaste,
     codexLinuxGlobalDictationPortalRegistration,
     codexLinuxGlobalDictationReleaseWatcher,
+    codexLinuxGlobalDictationPasteX11,
   ]
     .map(String)
     .join("");
@@ -280,7 +313,7 @@ function applyLinuxGlobalDictationMainProcessPatch(source) {
     patched = replaceUnique(
       patched,
       /case`aix`:case`android`:case`cygwin`:case`freebsd`:case`haiku`:case`linux`:case`netbsd`:case`openbsd`:case`sunos`:throw Error\(`Global dictation hotkey release watching is not supported\.`\)/u,
-      "case`linux`:{let n=codexLinuxGlobalDictationReleaseWatcher(e);if(n==null)throw Error(`Global dictation hotkey release watching is not supported.`);return _A(n,t)}case`aix`:case`android`:case`cygwin`:case`freebsd`:case`haiku`:case`netbsd`:case`openbsd`:case`sunos`:throw Error(`Global dictation hotkey release watching is not supported.`)",
+      "case`linux`:{let n=codexLinuxGlobalDictationReleaseWatcher(e,t);if(n==null)throw Error(`Global dictation hotkey release watching is not supported.`);return n}case`aix`:case`android`:case`cygwin`:case`freebsd`:case`haiku`:case`netbsd`:case`openbsd`:case`sunos`:throw Error(`Global dictation hotkey release watching is not supported.`)",
       "Linux release watcher platform branch",
     );
 
@@ -309,7 +342,7 @@ function applyLinuxGlobalDictationMainProcessPatch(source) {
     patched = replaceUnique(
       patched,
       /case`aix`:case`android`:case`cygwin`:case`freebsd`:case`haiku`:case`linux`:case`netbsd`:case`openbsd`:case`sunos`:throw Error\(`Global dictation paste is not supported on this OS\.`\)/u,
-      "case`linux`:if(codexLinuxGlobalDictationUsesWayland()){await codexLinuxGlobalDictationPaste();return}await k7(`xdotool`,[`key`,`--clearmodifiers`,`ctrl+v`]);return;case`aix`:case`android`:case`cygwin`:case`freebsd`:case`haiku`:case`netbsd`:case`openbsd`:case`sunos`:throw Error(`Global dictation paste is not supported on this OS.`)",
+      "case`linux`:if(codexLinuxGlobalDictationUsesWayland()){await codexLinuxGlobalDictationPaste();return}await codexLinuxGlobalDictationPasteX11();return;case`aix`:case`android`:case`cygwin`:case`freebsd`:case`haiku`:case`netbsd`:case`openbsd`:case`sunos`:throw Error(`Global dictation paste is not supported on this OS.`)",
       "Linux global dictation paste branch",
     );
 

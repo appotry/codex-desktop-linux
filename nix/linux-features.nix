@@ -13,6 +13,7 @@ let
     "pet-overlay"
     "remote-control-ui"
     "remote-mobile-control"
+    "shallow-repository-watches"
     "ui-tweaks"
   ];
 

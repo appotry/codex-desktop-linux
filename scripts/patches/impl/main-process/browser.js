@@ -9,8 +9,16 @@ const {
 } = require("../../lib/minified-js.js");
 
 function applyLinuxBundledPluginCopyPermissionsPatch(currentSource) {
-  const helperName = "codexLinuxMakeBundledPluginTreeWritable";
-  if (currentSource.includes(`async function ${helperName}(`)) {
+  const ancestorHelperName = "codexLinuxValidateBundledPluginAncestors";
+  const sourceHelperName = "codexLinuxValidateBundledPluginSource";
+  const stageHelperName = "codexLinuxPrepareBundledPluginStage";
+  const writableHelperName = "codexLinuxMakeBundledPluginTreeWritable";
+  if (
+    currentSource.includes(`async function ${ancestorHelperName}(`) &&
+    currentSource.includes(`async function ${sourceHelperName}(`) &&
+    currentSource.includes(`async function ${stageHelperName}(`) &&
+    currentSource.includes(`async function ${writableHelperName}(`)
+  ) {
     return currentSource;
   }
 
@@ -31,7 +39,7 @@ function applyLinuxBundledPluginCopyPermissionsPatch(currentSource) {
     copyBranchRegex,
     (_match, platformVar, fsPromisesVar, sourceVar, targetVar) => {
       patchedCopyBranch = true;
-      return `if(${platformVar}.default.platform!==\`win32\`){await ${fsPromisesVar}.default.cp(${sourceVar},${targetVar},{recursive:!0,verbatimSymlinks:!0});if(process.platform===\`linux\`)await ${helperName}(${targetVar},${fsPromisesVar}.default);return}`;
+      return `if(${platformVar}.default.platform!==\`win32\`){if(process.platform===\`linux\`){await ${fsPromisesVar}.default.cp(await ${sourceHelperName}(${sourceVar},${fsPromisesVar}.default),${targetVar},{recursive:!0,verbatimSymlinks:!0});await ${writableHelperName}(${targetVar},${fsPromisesVar}.default);return}await ${fsPromisesVar}.default.cp(${sourceVar},${targetVar},{recursive:!0,verbatimSymlinks:!0});return}`;
     },
   );
   if (!patchedCopyBranch) {
@@ -43,16 +51,63 @@ function applyLinuxBundledPluginCopyPermissionsPatch(currentSource) {
     return currentSource;
   }
 
-  const helper =
-    `async function ${helperName}(e,t){let n=await t.lstat(e);if(n.isSymbolicLink())return;await t.chmod(e,n.mode|128);if(n.isDirectory())for(let n of await t.readdir(e))await ${helperName}((0,${pathVar}.join)(e,n),t)}`;
+  const stagingMkdirRegex = new RegExp(
+    `await ([A-Za-z_$][\\w$]*)\\.default\\.mkdir\\(\\(0,${escapeRegExp(pathVar)}\\.join\\)\\(([A-Za-z_$][\\w$]*),\\.\\.\\.([A-Za-z_$][\\w$]*)\\.slice\\(0,-1\\)\\),\\{recursive:!0\\}\\)`,
+  );
+  let patchedStagingMkdir = false;
+  const stagingPatchedSource = patchedSource.replace(
+    stagingMkdirRegex,
+    (_match, fsPromisesVar, stageRootVar, manifestPartsVar) => {
+      patchedStagingMkdir = true;
+      return `await ${stageHelperName}(${stageRootVar},${fsPromisesVar}.default),await ${fsPromisesVar}.default.mkdir((0,${pathVar}.join)(${stageRootVar},...${manifestPartsVar}.slice(0,-1)),{recursive:!0,mode:448})`;
+    },
+  );
+  if (!patchedStagingMkdir) {
+    if (currentSource.includes("staging_marketplace")) {
+      console.warn(
+        "WARN: Could not find bundled marketplace staging creation — skipping Linux plugin permissions patch",
+      );
+    }
+    return currentSource;
+  }
+
+  const pluginParentMkdirRegex = new RegExp(
+    `await ([A-Za-z_$][\\w$]*)\\.default\\.mkdir\\(\\(0,${escapeRegExp(pathVar)}\\.dirname\\)\\(([A-Za-z_$][\\w$]*)\\),\\{recursive:!0\\}\\),await ([A-Za-z_$][\\w$]*)\\(([A-Za-z_$][\\w$]*),([A-Za-z_$][\\w$]*)\\)`,
+  );
+  let patchedPluginParentMkdir = false;
+  const fullyPatchedSource = stagingPatchedSource.replace(
+    pluginParentMkdirRegex,
+    (_match, fsPromisesVar, targetVar, copyFunctionVar, sourceVar, copyTargetVar) => {
+      if (copyTargetVar !== targetVar) {
+        return _match;
+      }
+      patchedPluginParentMkdir = true;
+      return `await ${fsPromisesVar}.default.mkdir((0,${pathVar}.dirname)(${targetVar}),{recursive:!0,mode:448}),await ${copyFunctionVar}(${sourceVar},${targetVar})`;
+    },
+  );
+  if (!patchedPluginParentMkdir) {
+    if (currentSource.includes("copy_plugins")) {
+      console.warn(
+        "WARN: Could not find bundled plugin target parent creation — skipping Linux plugin permissions patch",
+      );
+    }
+    return currentSource;
+  }
+
+  const helpers = [
+    `async function ${ancestorHelperName}(e,t){let n=await t.realpath(e),r=process.geteuid?.();if(!Number.isInteger(r))throw Error(\`Linux bundled plugin path is not trusted\`);for(let e=n;;){let n=await t.lstat(e),i=n.mode;if(n.isSymbolicLink()||!n.isDirectory()||n.uid!==r&&n.uid!==0||i&18&&!(n.uid===0&&i&512))throw Error(\`Linux bundled plugin path is not trusted\`);let a=(0,${pathVar}.dirname)(e);if(a===e)break;e=a}return n}`,
+    `async function ${sourceHelperName}(e,t){let n=await ${ancestorHelperName}(e,t),r=process.geteuid(),i=async e=>{let n=await t.lstat(e);if(n.isSymbolicLink()||!n.isDirectory()&&!n.isFile()||n.uid!==r&&n.uid!==0||n.mode&18)throw Error(\`Linux bundled plugin source is not trusted\`);if(n.isDirectory())for(let n of await t.readdir(e))await i((0,${pathVar}.join)(e,n))};return await i(n),n}`,
+    `async function ${stageHelperName}(e,t){let n=(0,${pathVar}.dirname)(e),r=n;for(;;)try{await t.lstat(r);break}catch(e){if(e?.code!==\`ENOENT\`)throw e;let t=(0,${pathVar}.dirname)(r);if(t===r)throw e;r=t}await ${ancestorHelperName}(r,t),await t.mkdir(n,{recursive:!0,mode:448}),await ${ancestorHelperName}(n,t),await t.mkdir(e,{mode:448});let i=process.geteuid(),a=await t.lstat(e);if(a.isSymbolicLink()||!a.isDirectory()||a.uid!==i)throw Error(\`Linux bundled plugin staging root is not private\`);await t.chmod(e,448),a=await t.lstat(e);if((a.mode&511)!==448)throw Error(\`Linux bundled plugin staging root is not private\`)}`,
+    `async function ${writableHelperName}(e,t){let n=await t.lstat(e);if(n.isSymbolicLink())throw Error(\`Linux bundled plugin copy contains a symbolic link\`);await t.chmod(e,(n.mode|128)&~18);if(n.isDirectory())for(let n of await t.readdir(e))await ${writableHelperName}((0,${pathVar}.join)(e,n),t)}`,
+  ].join("");
   const strictDirective = '"use strict";';
   const helperInsertionIndex = currentSource.startsWith(strictDirective)
     ? strictDirective.length
     : 0;
   return (
-    patchedSource.slice(0, helperInsertionIndex) +
-    helper +
-    patchedSource.slice(helperInsertionIndex)
+    fullyPatchedSource.slice(0, helperInsertionIndex) +
+    helpers +
+    fullyPatchedSource.slice(helperInsertionIndex)
   );
 }
 

@@ -447,6 +447,10 @@ function wrapFeaturePatchDescriptor(feature, descriptor, sourcePath, index, feat
   if (typeof descriptor.enabled === "function") {
     wrapped.enabled = (context) => descriptor.enabled(featureContext(context, feature));
   }
+  if (typeof descriptor.assetMatch === "function") {
+    wrapped.assetMatch = (source, assetName, context) =>
+      descriptor.assetMatch(source, assetName, featureContext(context, feature));
+  }
   if (typeof descriptor.targetSummary === "function") {
     wrapped.targetSummary = (context) => descriptor.targetSummary(featureContext(context, feature));
   }

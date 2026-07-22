@@ -259,6 +259,40 @@ configure_multi_launch_instance() {
 configure_multi_launch_instance "$@"
 WEBVIEW_ORIGIN="http://127.0.0.1:$CODEX_LINUX_WEBVIEW_PORT"
 
+resolve_webview_renderer_url() {
+    local webview_index="$WEBVIEW_DIR/index.html"
+    local index_sha256
+
+    if [ ! -f "$webview_index" ]; then
+        printf '%s/\n' "$WEBVIEW_ORIGIN"
+        return 0
+    fi
+    if ! index_sha256="$(sha256sum "$webview_index" 2>/dev/null | awk '{print $1}')" ||
+       [[ ! "$index_sha256" =~ ^[0-9a-f]{64}$ ]]; then
+        return 1
+    fi
+
+    printf '%s/?v=%s\n' "$WEBVIEW_ORIGIN" "$index_sha256"
+}
+
+select_webview_renderer_url() {
+    WEBVIEW_RENDERER_URL_OVERRIDE_ACTIVE=0
+    if early_truthy_env_value "${CODEX_LINUX_ALLOW_RENDERER_URL_OVERRIDE:-}" &&
+       [ -n "${ELECTRON_RENDERER_URL:-}" ]; then
+        WEBVIEW_RENDERER_URL_OVERRIDE_ACTIVE=1
+        WEBVIEW_RENDERER_URL="$ELECTRON_RENDERER_URL"
+        return 0
+    fi
+
+    if ! WEBVIEW_RENDERER_URL="$(resolve_webview_renderer_url)"; then
+        launcher_notice "$CODEX_LINUX_APP_DISPLAY_NAME could not fingerprint $WEBVIEW_DIR/index.html; install coreutils and rebuild the app."
+        return 1
+    fi
+}
+
+WEBVIEW_RENDERER_URL=""
+WEBVIEW_RENDERER_URL_OVERRIDE_ACTIVE=0
+
 mkdir -p "$LOG_DIR" "$APP_CONFIG_DIR" "$APP_STATE_DIR" "$LAUNCH_ACTION_RUNTIME_DIR"
 chmod 700 "$LAUNCH_ACTION_RUNTIME_DIR" 2>/dev/null || true
 export CODEX_DESKTOP_LAUNCH_ACTION_SOCKET="$LAUNCH_ACTION_SOCKET"
@@ -467,6 +501,37 @@ fix_bundled_marketplace_tmp_permissions() {
     [ -d "$marketplace_tmp_root" ] || return 0
     find "$marketplace_tmp_root" -type d -exec chmod u+rwx {} + 2>/dev/null || true
     find "$marketplace_tmp_root" -type f -exec chmod u+rw {} + 2>/dev/null || true
+}
+
+prepare_bundled_marketplace_tmp_paths() {
+    local codex_home="${CODEX_HOME:-$HOME/.codex}"
+    local marketplace_tmp_root="$codex_home/.tmp/bundled-marketplaces"
+    local scope="${1:-root}"
+    local path
+    local -a paths=(
+        "$codex_home"
+        "$codex_home/.tmp"
+        "$marketplace_tmp_root"
+    )
+
+    if [ "$scope" = "full" ]; then
+        paths+=(
+            "$marketplace_tmp_root/openai-bundled"
+            "$marketplace_tmp_root/openai-bundled/.agents"
+            "$marketplace_tmp_root/openai-bundled/.agents/plugins"
+            "$marketplace_tmp_root/openai-bundled/plugins"
+        )
+    fi
+
+    for path in "${paths[@]}"; do
+        if [ -e "$path" ] || [ -L "$path" ]; then
+            [ -d "$path" ] && [ ! -L "$path" ] || return 1
+        else
+            (umask 0077; mkdir -p "$path") || return 1
+        fi
+        make_path_owner_trusted "$path" || return 1
+        ! path_has_unsafe_write "$path" || return 1
+    done
 }
 
 clear_bundled_marketplace_tmp_cache() {
@@ -2238,7 +2303,9 @@ running_app_uses_renderer_url_override() {
     allow_override="$(pid_environ_value "$RUNNING_APP_PID" CODEX_LINUX_ALLOW_RENDERER_URL_OVERRIDE 2>/dev/null || true)"
     truthy_env_value "$allow_override" || return 1
     renderer_url="$(pid_environ_value "$RUNNING_APP_PID" ELECTRON_RENDERER_URL 2>/dev/null || true)"
-    [ -n "$renderer_url" ] && [ "$renderer_url" != "$WEBVIEW_ORIGIN/" ]
+    [ -n "$renderer_url" ] || return 1
+    renderer_url_override_is_active && return 0
+    [ "$renderer_url" != "$WEBVIEW_RENDERER_URL" ]
 }
 
 terminate_stale_electron_with_pidfd() {
@@ -2709,13 +2776,7 @@ adopt_discovered_webview_server() {
 }
 
 renderer_url_override_is_active() {
-    if truthy_env_value "${CODEX_LINUX_ALLOW_RENDERER_URL_OVERRIDE:-}" &&
-       [ -n "${ELECTRON_RENDERER_URL:-}" ] &&
-       [ "$ELECTRON_RENDERER_URL" != "$WEBVIEW_ORIGIN/" ]; then
-        return 0
-    fi
-
-    return 1
+    [ "${WEBVIEW_RENDERER_URL_OVERRIDE_ACTIVE:-0}" -eq 1 ]
 }
 
 require_webview_entrypoint() {
@@ -4136,6 +4197,12 @@ if [ "$LAUNCHER_DIAGNOSE_SCALING" -eq 1 ]; then
     print_scaling_diagnostics
     exit 0
 fi
+select_webview_renderer_url || exit 1
+if renderer_url_override_is_active; then
+    echo "External renderer URL override active"
+else
+    echo "Packaged webview renderer URL: $WEBVIEW_RENDERER_URL"
+fi
 register_url_scheme_handlers
 log_phase "initial_launch_state_refresh_start"
 refresh_launch_state
@@ -4178,13 +4245,13 @@ if [ -z "${CODEX_CLI_PATH:-}" ]; then
     log_phase "cli_lookup"
 fi
 export CHROME_DESKTOP="${CHROME_DESKTOP:-$CODEX_LINUX_APP_ID.desktop}"
-if ! truthy_env_value "${CODEX_LINUX_ALLOW_RENDERER_URL_OVERRIDE:-}"; then
-    if [ -n "${ELECTRON_RENDERER_URL:-}" ] && [ "$ELECTRON_RENDERER_URL" != "$WEBVIEW_ORIGIN/" ]; then
+if ! renderer_url_override_is_active; then
+    if [ -n "${ELECTRON_RENDERER_URL:-}" ] && [ "$ELECTRON_RENDERER_URL" != "$WEBVIEW_RENDERER_URL" ]; then
         echo "Ignoring inherited ELECTRON_RENDERER_URL; set CODEX_LINUX_ALLOW_RENDERER_URL_OVERRIDE=1 to allow overrides"
     fi
-    export ELECTRON_RENDERER_URL="$WEBVIEW_ORIGIN/"
+    export ELECTRON_RENDERER_URL="$WEBVIEW_RENDERER_URL"
 else
-    export ELECTRON_RENDERER_URL="${ELECTRON_RENDERER_URL:-$WEBVIEW_ORIGIN/}"
+    export ELECTRON_RENDERER_URL="$WEBVIEW_RENDERER_URL"
 fi
 
 if needs_cold_start && [ -z "$CODEX_CLI_PATH" ]; then
@@ -4244,7 +4311,15 @@ fi
 export_packaged_runtime_env
 if needs_cold_start; then
     log_phase "cold_start_cache_sync_start"
+    if ! prepare_bundled_marketplace_tmp_paths; then
+        notify_error "Bundled plugin staging paths are not trusted. Refusing to start Electron."
+        exit 1
+    fi
     clear_bundled_marketplace_tmp_cache
+    if ! prepare_bundled_marketplace_tmp_paths full; then
+        notify_error "Bundled plugin staging paths are not trusted. Refusing to start Electron."
+        exit 1
+    fi
     log_phase "bundled_marketplace_tmp_cleared"
     stage_bundled_marketplace_metadata
     log_phase "bundled_marketplace_metadata_staged"

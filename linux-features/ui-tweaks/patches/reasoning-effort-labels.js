@@ -13,7 +13,7 @@ const ENGLISH_REASONING_LABELS = Object.freeze({
 });
 
 function warn(message) {
-  console.warn(`WARN: ${message} - skipping missing ui-tweaks reasoning label markers`);
+  console.warn(`WARN: ${message} - skipping ui-tweaks reasoning label patch`);
 }
 
 function reasoningLabelConfig(context) {
@@ -43,24 +43,40 @@ function applyEnglishReasoningLabels(source, context = {}) {
       return source;
     }
 
-    let patched = source;
     const missingKeys = [];
+    const replacements = [];
+    let appliedKeyCount = 0;
     for (const [key, label] of Object.entries(ENGLISH_REASONING_LABELS)) {
       const replacement = `"${key}":\`${label}\``;
-      if (patched.includes(replacement)) {
+      if (source.includes(replacement)) {
+        appliedKeyCount += 1;
         continue;
       }
 
       const pattern = new RegExp(`"${escapeRegExp(key)}":\\\`[^\\\`]*\\\``);
-      if (!pattern.test(patched)) {
+      if (!pattern.test(source)) {
         missingKeys.push(key);
         continue;
       }
-      patched = patched.replace(pattern, replacement);
+      replacements.push([pattern, replacement]);
     }
 
     if (missingKeys.length > 0 && context.warnOnMissingMarkers === true) {
       warn(`Could not find ${missingKeys.join(", ")}`);
+    }
+    if (missingKeys.length > 0) {
+      return source;
+    }
+    if (appliedKeyCount > 0 && replacements.length > 0) {
+      if (context.warnOnMissingMarkers === true) {
+        warn("Found mixed applied and untranslated reasoning label markers");
+      }
+      return source;
+    }
+
+    let patched = source;
+    for (const [pattern, replacement] of replacements) {
+      patched = patched.replace(pattern, replacement);
     }
     return patched;
   } catch (error) {

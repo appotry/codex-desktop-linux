@@ -8,6 +8,7 @@ const path = require("node:path");
 const test = require("node:test");
 
 require("./dock-icon.test.js");
+require("./suggested-prompts.test.js");
 
 const {
   discoverLinuxFeatureManifests,
@@ -178,6 +179,10 @@ test("ui-tweaks is discoverable and disabled until listed in features.json", () 
         ["feature:ui-tweaks:appearance-dock-icon-main-process", "main-bundle", "optional"],
         ["feature:ui-tweaks:appearance-dock-icon-settings-row", "webview-asset", "optional"],
         ["feature:ui-tweaks:appearance-dock-icon-settings-search", "webview-asset", "optional"],
+        ["feature:ui-tweaks:home-suggested-prompts-main-process", "main-bundle", "optional"],
+        ["feature:ui-tweaks:home-suggested-prompts-app-page", "webview-asset", "optional"],
+        ["feature:ui-tweaks:home-suggested-prompts-settings-row", "webview-asset", "optional"],
+        ["feature:ui-tweaks:home-suggested-prompts-content", "webview-asset", "optional"],
       ],
     );
   } finally {
@@ -384,6 +389,34 @@ test("reasoning effort labels stay in English in the Simplified Chinese locale",
   assert.equal(applyEnglishReasoningLabels(patched), patched);
   assert.match("zh-CN-BPHwMaw8.js", ZH_CN_LOCALE_ASSET_PATTERN);
   assert.doesNotMatch("zh-TW-rBlCyjlT.js", ZH_CN_LOCALE_ASSET_PATTERN);
+});
+
+test("reasoning effort label drift warns and leaves the asset unchanged", () => {
+  const source = simplifiedChineseLocaleFixture().replace(
+    '"composer.mode.local.reasoning.ultra.label":`极高`',
+    '"composer.mode.local.reasoning.ultra.missing":`极高`',
+  );
+  const { value, warnings } = withCapturedWarns(() =>
+    applyEnglishReasoningLabels(source, { warnOnMissingMarkers: true }),
+  );
+
+  assert.equal(value, source);
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /composer\.mode\.local\.reasoning\.ultra\.label/);
+});
+
+test("mixed reasoning effort label markers warn and remain byte-identical", () => {
+  const source = simplifiedChineseLocaleFixture().replace(
+    '"composer.mode.local.reasoning.medium.label":`中`',
+    '"composer.mode.local.reasoning.medium.label":`Medium`',
+  );
+  const { value, warnings } = withCapturedWarns(() =>
+    applyEnglishReasoningLabels(source, { warnOnMissingMarkers: true }),
+  );
+
+  assert.equal(value, source);
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /mixed applied and untranslated reasoning label markers/i);
 });
 
 test("English reasoning effort labels can be disabled", () => {

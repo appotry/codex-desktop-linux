@@ -199,6 +199,11 @@ let
       linuxFeatureIds = [ "not-nix-compatible" ];
     }).drvPath
   );
+  shallowRepositoryWatchBuilder = builtins.tryEval (
+    (packages.codex-desktop.override {
+      linuxFeatureIds = [ "shallow-repository-watches" ];
+    }).drvPath
+  );
   invalidHomeManager = builtins.tryEval (
     builtins.deepSeq
       (evalHomeManager {
@@ -318,6 +323,9 @@ assert lib.assertMsg
   ((nixosPackage customConfig).drvPath == customPackage.drvPath)
   "the NixOS custom package override lost precedence";
 assert lib.assertMsg (!invalidBuilder.success) "the package builder accepted an unsupported feature";
+assert lib.assertMsg
+  shallowRepositoryWatchBuilder.success
+  "the package builder rejected the shallow repository-watch feature";
 assert lib.assertMsg (!invalidHomeManager.success) "Home Manager accepted an unsupported feature";
 assert lib.assertMsg (!invalidNixOS.success) "NixOS accepted an unsupported feature";
 assert lib.assertMsg

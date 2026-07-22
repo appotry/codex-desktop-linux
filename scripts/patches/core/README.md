@@ -45,6 +45,10 @@ phase:
 - `extracted-app:pre-webview`: patches extracted files before webview asset
   descriptors run.
 - `webview-asset`: scans `webview/assets/` with `pattern` or `assetPattern`.
+  Descriptors may also provide `assetMatch(source, assetName, context)` to select
+  exactly one semantic contract within a stable filename family. Zero or
+  multiple semantic matches warn and leave every candidate byte-identical; the
+  selected filename is recorded as `assetName` in the patch report.
 - `extracted-app:post-webview`: patches extracted files after webview asset
   descriptors run.
 

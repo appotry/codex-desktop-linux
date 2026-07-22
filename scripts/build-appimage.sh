@@ -182,6 +182,8 @@ prepare_appdir() {
         "$APPIMAGE_RUNTIME_TEMPLATE" \
         "$APPDIR/opt/$PACKAGE_NAME/.codex-linux/codex-packaged-runtime.sh"
     chmod 0644 "$APPDIR/opt/$PACKAGE_NAME/.codex-linux/codex-packaged-runtime.sh"
+    normalize_package_payload_permissions "$APPDIR"
+    restore_linux_feature_payload_permissions "$APPDIR"
 }
 
 main() {

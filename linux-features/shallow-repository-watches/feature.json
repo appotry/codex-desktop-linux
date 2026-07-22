@@ -1,0 +1,12 @@
+{
+  "id": "shallow-repository-watches",
+  "title": "Shallow Linux Repository Watches",
+  "description": "Prevents transient repository previews from recursively walking working trees and Git metadata on Electron's main thread.",
+  "defaultEnabled": false,
+  "conflicts": [
+    "directory-only-working-tree-watch"
+  ],
+  "entrypoints": {
+    "patchDescriptors": "./patch.js"
+  }
+}

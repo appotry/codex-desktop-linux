@@ -65,9 +65,9 @@ const CURRENT_APP_MAIN_PAGE_ASSET =
 const CURRENT_REMOTE_CONNECTIONS_VISIBILITY_ASSET =
   "app-initial~avatarOverlayCompositionSurface~notebook-preview-panel~app-main~appgen-settings~el5fc9d5-test.js";
 const CURRENT_REMOTE_LOAD_GATE_ASSET =
-  "app-initial~artifact-tab-content.electron~notebook-preview-panel~app-main~business-checkout~hm0a50up-test.js";
+  "app-initial~artifact-tab-content.electron~notebook-preview-panel~app-main~business-checkout~k87y25tw-test.js";
 const OLD_REMOTE_LOAD_GATE_ASSET =
-  "app-initial~artifact-tab-content.electron~notebook-preview-panel~app-main~business-checkout~d7o11fcp-test.js";
+  "app-initial~artifact-tab-content.electron~notebook-preview-panel~app-main~business-checkout~hm0a50up-test.js";
 const OLD_REMOTE_CONVERSATION_STATUS_ASSET =
   "app-initial~app-main~projects-index-page~remote-conversation-page-test.js";
 const CURRENT_REMOTE_CONVERSATION_STATUS_ASSET =
@@ -168,6 +168,29 @@ function createPatchedDeviceKeyClient(configHome, moduleOverrides = {}, processE
   };
   vm.runInNewContext(`${patched};module.exports=wV({resourcesPath:null});`, context);
   return context.module.exports;
+}
+
+function createSafeStorage({ backend = "gnome_libsecret", decryptError = null, encryptError = null } = {}) {
+  const calls = { decrypt: [], encrypt: [] };
+  return {
+    calls,
+    safeStorage: {
+      decryptString(ciphertext) {
+        calls.decrypt.push(Buffer.from(ciphertext));
+        if (decryptError != null) throw decryptError;
+        const encoded = Buffer.from(ciphertext).toString("utf8");
+        assert.match(encoded, /^encrypted:/u);
+        return encoded.slice("encrypted:".length);
+      },
+      encryptString(plaintext) {
+        calls.encrypt.push(plaintext);
+        if (encryptError != null) throw encryptError;
+        return Buffer.from(`encrypted:${plaintext}`, "utf8");
+      },
+      getSelectedStorageBackend: () => backend,
+      isEncryptionAvailable: () => true,
+    },
+  };
 }
 
 function findExecutableOnPath(name) {
@@ -1422,6 +1445,12 @@ test("Linux remote-control load gate enables remote-control environment loading"
   assert.match(patched, /navigator\.userAgent\.includes\(`Linux`\)/);
   assert.match(patched, /return codexLinuxRemoteControlLoadGateEnabled\(\)\|\|c\(`1042620455`\)/);
   assert.equal(applyLinuxRemoteControlLoadGatePatch(patched), patched);
+});
+
+test("Linux remote-control load gate rejects non-current quote shapes", () => {
+  const source = "function f(){return c(\"1042620455\")}";
+
+  assert.equal(applyLinuxRemoteControlLoadGatePatch(source), source);
 });
 
 test("Linux remote-control feature sync forces remote_control and preserves remote_plugin on Linux", () => {
@@ -2896,6 +2925,152 @@ test("patched Linux device-key provider can create, sign with, and delete a key"
   }
 });
 
+test("Linux device-key provider encrypts protected records and decrypts them for signing", async () => {
+  const configHome = fs.mkdtempSync(path.join(os.tmpdir(), "codex-remote-mobile-key-safe-storage-"));
+  try {
+    const storage = createSafeStorage();
+    const client = createPatchedDeviceKeyClient(configHome, { electron: { safeStorage: storage.safeStorage } });
+    const created = await client.createDeviceKey("allow_os_protected_nonextractable");
+    const { store } = remoteControlKeyStorePaths(configHome);
+    const persistedText = fs.readFileSync(store, "utf8");
+    const record = JSON.parse(persistedText).keys[created.keyId];
+
+    assert.equal(record.storageBackend, "gnome_libsecret");
+    assert.equal(record.detectedBackend, "gnome_libsecret");
+    assert.equal(typeof record.privateKeyCiphertextBase64, "string");
+    assert.equal(record.privateKeyPkcs8Pem, undefined);
+    assert.doesNotMatch(persistedText, /-----BEGIN PRIVATE KEY-----/u);
+
+    const signature = await client.signDeviceKey(created.keyId, { nonce: "protected" });
+    assert.equal(signature.algorithm, "ecdsa_p256_sha256");
+    assert.equal(storage.calls.encrypt.length, 1);
+    assert.equal(storage.calls.decrypt.length, 1);
+  } finally {
+    fs.rmSync(configHome, { recursive: true, force: true });
+  }
+});
+
+test("Linux device-key provider falls back for basic_text and unavailable safeStorage", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "codex-remote-mobile-key-safe-storage-fallback-"));
+  try {
+    const basicText = createSafeStorage({ backend: "basic_text" });
+    const basicTextClient = createPatchedDeviceKeyClient(path.join(root, "basic-text"), {
+      electron: { safeStorage: basicText.safeStorage },
+    });
+    const basicTextKey = await basicTextClient.createDeviceKey("allow_os_protected_nonextractable");
+    const basicTextRecord = JSON.parse(fs.readFileSync(remoteControlKeyStorePaths(path.join(root, "basic-text")).store, "utf8"))
+      .keys[basicTextKey.keyId];
+    assert.equal(basicTextRecord.storageBackend, "file_0600");
+    assert.equal(basicTextRecord.detectedBackend, "basic_text");
+    assert.equal(typeof basicTextRecord.privateKeyPkcs8Pem, "string");
+    assert.equal(basicText.calls.encrypt.length, 0);
+
+    const unavailableClient = createPatchedDeviceKeyClient(path.join(root, "unavailable"), { electron: {} });
+    const unavailableKey = await unavailableClient.createDeviceKey("allow_os_protected_nonextractable");
+    const unavailableRecord = JSON.parse(fs.readFileSync(remoteControlKeyStorePaths(path.join(root, "unavailable")).store, "utf8"))
+      .keys[unavailableKey.keyId];
+    assert.equal(unavailableRecord.storageBackend, "file_0600");
+    assert.equal(unavailableRecord.detectedBackend, "unavailable");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Linux device-key migration retains the legacy PEM when encryption fails", async () => {
+  const configHome = fs.mkdtempSync(path.join(os.tmpdir(), "codex-remote-mobile-key-safe-storage-migration-failure-"));
+  try {
+    const fallbackClient = createPatchedDeviceKeyClient(configHome);
+    const created = await fallbackClient.createDeviceKey("allow_os_protected_nonextractable");
+    const { store } = remoteControlKeyStorePaths(configHome);
+    const original = fs.readFileSync(store, "utf8");
+    const storage = createSafeStorage({ encryptError: new Error("keychain unavailable") });
+    const protectedClient = createPatchedDeviceKeyClient(configHome, { electron: { safeStorage: storage.safeStorage } });
+
+    assert.equal((await protectedClient.getDeviceKeyPublic(created.keyId)).keyId, created.keyId);
+    assert.equal(fs.readFileSync(store, "utf8"), original);
+    assert.equal(storage.calls.encrypt.length, 1);
+  } finally {
+    fs.rmSync(configHome, { recursive: true, force: true });
+  }
+});
+
+test("Linux device-key migration serializes with a concurrent key update through flock", async () => {
+  const configHome = fs.mkdtempSync(path.join(os.tmpdir(), "codex-remote-mobile-key-safe-storage-lock-"));
+  try {
+    const fallbackClient = createPatchedDeviceKeyClient(configHome);
+    const existing = await fallbackClient.createDeviceKey("allow_os_protected_nonextractable");
+    const storage = createSafeStorage();
+    const lockChildren = [];
+    const waitingChildren = [];
+    let spawnCalls = 0;
+    const childProcess = require("node:child_process");
+    const protectedClient = createPatchedDeviceKeyClient(configHome, {
+      "node:child_process": {
+        ...childProcess,
+        spawn() {
+          spawnCalls += 1;
+          const child = new EventEmitter();
+          child.stderr = new EventEmitter();
+          child.stdout = new EventEmitter();
+          child.stdin = {
+            end: () => {
+              child.emit("close", 0);
+              const next = waitingChildren.shift();
+              if (next != null) setImmediate(() => next.stdout.emit("data", Buffer.from("ready\n")));
+            },
+          };
+          child.kill = () => child.emit("close", 1);
+          if (lockChildren.length > 0) waitingChildren.push(child);
+          lockChildren.push(child);
+          return child;
+        },
+      },
+      electron: { safeStorage: storage.safeStorage },
+    });
+
+    const migration = protectedClient.getDeviceKeyPublic(existing.keyId);
+    const concurrentCreate = protectedClient.createDeviceKey("allow_os_protected_nonextractable");
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(spawnCalls, 2, "migration and concurrent updates must each acquire the file lock");
+    lockChildren[0].stdout.emit("data", Buffer.from("ready\n"));
+    const [migrated, replacement] = await Promise.all([migration, concurrentCreate]);
+    const persisted = JSON.parse(fs.readFileSync(remoteControlKeyStorePaths(configHome).store, "utf8"));
+    assert.equal(migrated.keyId, existing.keyId);
+    assert.ok(persisted.keys[existing.keyId]);
+    assert.ok(persisted.keys[replacement.keyId]);
+    assert.equal(persisted.keys[existing.keyId].privateKeyPkcs8Pem, undefined);
+    assert.equal(typeof persisted.keys[existing.keyId].privateKeyCiphertextBase64, "string");
+    assert.equal(storage.calls.encrypt.length, 2);
+  } finally {
+    fs.rmSync(configHome, { recursive: true, force: true });
+  }
+});
+
+test("Linux device-key replacement remains committed when directory fsync fails after rename", async () => {
+  const configHome = fs.mkdtempSync(path.join(os.tmpdir(), "codex-remote-mobile-key-post-rename-"));
+  try {
+    let failedDirectorySync = false;
+    const fsOverride = {
+      ...fs,
+      fsyncSync(fd) {
+        if (!failedDirectorySync && fs.fstatSync(fd).isDirectory()) {
+          failedDirectorySync = true;
+          throw new Error("simulated directory fsync failure");
+        }
+        return fs.fsyncSync(fd);
+      },
+    };
+    const client = createPatchedDeviceKeyClient(configHome, { "node:fs": fsOverride });
+    const created = await client.createDeviceKey("allow_os_protected_nonextractable");
+    const persisted = JSON.parse(fs.readFileSync(remoteControlKeyStorePaths(configHome).store, "utf8"));
+
+    assert.equal(failedDirectorySync, true);
+    assert.ok(persisted.keys[created.keyId]);
+  } finally {
+    fs.rmSync(configHome, { recursive: true, force: true });
+  }
+});
+
 test("Linux device-key store serializes concurrent updates", async () => {
   const configHome = fs.mkdtempSync(path.join(os.tmpdir(), "codex-remote-mobile-key-concurrency-"));
   try {
@@ -2906,7 +3081,7 @@ test("Linux device-key store serializes concurrent updates", async () => {
     const { directory, lock, store } = remoteControlKeyStorePaths(configHome);
     const persisted = JSON.parse(fs.readFileSync(store, "utf8"));
 
-    assert.equal(persisted.version, 1);
+    assert.equal(persisted.version, 2);
     assert.deepEqual(new Set(Object.keys(persisted.keys)), new Set(created.map((key) => key.keyId)));
     assert.equal(fs.statSync(directory).mode & 0o777, 0o700);
     assert.equal(fs.statSync(store).mode & 0o777, 0o600);
@@ -3083,7 +3258,7 @@ test("Linux device-key store migrates the legacy schema on the next write", asyn
 
     const second = await client.createDeviceKey("allow_os_protected_nonextractable");
     const migrated = JSON.parse(fs.readFileSync(store, "utf8"));
-    assert.equal(migrated.version, 1);
+    assert.equal(migrated.version, 2);
     assert.ok(migrated.keys[first.keyId]);
     assert.ok(migrated.keys[second.keyId]);
   } finally {
@@ -3274,7 +3449,7 @@ test("Linux device-key store enforces its schema and key-count boundary", async 
     await assert.rejects(() => client.getDeviceKeyPublic("key-0"), /record is invalid/);
 
     persisted.keys["key-0"] = { ...record, keyId: "key-0" };
-    persisted.version = 2;
+    persisted.version = 3;
     fs.writeFileSync(store, `${JSON.stringify(persisted)}\n`, { mode: 0o600 });
     await assert.rejects(() => client.getDeviceKeyPublic("key-0"), /schema is invalid/);
   } finally {

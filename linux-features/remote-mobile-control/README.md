@@ -57,10 +57,29 @@ What it changes:
 - Persists the private key material at
   `~/.config/codex-desktop/remote-control-device-keys/remote-control-device-keys-v1.json`
   with `0600` file permissions inside a dedicated `0700` directory. Updates are
-  serialized with a safely resolved `flock`/`sh` helper, written through a
-  crash-durable atomic replacement, and rejected when the store has unsafe
-  ownership, permissions, file types, schema, or size. An existing key file at
-  the previous location is moved into the private directory on first use.
+  serialized with a safely resolved `flock`/`sh` helper, including migrations
+  triggered by reading or signing a key. A replacement fsyncs its temporary
+  file before an atomic rename; the rename is the commit point and is followed
+  by a best-effort directory fsync. If that final fsync fails, the committed
+  replacement remains in use and a warning reports that crash durability was
+  not confirmed. Unsafe ownership, permissions, file types, schema, or size
+  are rejected. An existing key file at the previous location is moved into the
+  private directory on first use.
+- Encrypts private key material with Electron `safeStorage` when the Linux
+  desktop exposes GNOME Secret Service/libsecret or KWallet. The hardened JSON
+  store keeps only public metadata and a base64 ciphertext in that mode.
+- Records the selected storage backend (`gnome_libsecret`, `kwallet`,
+  `kwallet5`, or `kwallet6`) in the key metadata. Electron's `basic_text`
+  backend is deliberately not treated as a keychain because it does not provide
+  OS-protected storage.
+- If no usable keychain is available, creation falls back to the existing
+  file-backed PEM protected by `0600` permissions and emits a warning. This is
+  a compatibility fallback, not equivalent protection to a desktop keychain or
+  macOS Secure Enclave.
+- Existing file-backed PEM records migrate to `safeStorage` on first read when
+  a usable backend is available. Encryption and pre-rename write failures leave
+  the original file intact; a post-rename directory-fsync warning does not roll
+  back the already committed replacement.
 - Preserves `remote_control = true` / `features.remote_control = true` in the
   local Codex config instead of letting upstream strip it before app-server
   startup.
@@ -232,13 +251,24 @@ a non-empty `windows` list.
 
 Known risks:
 
-- The Linux key provider is file-backed and protected by ordinary user file
-  permissions. It is not equivalent to OS- or hardware-backed non-extractable
-  key storage.
-- Linux host enrollment or outbound authorization can still fail server-side.
-  The official Remote documentation does not list Linux as a supported host
-  platform.
+- This is not equivalent to macOS Secure Enclave-backed storage. Private key
+  material is protected by the desktop keychain when available; the
+  `file_0600` fallback is protected only by ordinary user file permissions.
+- OpenAI may still reject Linux host enrollment or outbound authorization
+  server-side. This feature only removes local macOS-only blockers in the
+  repackaged app.
 - Treat this as experimental account-level remote-control plumbing.
+
+Keychain diagnostics:
+
+- Inspect the `storageBackend` and `detectedBackend` fields in
+  `remote-control-device-keys-v1.json` without sharing the private values.
+- `storageBackend` set to `gnome_libsecret` or `kwallet*` means the private key
+  is stored as Electron `safeStorage` ciphertext.
+- `storageBackend` set to `file_0600` means the session had no usable keychain,
+  selected `basic_text`, or was running without Electron safe storage. The
+  launcher log contains a warning with the detected backend but never logs key
+  material, ciphertext, signatures, or tokens.
 
 Run the feature tests with:
 

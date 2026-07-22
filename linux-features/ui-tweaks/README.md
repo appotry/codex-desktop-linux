@@ -18,6 +18,7 @@ Enable it in the local, gitignored feature config:
 | Tweak | Patch module | What it does | Settings |
 | --- | --- | --- | --- |
 | `appearance.dockIcon` | `patches/dock-icon.js` | Exposes the upstream Appearance setting and search result for switching Linux windows, the system tray, and supported launchers between the official ChatGPT and Codex icons. | `tweaks.appearance.dockIcon.enabled` |
+| `home.suggestedPrompts` | `patches/suggested-prompts.js` | Exposes the upstream Suggested Prompts setting and enables generated project-aware cards on Home. | `tweaks.home.suggestedPrompts.enabled` |
 | `modelPicker.showModelsByDefault` | `patches/model-picker-model-list.js` | Opens the advanced picker by default and shows model choices inline instead of hiding them behind the compact Power slider and a nested Model submenu. | `tweaks.modelPicker.showModelsByDefault.enabled` |
 | `reasoning.keepEffortLabelsEnglish` | `patches/reasoning-effort-labels.js` | Keeps reasoning effort values in English in the Simplified Chinese UI while leaving the surrounding interface translated. | `tweaks.reasoning.keepEffortLabelsEnglish.enabled` |
 | `sidebar.projectName` | `patches/sidebar-project-name.js` | Styles project names in the left sidebar project list. It does not style `Projects` / `Chats` section headings and does not style chat rows. | `tweaks.sidebar.projectName.enabled`, `tweaks.sidebar.projectName.style` |
@@ -91,6 +92,43 @@ Config keys:
   a prelaunch hook also removes a marker-owned user-local launcher and its
   managed icon files. Unmanaged or symlinked desktop artifacts are preserved.
 
+### `home.suggestedPrompts`
+
+Exposes the upstream Suggested Prompts row in General Settings and enables the
+existing generated-suggestion path on Home. Suggestions are generated from the
+selected project and connected apps by the upstream implementation. Selecting a
+card fills the composer with its proposed next action.
+
+The patch continues to call the upstream rollout and account-eligibility
+functions for diagnostics, then honors the explicit Linux opt-in. It also keeps
+the upstream setting as the user's runtime on/off control after the feature is
+built into the app.
+
+This tweak is independently disabled by default:
+
+```json
+{
+  "enabled": ["ui-tweaks"],
+  "settings": {
+    "ui-tweaks": {
+      "tweaks": {
+        "home": {
+          "suggestedPrompts": {
+            "enabled": true
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+Config keys:
+
+- `enabled`: `true` applies the four current-DMG Suggested Prompts descriptors.
+  `false` leaves the upstream Settings and Home behavior unchanged while other
+  UI tweaks remain independently configurable.
+
 ### `modelPicker.showModelsByDefault`
 
 Makes the detailed model list the default Codex composer picker view. The model
@@ -155,8 +193,9 @@ The patches are fail-soft. If upstream bundle markers drift, the feature writes
 a `WARN` message and leaves the asset unchanged. The patch report exposes that
 warning, and acceptance rejects a candidate when the enabled feature has drifted.
 Missing Dock icon resources also warn, remove only the Dock icon payload, and do
-not abort staging. Invalid style values warn and fall back to the default bold
-style.
+not abort staging. Suggested Prompts validates every current insertion point
+before changing an asset and leaves mixed or drifted input byte-identical.
+Invalid style values warn and fall back to the default bold style.
 
 ## Adding Tweaks
 

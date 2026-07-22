@@ -24,6 +24,7 @@ test("runner executes descriptor phases explicitly and sorts order only within e
     fs.mkdirSync(patchDir, { recursive: true });
     fs.writeFileSync(path.join(buildDir, "main.js"), "main");
     fs.writeFileSync(path.join(assetsDir, "app-test.js"), "asset");
+    fs.writeFileSync(path.join(assetsDir, "app-wrapper.js"), "wrapper");
     fs.writeFileSync(path.join(assetsDir, "app-test.png"), "");
 
     fs.writeFileSync(
@@ -32,7 +33,7 @@ test("runner executes descriptor phases explicitly and sorts order only within e
         "\"use strict\";",
         `const descriptor = require(${JSON.stringify(path.join(__dirname, "descriptor.js"))});`,
         "module.exports = [",
-        "  descriptor.webviewAssetPatch({ id: 'webview-low-order', order: 1, pattern: /^app-.*\\.js$/, apply: (source) => source + '|webview' }),",
+        "  descriptor.webviewAssetPatch({ id: 'webview-low-order', order: 1, pattern: /^app-.*\\.js$/, assetMatch: (source) => source === 'asset' || source === 'asset|webview', apply: (source) => source + '|webview' }),",
         "  descriptor.extractedAppPatch({ id: 'post-high-order', phase: descriptor.PHASE_EXTRACTED_APP_POST_WEBVIEW, order: 1, apply: () => ({ changed: true }) }),",
         "  descriptor.mainBundlePatch({ id: 'main-high-order', order: 20, apply: (source) => source + '|main-high' }),",
         "  descriptor.extractedAppPatch({ id: 'pre-high-order', phase: descriptor.PHASE_EXTRACTED_APP_PRE_WEBVIEW, order: 9999, apply: () => ({ changed: true }) }),",
@@ -56,6 +57,8 @@ test("runner executes descriptor phases explicitly and sorts order only within e
     assert.ok(names.indexOf("webview-low-order") < names.indexOf("post-high-order"));
     assert.equal(fs.readFileSync(path.join(buildDir, "main.js"), "utf8"), "main|main-low|main-high");
     assert.equal(fs.readFileSync(path.join(assetsDir, "app-test.js"), "utf8"), "asset|webview");
+    assert.equal(fs.readFileSync(path.join(assetsDir, "app-wrapper.js"), "utf8"), "wrapper");
+    assert.equal(report.patches.find((patch) => patch.name === "webview-low-order").assetName, "app-test.js");
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
   }

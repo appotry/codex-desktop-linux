@@ -59,11 +59,12 @@ function mainBundleFixture() {
     "function Kk(e,t){let n=``;e.stdout?.on(`data`,e=>{n+=e.toString(`utf8`);let r=n.indexOf(`\\n`);for(;r!==-1;)t(n.slice(0,r).trim()),n=n.slice(r+1),r=n.indexOf(`\\n`)})}",
     "function eA(e,t,n){if(Rk(e))return Lk(e)?Mk(e,t,n?.bareModifierTrigger):null;let r=oA(e),i=()=>{t.onPressed()},a=c.globalShortcut.register(r,i);return a?process.platform===`darwin`?sA({hotkey:e,onPressed:i,registrationHotkey:r}):{handlesRelease:!1,unregister:()=>{c.globalShortcut.unregister(r)}}:null}",
     "function fA(e){return nA(e)??(Lk(e)||bA(e,process.platform)?null:`Shortcut key is not supported for global dictation.`)}",
-    "function pA(e,t){switch(process.platform){case`darwin`:{let n=Ik(mA(e),t);if(n==null)throw Error(`Global dictation hotkey release watching is not supported.`);return n}case`win32`:{let n=gA(e,process.platform);if(n==null)throw Error(`Global dictation hotkey release watching is not supported.`);return _A((0,h.spawn)(`powershell.exe`,[],{stdio:`ignore`}),t)}case`aix`:case`android`:case`cygwin`:case`freebsd`:case`haiku`:case`linux`:case`netbsd`:case`openbsd`:case`sunos`:throw Error(`Global dictation hotkey release watching is not supported.`)}}",
+    "function pA(e,t){switch(process.platform){case`darwin`:{let n=Ik(mA(e),t);if(n==null)throw Error(`Global dictation hotkey release watching is not supported.`);return n}case`win32`:{let n=gA(e,process.platform);if(n==null)throw Error(`Global dictation hotkey release watching is not supported.`);return BA((0,h.spawn)(`powershell.exe`,[],{stdio:`ignore`}),t)}case`aix`:case`android`:case`cygwin`:case`freebsd`:case`haiku`:case`linux`:case`netbsd`:case`openbsd`:case`sunos`:throw Error(`Global dictation hotkey release watching is not supported.`)}}",
     "function mA(e){let t=[];for(let n of e.split(`+`)){let e=uA.get(n.trim().toLowerCase());e!=null&&!t.includes(e)&&t.push(e)}return t}",
-    "function _A(e,t){let n=!1,i=e=>{n||(n=!0,e!=null&&r.r().warning(`Global dictation hotkey release watching failed`,{safe:{},sensitive:{error:e}}),t())};return e.once(`error`,i),e.once(`exit`,()=>i()),{dispose:()=>{n=!0,e.kill()}}}",
+    "function _A(){return [`/unrelated/native/path`]}",
+    "function BA(e,t){let n=!1,i=e=>{n||(n=!0,e!=null&&r.r().warning(`Global dictation hotkey release watching failed`,{safe:{},sensitive:{error:e}}),t())};return e.once(`error`,i),e.once(`exit`,()=>i()),{dispose:()=>{n=!0,e.kill()}}}",
     "function bA(e,t){return t===`darwin`?mA(e).length>0:gA(e,t)!=null}",
-    "var k7=async(...e)=>globalThis.__execFile(...e);async function P7(){switch(process.platform){case`darwin`:return;case`win32`:return;case`aix`:case`android`:case`cygwin`:case`freebsd`:case`haiku`:case`linux`:case`netbsd`:case`openbsd`:case`sunos`:throw Error(`Global dictation paste is not supported on this OS.`)}}",
+    "function k7(e,t,n){return{x:e.centerX-n.x-t.width/2,y:e.centerY-n.y-t.height/2,...t}}var V7=async(...e)=>globalThis.__upstreamExecFile(...e);async function P7(){switch(process.platform){case`darwin`:await V7(`/usr/bin/osascript`,[]);return;case`win32`:return;case`aix`:case`android`:case`cygwin`:case`freebsd`:case`haiku`:case`linux`:case`netbsd`:case`openbsd`:case`sunos`:throw Error(`Global dictation paste is not supported on this OS.`)}}",
     "var H7=class{registeredHotkey=null;registeredHotkeyRegistration=null;registeredToggleHotkey=null;registeredToggleHotkeyRegistration=null;registerHotkeyOrThrow(e){if(this.registeredHotkey===e)return;let t=this.registeredHotkey,n=eA(e,{onPressed:()=>{this.handleHoldHotkeyPressed()},onReleased:()=>{this.handleHoldHotkeyReleased()}});if(n==null)throw Error(`Unable to register global dictation hotkey: ${e}`);t!=null&&this.registeredHotkeyRegistration?.unregister(),this.registeredHotkey=e,this.registeredHotkeyRegistration=n}unregisterHotkey(){this.registeredHotkey!=null&&(this.registeredHotkeyRegistration?.unregister(),this.registeredHotkey=null,this.registeredHotkeyRegistration=null)}registerToggleHotkeyOrThrow(e){if(this.registeredToggleHotkey===e)return;let t=this.registeredToggleHotkey,n=eA(e,{onPressed:()=>{this.handleToggleHotkeyPressed()}},{bareModifierTrigger:`release`});if(n==null)throw Error(`Unable to register global dictation toggle hotkey: ${e}`);t!=null&&this.registeredToggleHotkeyRegistration?.unregister(),this.registeredToggleHotkey=e,this.registeredToggleHotkeyRegistration=n}unregisterToggleHotkey(){this.registeredToggleHotkey!=null&&(this.registeredToggleHotkeyRegistration?.unregister(),this.registeredToggleHotkey=null,this.registeredToggleHotkeyRegistration=null)}deactivateLifecycle(){this.unregisterHotkey(),this.unregisterToggleHotkey()}handleHoldHotkeyPressed(){}handleHoldHotkeyReleased(){}handleToggleHotkeyPressed(){}};",
     "function W7(){return process.platform===`darwin`||process.platform===`win32`}",
   ].join("");
@@ -100,13 +101,19 @@ function waylandPatchContext(children) {
     require(id) {
       if (id === "node:fs") return { accessSync() {}, constants: { X_OK: 1 } };
       if (id === "node:path") return path;
-      if (id === "node:child_process") return { spawn: () => children.shift() };
+      if (id === "node:child_process") {
+        return {
+          spawn: () => children.shift(),
+          execFile: (...args) => context.__execFile(...args),
+        };
+      }
       if (id === "electron") return { app: { getAppPath: () => null }, globalShortcut: {} };
       throw new Error(`unexpected module: ${id}`);
     },
     clearTimeout,
     setTimeout,
-    __execFile: async () => {},
+    __execFile: (_file, _args, _options, callback) => callback(),
+    __upstreamExecFile: async () => {},
   };
   vm.runInNewContext(applyPatchTwice(mainBundleFixture()), context);
   return context;
@@ -193,7 +200,12 @@ test("main patch enables Linux and preserves the other platform gates", () => {
     /function W7\(\)\{return process\.platform===`darwin`\|\|process\.platform===`win32`\|\|process\.platform===`linux`\}/,
   );
   assert.match(patched, /case`linux`:if\(codexLinuxGlobalDictationUsesWayland\(\)\)/);
-  assert.match(patched, /await k7\(`xdotool`,\[`key`,`--clearmodifiers`,`ctrl\+v`\]\)/);
+  assert.match(
+    patched,
+    /await codexLinuxGlobalDictationPasteX11\(\)/,
+  );
+  assert.doesNotMatch(patched, /return _A\(n,t\)/);
+  assert.doesNotMatch(patched, /await k7\(`xdotool`/);
 });
 
 test("main patch handles dollar signs in minified identifiers", () => {
@@ -274,12 +286,25 @@ test("X11 paste uses xdotool with fixed arguments", async () => {
   const calls = [];
   const context = waylandPatchContext([]);
   context.process.env = { DISPLAY: ":1", XDG_SESSION_TYPE: "x11" };
-  context.__execFile = async (...args) => calls.push(args);
+  context.__execFile = (file, args, options, callback) => {
+    calls.push([file, args, options]);
+    callback();
+  };
 
   await context.P7();
   assert.deepEqual(JSON.parse(JSON.stringify(calls)), [
-    ["xdotool", ["key", "--clearmodifiers", "ctrl+v"]],
+    ["xdotool", ["key", "--clearmodifiers", "ctrl+v"], { windowsHide: true }],
   ]);
+});
+
+test("X11 paste propagates xdotool failures", async () => {
+  const context = waylandPatchContext([]);
+  context.process.env = { DISPLAY: ":1", XDG_SESSION_TYPE: "x11" };
+  context.__execFile = (_file, _args, _options, callback) => {
+    callback(new Error("xdotool failed"));
+  };
+
+  await assert.rejects(context.P7(), /xdotool failed/);
 });
 
 test("Wayland helper failure is reported once and releases the registration queue", async () => {
@@ -312,12 +337,34 @@ test("Wayland helper failure is reported once and releases the registration queu
 test("X11 hold mode starts the bounded release watcher", () => {
   const patched = applyPatchTwice(mainBundleFixture());
   assert.match(patched, /function codexLinuxGlobalDictationReleaseWatcher\(/);
-  assert.match(patched, /case`linux`:\{let n=codexLinuxGlobalDictationReleaseWatcher\(e\)/);
+  assert.match(patched, /case`linux`:\{let n=codexLinuxGlobalDictationReleaseWatcher\(e,t\)/);
   assert.match(patched, /t===`darwin`\|\|t===`linux`\?mA\(e\)\.length>0/);
   assert.match(
     patched,
     /process\.platform===`linux`&&Lk\(e\)\?`Modifier-only shortcuts are not supported for global dictation on Linux\.`/,
   );
+});
+
+test("X11 hold watcher exposes a disposable and releases once", async () => {
+  const firstChild = fakeHelperChild();
+  const secondChild = fakeHelperChild();
+  const context = waylandPatchContext([firstChild, secondChild]);
+  context.process.env = { DISPLAY: ":1", XDG_SESSION_TYPE: "x11" };
+  let releases = 0;
+
+  const completed = context.pA("Ctrl+Space", () => releases++);
+  assert.equal(typeof completed.dispose, "function");
+  firstChild.emit("exit", 0);
+  firstChild.emit("error", new Error("late error"));
+  await new Promise(setImmediate);
+  assert.equal(releases, 1);
+
+  const cancelled = context.pA("Ctrl+Space", () => releases++);
+  cancelled.dispose();
+  secondChild.emit("exit", 0);
+  await new Promise(setImmediate);
+  assert.equal(secondChild.killed, true);
+  assert.equal(releases, 1);
 });
 
 test("portal failure tears down the existing lifecycle without dropping other platforms", () => {

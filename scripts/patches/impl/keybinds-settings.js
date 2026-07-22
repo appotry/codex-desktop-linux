@@ -628,6 +628,40 @@ function collectOptionalMatchingAssetPatches(extractedDir, predicate, patchFn) {
 
   return patches;
 }
+
+function collectLinuxDesktopIconMapPatches(extractedDir) {
+  const webviewAssetsDir = path.join(extractedDir, "webview", "assets");
+  if (!fs.existsSync(webviewAssetsDir)) {
+    throw new Error(`Required Keybinds settings patch failed: missing webview assets directory ${webviewAssetsDir}`);
+  }
+
+  const candidates = fs
+    .readdirSync(webviewAssetsDir)
+    .filter((name) => /^use-visible-settings-sections-.*\.js$/.test(name))
+    .sort()
+    .filter((name) => {
+      const source = fs.readFileSync(path.join(webviewAssetsDir, name), "utf8");
+      return isSettingsIconMapBundleSource(source);
+    });
+
+  if (candidates.length !== 1) {
+    throw new Error(
+      `Required Keybinds settings patch failed: could not find exactly one settings icon map (found ${candidates.length})`,
+    );
+  }
+
+  return candidates.map((candidate) => {
+    const filePath = path.join(webviewAssetsDir, candidate);
+    const currentSource = fs.readFileSync(filePath, "utf8");
+    return {
+      filePath,
+      currentSource,
+      patchedSource: applyLinuxDesktopSettingsIconPatch(currentSource),
+      patchFn: applyLinuxDesktopSettingsIconPatch,
+    };
+  });
+}
+
 function collectLinuxDesktopRouteAndNavigationPatches(
   extractedDir,
   routeAssetSpecifier = linuxDesktopSettingsAsset,
@@ -791,6 +825,7 @@ function patchKeybindsSettingsAssets(extractedDir) {
         isLinuxShortcutPhysicalKeyFallbackBundleSource,
         applyLinuxShortcutPhysicalKeyFallbackPatch,
       ),
+      ...collectLinuxDesktopIconMapPatches(extractedDir),
       ...collectLinuxDesktopRouteAndNavigationPatches(
         extractedDir,
         settingsAsset.routeAssetSpecifier,
@@ -1090,6 +1125,12 @@ function isSettingsSharedMetadataBundleSource(currentSource) {
     || currentSource.includes("id:`settings.section.general-settings`,defaultMessage:`General`");
 }
 
+function isSettingsIconMapBundleSource(currentSource) {
+  return /[A-Za-z_$][\w$]*=\{(?:"linux-desktop":[A-Za-z_$][\w$]*,)?"general-settings":[A-Za-z_$][\w$]*,(?=[^;]{0,3000}"keyboard-shortcuts":[A-Za-z_$][\w$]*[,}])/.test(
+    currentSource,
+  );
+}
+
 function isSettingsNavigationBundleSource(currentSource) {
   return /[A-Za-z_$][\w$]*=\[`general-settings`,(?:`linux-desktop`,)?`import`,/.test(currentSource)
     && currentSource.includes("slugs:[`general-settings`,");
@@ -1125,6 +1166,29 @@ function applyLinuxDesktopSettingsRoutePatch(
   return patchedSource;
 }
 
+function applyLinuxDesktopSettingsIconPatch(currentSource) {
+  const patchedIconPattern = /[A-Za-z_$][\w$]*=\{"linux-desktop":[A-Za-z_$][\w$]*,"general-settings":[A-Za-z_$][\w$]*,(?=[^;]{0,3000}"keyboard-shortcuts":[A-Za-z_$][\w$]*[,}])/g;
+  const iconPattern = /([A-Za-z_$][\w$]*=\{)"general-settings":([A-Za-z_$][\w$]*),(?=[^;]{0,3000}"keyboard-shortcuts":[A-Za-z_$][\w$]*[,}])/g;
+  const patchedCount = currentSource.match(patchedIconPattern)?.length ?? 0;
+  const unpatchedCount = currentSource.match(iconPattern)?.length ?? 0;
+
+  if (patchedCount === 1 && unpatchedCount === 0) {
+    return currentSource;
+  }
+
+  const iconMapCount = patchedCount + unpatchedCount;
+  if (patchedCount !== 0 || unpatchedCount !== 1) {
+    throw new Error(
+      `Required Keybinds settings patch failed: expected exactly one settings icon map (found ${iconMapCount}, ${patchedCount} already patched)`,
+    );
+  }
+
+  return currentSource.replace(
+    iconPattern,
+    (_match, prefix, icon) => `${prefix}"linux-desktop":${icon},"general-settings":${icon},`,
+  );
+}
+
 function applyLinuxDesktopSettingsNavigationPatch(currentSource) {
   let patchedSource = currentSource;
 
@@ -1158,6 +1222,7 @@ module.exports = {
   applyKeybindsSettingsSectionsPatch,
   applyKeybindsSettingsSharedPatch,
   applyLinuxDesktopSettingsIndexPatch,
+  applyLinuxDesktopSettingsIconPatch,
   applyLinuxDesktopSettingsNavigationPatch,
   applyLinuxDesktopSettingsRoutePatch,
   applyLinuxDesktopSettingsSectionsPatch,

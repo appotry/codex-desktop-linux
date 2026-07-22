@@ -26,26 +26,26 @@ const {
 } = require("../../scripts/patches/impl/webview/index.js");
 
 const currentAppInfoSource = [
-  "function fv(e,t,r){return`icon-chatgpt`}",
-  "function pv(e){return{dark:`icon-codex-dark-color.png`,light:`icon-codex-light.png`}}",
-  "function hv(e,t){if(process.platform!==`darwin`||t==null)return null;let n=pv(e),r=gv(`${fv(e,t)}.png`),i=gv(n.dark),a=gv(n.light);return r==null||i==null||a==null?null:{appDefault:r,codexDark:i,codexLight:a}}",
-  "function gv(e){if(e==null)return null;let t=c.app.isPackaged?(0,d.join)(process.resourcesPath,e):null,n=t!=null&&(0,h.existsSync)(t)?t:(0,d.join)(c.app.getAppPath(),`src`,`icons`,e),r=c.nativeImage.createFromPath(n);return r.isEmpty()?null:r.resize({width:128,height:128,quality:`best`}).toDataURL()}",
+  "function F_(e,t){return`icon-chatgpt`}",
+  "function I_(e){return{dark:`icon-codex-dark-color.png`,light:`icon-codex-light.png`}}",
+  "function R_(e,t){if(process.platform!==`darwin`||t==null)return null;let n=I_(e),r=z_(`${F_(e,t)}.png`),i=z_(n.dark),a=z_(n.light);return r==null||i==null||a==null?null:{appDefault:r,codexDark:i,codexLight:a}}",
+  "function z_(e){if(e==null)return null;let t=l.app.isPackaged?(0,f.join)(process.resourcesPath,e):null,n=t!=null&&(0,g.existsSync)(t)?t:(0,f.join)(l.app.getAppPath(),`src`,`icons`,e),r=l.nativeImage.createFromPath(n);return r.isEmpty()?null:r.resize({width:128,height:128,quality:`best`}).toDataURL()}",
 ].join("");
 
 const currentRuntimeSource = [
   "function Xie({appBrand:e,buildFlavor:r,settingsStore:p,repoRoot:_,isMacOS:v,onWindowRegistered:C,disposables:w}){",
-  "let T=(0,d.join)(_,`electron`,`src`,`icons`),E=e=>{if(!c.app.isPackaged)return null;let t=(0,d.join)(process.resourcesPath,e);return(0,h.existsSync)(t)?t:null},",
+  "let T=(0,f.join)(_,`electron`,`src`,`icons`),E=e=>{if(!l.app.isPackaged)return null;let t=(0,f.join)(process.resourcesPath,e);return(0,g.existsSync)(t)?t:null},",
   "D=e=>null,O=e=>E(e)??D(e),k=()=>p.get(n.cc.DOCK_ICON_PREFERENCE)??`app-default`,",
-  "A=()=>O(`${fv(r,e)}.png`),j=pv(r),M=()=>c.nativeTheme.shouldUseDarkColorsForSystemIntegratedUI?j.dark:j.light,",
-  "N=t=>{if(t===`app-default`&&r!==i.a.Dev&&(c.app.isPackaged||e===n.rl.ChatGPT)){let e=c.app.dock;e!=null&&Reflect.apply(e.setIcon.bind(e),e,[null]);return}let a=t===`codex-system`?M():null,o=(a==null?null:O(a))??A(),s=o==null?c.nativeImage.createEmpty():c.nativeImage.createFromPath(o);s.isEmpty()||c.app.dock?.setIcon(s)},",
-  "P=()=>{if(!v)return;let e=k();N(e),PZ({preference:e,resourceName:e===`codex-system`?j.light:null}).then(e=>{e&&N(k())})};",
-  "if(v){P();let e=()=>{let e=k();e===`codex-system`&&N(e)};c.nativeTheme.on(`updated`,e),w.add(()=>{c.nativeTheme.off(`updated`,e)})}",
+  "A=()=>O(`${F_(r,e)}.png`),j=I_(r),M=()=>l.nativeTheme.shouldUseDarkColorsForSystemIntegratedUI?j.dark:j.light,",
+  "N=t=>{if(t===`app-default`&&r!==i.a.Dev&&(l.app.isPackaged||e===n.rl.ChatGPT)){let e=l.app.dock;e!=null&&Reflect.apply(e.setIcon.bind(e),e,[null]);return}let a=t===`codex-system`?M():null,o=(a==null?null:O(a))??A(),s=o==null?l.nativeImage.createEmpty():l.nativeImage.createFromPath(o);s.isEmpty()||l.app.dock?.setIcon(s)},",
+  "P=()=>{if(!v)return;let e=k();N(e),NZ({preference:e,resourceName:e===`codex-system`?j.light:null}).then(e=>{e&&N(k())})};",
+  "if(v){P();let e=()=>{let e=k();e===`codex-system`&&N(e)};l.nativeTheme.on(`updated`,e),w.add(()=>{l.nativeTheme.off(`updated`,e)})}",
   "let F=null,I=new Rie({onWindowRegistered:e=>{F?.registerWindow(e),C?.(e)}});",
   "return{updateDockIcon:P,windowManager:I}}",
 ].join("");
 
 const currentTraySource =
-  "async function fae(e){let t=await pae(e.buildFlavor,e.appBrand,e.repoRoot),n=typeof codexLinuxRegisterTray===`function`?codexLinuxRegisterTray(new c.Tray(t.defaultIcon)):new c.Tray(t.defaultIcon);if(!G9)return n.destroy(),null;return n}";
+  "let codexLinuxTray=null,codexLinuxRegisterTray=e=>(codexLinuxTray=e,e);async function dae(e){let t=await fae(e.buildFlavor,e.appBrand,e.repoRoot),n=codexLinuxRegisterTray(new l.Tray(t.defaultIcon));if(!G9)return n.destroy(),null;return n}";
 
 const currentMainSource = currentAppInfoSource + currentRuntimeSource + currentTraySource;
 
@@ -168,21 +168,22 @@ test("main patch enables official previews and synchronizes Linux window and tra
   assert.match(patched, /process\.platform!==`darwin`&&process\.platform!==`linux`/);
   assert.match(
     patched,
-    /c\.app\.isPackaged\|\|process\.platform===`linux`\?codexLinuxDockIconResourcePath/,
+    /l\.app\.isPackaged\|\|process\.platform===`linux`\?codexLinuxDockIconResourcePath/,
   );
-  assert.match(patched, /if\(!c\.app\.isPackaged&&process\.platform!==`linux`\)return null/);
+  assert.match(patched, /if\(!l\.app\.isPackaged&&process\.platform!==`linux`\)return null/);
   assert.match(patched, /BrowserWindow\.getAllWindows\(\)/);
   assert.match(patched, /globalThis\.codexLinuxDockIconImage=s/);
-  assert.match(patched, /dae\(\)\?\.tray/);
+  assert.match(patched, /codexLinuxTray!=null&&!codexLinuxTray\.isDestroyed\(\)&&codexLinuxTray\.setImage\(s\)/);
+  assert.doesNotMatch(patched, /dae\(\)\?\.tray/);
   assert.match(patched, /sync-desktop-icon\.sh/);
   assert.match(patched, /crop\(\{x:34,y:34,width:956,height:956\}\)/);
   assert.match(patched, /crop\(\{x:13,y:23,width:998,height:998\}\)/);
-  assert.match(patched, /require\(`node:child_process`\)\.spawn\(f,\[l\]/);
+  assert.match(patched, /require\(`node:child_process`\)\.spawn\(codexLinuxSyncScript,\[codexLinuxIconSelection\]/);
   assert.match(patched, /e\.stdin\.end\(s\.toPNG\(\)\)/);
   assert.match(patched, /codexLinuxDockIconImage\.isEmpty\(\)/);
   assert.match(
     patched,
-    /codexLinuxRegisterTray\(new c\.Tray\(process\.platform===`linux`&&globalThis\.codexLinuxDockIconImage/,
+    /codexLinuxRegisterTray\(new l\.Tray\(process\.platform===`linux`&&globalThis\.codexLinuxDockIconImage/,
   );
   assert.match(
     patched,
@@ -196,13 +197,13 @@ test("main patch enables official previews and synchronizes Linux window and tra
 test("main patch rejects drift at every current-DMG insertion point byte-identically", () => {
   const insertionPoints = [
     "if(process.platform!==`darwin`||t==null)return null",
-    "function gv(e){if(e==null)return null",
-    "E=e=>{if(!c.app.isPackaged)return null",
+    "function z_(e){if(e==null)return null",
+    "E=e=>{if(!l.app.isPackaged)return null",
     "N=t=>{if(t===`app-default`",
     "P=()=>{if(!v)return",
     "if(v){P();let e=()=>",
     "onWindowRegistered:e=>{F?.registerWindow(e),C?.(e)}",
-    "codexLinuxRegisterTray(new c.Tray(t.defaultIcon))",
+    "codexLinuxRegisterTray(new l.Tray(t.defaultIcon))",
   ];
 
   for (const insertionPoint of insertionPoints) {
@@ -271,13 +272,13 @@ test("search drift remains byte-identical", () => {
   assert.match(warnings[0], /current Dock icon settings search contract/);
 });
 
-test("descriptor targets the current General settings asset", () => {
+test("descriptors select current contracts across renderer hash changes", () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "dock-icon-assets-"));
   try {
     const assetsDir = path.join(tempDir, "webview", "assets");
     fs.mkdirSync(assetsDir, { recursive: true });
-    const settingsPath = path.join(assetsDir, "general-settings-Boi5S8Wz.js");
-    const searchPath = path.join(assetsDir, "settings-page-SrGKyWwG.js");
+    const settingsPath = path.join(assetsDir, "general-settings-HashNext1.js");
+    const searchPath = path.join(assetsDir, "settings-page-HashNext2.js");
     fs.writeFileSync(settingsPath, currentSettingsSource);
     fs.writeFileSync(searchPath, currentSearchSource);
 
@@ -295,12 +296,15 @@ test("descriptor targets the current General settings asset", () => {
       "missing",
     );
     assert.deepEqual(searchResult, { matched: 1, changed: 1 });
-    assert.equal(descriptors[1].pattern.test("general-settings-Boi5S8Wz.js"), true);
-    assert.equal(descriptors[1].pattern.test("general-settings-BMzH5BZ9.js"), false);
-    assert.equal(descriptors[1].pattern.test("general-settings-stale.js"), false);
-    assert.equal(descriptors[2].pattern.test("settings-page-SrGKyWwG.js"), true);
-    assert.equal(descriptors[2].pattern.test("settings-page-stale.js"), false);
-    assert.equal(descriptors[1].pattern.test("general-settings-DMO9G9gL.js"), false);
+    assert.equal(descriptors[1].pattern.test("general-settings-HashNext1.js"), true);
+    assert.equal(descriptors[1].pattern.test("general-settings-wrapper.js"), true);
+    assert.equal(descriptors[1].assetMatch(currentSettingsSource), true);
+    assert.equal(descriptors[1].assetMatch(applyDockIconSettingsPatch(currentSettingsSource)), true);
+    assert.equal(descriptors[1].assetMatch("export{row}"), false);
+    assert.equal(descriptors[2].pattern.test("settings-page-HashNext2.js"), true);
+    assert.equal(descriptors[2].assetMatch(currentSearchSource), true);
+    assert.equal(descriptors[2].assetMatch(applyDockIconSearchPatch(currentSearchSource)), true);
+    assert.equal(descriptors[2].assetMatch("export{settings}"), false);
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }

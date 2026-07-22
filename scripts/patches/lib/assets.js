@@ -65,6 +65,50 @@ function patchAssetFiles(extractedDir, filenamePattern, patchFn, missingWarnMess
   return { matched: candidates.length, changed: pendingWrites.length };
 }
 
+function patchUniqueAssetFile(
+  extractedDir,
+  filenamePattern,
+  assetMatch,
+  patchFn,
+  missingWarnMessage,
+  ambiguousWarnMessage,
+) {
+  const webviewAssetsDir = path.join(extractedDir, "webview", "assets");
+  if (!fs.existsSync(webviewAssetsDir)) {
+    console.warn(
+      `WARN: Could not find webview assets directory in ${webviewAssetsDir} — skipping asset patch`,
+    );
+    return { matched: 0, changed: 0, assetName: null };
+  }
+
+  const matches = fs
+    .readdirSync(webviewAssetsDir)
+    .filter((name) => regexpTest(filenamePattern, name))
+    .sort()
+    .map((assetName) => ({
+      assetName,
+      source: fs.readFileSync(path.join(webviewAssetsDir, assetName), "utf8"),
+    }))
+    .filter(({ assetName, source }) => assetMatch(source, assetName));
+
+  if (matches.length === 0) {
+    console.warn(missingWarnMessage);
+    return { matched: 0, changed: 0, assetName: null };
+  }
+  if (matches.length !== 1) {
+    console.warn(`${ambiguousWarnMessage}: ${matches.map(({ assetName }) => assetName).join(", ")}`);
+    return { matched: matches.length, changed: 0, assetName: null };
+  }
+
+  const [{ assetName, source }] = matches;
+  const patchedSource = patchFn(source);
+  if (patchedSource === source) {
+    return { matched: 1, changed: 0, assetName };
+  }
+  fs.writeFileSync(path.join(webviewAssetsDir, assetName), patchedSource, "utf8");
+  return { matched: 1, changed: 1, assetName };
+}
+
 function readWebviewAsset(webviewAssetsDir, assetName) {
   return fs.readFileSync(path.join(webviewAssetsDir, assetName), "utf8");
 }
@@ -168,6 +212,7 @@ module.exports = {
   findMainBundle,
   findRequiredWebviewAsset,
   patchAssetFiles,
+  patchUniqueAssetFile,
   readDirectoryNames,
   readWebviewAsset,
 };

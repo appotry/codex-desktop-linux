@@ -27,10 +27,14 @@ control endpoint and must not be exposed directly over TCP or forwarded as a
 network service.
 
 Authority startup is serialized by an owner-only lock next to the socket. The
-feature fails closed if either path already exists; it never guesses that an
-existing socket or lock is stale. After an abnormal Desktop termination, verify
-that no authority still owns the configured endpoint before removing stale
-paths and restarting Desktop.
+lock records the owning Linux process identity, so a later Desktop launch can
+reclaim it only when that exact process no longer exists. An existing socket is
+probed before recovery: connectable endpoints and live or unverifiable owners
+still fail closed, while an unbound socket inode from the dead owner is removed
+only if its filesystem identity is unchanged.
+Legacy locks without owner metadata remain protected for 15 seconds, longer
+than the authority startup timeout, before they can be reclaimed when no socket
+exists.
 
 ## SSH setup
 
