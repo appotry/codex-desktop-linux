@@ -5,7 +5,6 @@ const {
   mainBundlePatch,
 } = require("../../../../descriptor.js");
 const {
-  applyLinuxAboutDialogPatch,
   applyLinuxAppReloadShortcutsPatch,
   applyLinuxApplicationMenuPatch,
   applyLinuxWindowOptionsPatch,
@@ -32,7 +31,6 @@ const {
 } = require("../../../../impl/main-process/tray.js");
 const {
   applyLinuxAvatarOverlayMousePassthroughPatch,
-  applyLinuxQueryCacheInvalidationBroadcastPatch,
 } = require("../../../../impl/avatar-overlay.js");
 
 module.exports = [
@@ -51,13 +49,6 @@ module.exports = [
       }
       return "already-applied";
     },
-  }),
-  mainBundlePatch({
-    id: "linux-about-dialog",
-    phase: "main-bundle",
-    order: 55,
-    ciPolicy: "optional",
-    apply: (source, context) => applyLinuxAboutDialogPatch(source, context.iconPathExpression),
   }),
   mainBundlePatch({
     id: "linux-window-options",
@@ -135,13 +126,6 @@ module.exports = [
     order: 90,
     ciPolicy: "required-upstream",
     apply: applyLinuxAvatarOverlayMousePassthroughPatch,
-  }),
-  mainBundlePatch({
-    id: "linux-avatar-settings-sync",
-    phase: "main-bundle",
-    order: 92,
-    ciPolicy: "optional",
-    apply: applyLinuxQueryCacheInvalidationBroadcastPatch,
   }),
   mainBundlePatch({
     id: "linux-file-manager",

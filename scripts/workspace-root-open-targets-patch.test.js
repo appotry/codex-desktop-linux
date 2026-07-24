@@ -6,6 +6,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
+const vm = require("node:vm");
 
 const workspaceRootOpenTargetsPatch = require("./patches/core/all-linux/extracted-app/workspace-root-open-targets/patch.js");
 const {
@@ -35,9 +36,9 @@ test("workspace root dropdown adds Linux open targets alongside File Manager", (
   ].join("");
   const source = [
     "function WorkspaceRootMenu(){",
-    "let t=[],a=()=>{},v=`/tmp/project`,S=Zt(`open-file`),C;",
-    "t[7]!==v||t[8]!==a||t[9]!==S?",
-    "(C=()=>{if(v==null)return;let e=lr(v);El({path:v,cwd:e,target:`fileManager`,openFile:S.mutate}),a(!1)},t[7]=v,t[8]=a,t[9]=S,t[10]=C):C=t[10];",
+    "let t=[],a=()=>{},v=`/tmp/project`,C;",
+    "t[7]!==v||t[8]!==a?",
+    "(C=()=>{if(v==null)return;let e=lr(v);El({path:v,cwd:e,target:`fileManager`}),a(!1)},t[7]=v,t[8]=a,t[10]=C):C=t[10];",
     "let T;t[11]!==C?(T=(0,Z.jsx)(uv.Item,{LeftIcon:iy,onSelect:C,children:`File Manager`}),t[11]=C,t[12]=T):T=t[12];",
     "return (0,Z.jsxs)(Z.Fragment,{children:[T]})",
     "}",
@@ -72,14 +73,14 @@ test("workspace root dropdown patches every File Manager item in a shared chunk"
   ];
   const source = [
     "function FirstWorkspaceRootMenu(){",
-    "let a=()=>{},v=`/tmp/one`,S=Zt(`open-file`),C,T;",
-    "C=()=>{if(v==null)return;let e=lr(v);El({path:v,cwd:e,target:`fileManager`,openFile:S.mutate}),a(!1)};",
+    "let a=()=>{},v=`/tmp/one`,C,T;",
+    "C=()=>{if(v==null)return;let e=lr(v);El({path:v,cwd:e,target:`fileManager`}),a(!1)};",
     "T=(0,Z.jsx)(uv.Item,{LeftIcon:iy,onSelect:C,children:`File Manager`});",
     "return T",
     "}",
     "function SecondWorkspaceRootMenu(){",
-    "let b=()=>{},p=`/tmp/two`,M=Qt(`open-file`),D,U;",
-    "D=()=>{if(p==null)return;let c=lr(p);Op({path:p,cwd:c,target:`fileManager`,openFile:M.mutate}),b(!1)};",
+    "let b=()=>{},p=`/tmp/two`,D,U;",
+    "D=()=>{if(p==null)return;let c=lr(p);Op({path:p,cwd:c,target:`fileManager`}),b(!1)};",
     "U=(0,Z.jsx)(uv.Item,{LeftIcon:iy,onSelect:D,children:`File Manager`});",
     "return U",
     "}",
@@ -104,8 +105,8 @@ test("workspace root dropdown follows aliased File Manager callbacks", () => {
   ];
   const source = [
     "function CurrentWorkspaceMenu(){",
-    "let _=`/tmp/project`,a=()=>{},x=A(`open-file`),C,w,E;",
-    "C=()=>{if(_==null)return;let e=S(_);Ta({path:_,cwd:e,target:`fileManager`,openFile:x.mutate}),a(!1)};",
+    "let _=`/tmp/project`,a=()=>{},C,w,E;",
+    "C=()=>{if(_==null)return;let e=S(_);Ta({path:_,cwd:e,target:`fileManager`}),a(!1)};",
     "w=C;",
     "E=_==null?null:(0,$.jsx)(di.Item,{LeftIcon:em,onSelect:w,children:(0,$.jsx)(Gh,{platform:m})});",
     "return (0,$.jsxs)($.Fragment,{children:[E]})",
@@ -118,10 +119,48 @@ test("workspace root dropdown follows aliased File Manager callbacks", () => {
   assert.match(patched, /codexLinuxWorkspaceRootOpenTarget:vscode/);
   assert.match(patched, /codexLinuxWorkspaceRootOpenTarget:zed/);
   assert.match(patched, /codexLinuxWorkspaceRootOpenTarget:terminal/);
-  assert.match(patched, /onSelect:\(\)=>\{Ta\(\{path:_,cwd:e,target:`vscode`,openFile:x\.mutate\}\),a\(!1\)\}/);
-  assert.match(patched, /target:`fileManager`,openFile:x\.mutate/);
+  assert.match(patched, /onSelect:\(\)=>\{Ta\(\{path:_,cwd:S\(_\),target:`vscode`\}\),a\(!1\)\}/);
+  assert.match(patched, /target:`fileManager`/);
   assert.match(patched, /\(0,\$\.jsx\)\(di\.Item,\{LeftIcon:em,onSelect:w/);
   assert.equal(applyWorkspaceRootOpenTargetsPatch(patched, targets), patched);
+});
+
+test("workspace root dropdown recomputes cwd inside generated open target handlers", () => {
+  const source = [
+    "function CurrentWorkspaceMenu(){",
+    "let _=`/tmp/project`,a=()=>{},C,w,E;",
+    "C=()=>{if(_==null)return;let e=S(_);Ta({path:_,cwd:e,target:`fileManager`}),a(!1)};",
+    "w=C;",
+    "E=_==null?null:(0,$.jsx)(di.Item,{LeftIcon:em,onSelect:w,children:(0,$.jsx)(Gh,{platform:m})});",
+    "return (0,$.jsxs)($.Fragment,{children:[E]})",
+    "}",
+  ].join("");
+  const patched = applyWorkspaceRootOpenTargetsPatch(source, [
+    { id: "vscode", label: "VS Code" },
+  ]);
+  const calls = [];
+  const context = {
+    calls,
+    di: { Item: Symbol("Item") },
+    em: Symbol("FileManagerIcon"),
+    Gh: Symbol("FileManagerLabel"),
+    m: "linux",
+    S: (workspaceRoot) => `cwd:${workspaceRoot}`,
+    Ta: (payload) => calls.push(payload),
+    $: {
+      Fragment: Symbol("Fragment"),
+      jsx: (_type, props) => ({ props }),
+      jsxs: (_type, props) => ({ props }),
+    },
+  };
+
+  vm.runInNewContext(`${patched};result=CurrentWorkspaceMenu()`, context);
+  const generatedItem = context.result.props.children[0].props.children[0];
+  generatedItem.props.onSelect();
+
+  assert.deepEqual(JSON.parse(JSON.stringify(calls)), [
+    { path: "/tmp/project", cwd: "cwd:/tmp/project", target: "vscode" },
+  ]);
 });
 
 test("workspace root open targets patch scans the current app page chunk", () => {
@@ -150,8 +189,9 @@ test("workspace root open targets patch scans the current app page chunk", () =>
       path.join(assetsDir, sharedChunkName),
       [
         "function CurrentWorkspaceMenu(){",
-        "let _=`/tmp/project`,a=()=>{},x=A(`open-file`),C,w,E;",
-        "C=()=>{if(_==null)return;let e=S(_);Ta({path:_,cwd:e,target:`fileManager`,openFile:x.mutate}),a(!1)};",
+        "let _=`/tmp/project`,a=()=>{},C,w,E;",
+        "C=()=>{if(_==null)return;let e=S(_);Ta({path:_,cwd:e,target:`fileManager`}),a(!1)};",
+        "sidebarElectron.createStableWorktree;",
         "w=C;",
         "E=_==null?null:(0,$.jsx)(di.Item,{LeftIcon:em,onSelect:w,children:(0,$.jsx)(Gh,{platform:m})});",
         "return (0,$.jsxs)($.Fragment,{children:[E]})",
@@ -190,8 +230,8 @@ test("workspace root open targets patch is not applicable without Linux targets"
       path.join(assetsDir, "app-main-current.js"),
       [
         "function CurrentWorkspaceMenu(){",
-        "let _=`/tmp/project`,a=()=>{},x=A(`open-file`),C,E;",
-        "C=()=>{if(_==null)return;let e=S(_);Ta({path:_,cwd:e,target:`fileManager`,openFile:x.mutate}),a(!1)};",
+        "let _=`/tmp/project`,a=()=>{},C,E;",
+        "C=()=>{if(_==null)return;let e=S(_);Ta({path:_,cwd:e,target:`fileManager`}),a(!1)};",
         "E=(0,$.jsx)(di.Item,{LeftIcon:em,onSelect:C,children:`File Manager`});",
         "return E",
         "}",

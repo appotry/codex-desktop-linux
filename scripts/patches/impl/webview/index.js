@@ -12,35 +12,9 @@ const {
 
 // Webview asset patches target hashed browser chunks copied out of app.asar.
 // They stay fail-soft because upstream chunk names and minified symbols drift.
-const LINUX_SAFE_MONOSPACE_FONT_STACK =
-  "\"Noto Sans Mono\", \"DejaVu Sans Mono\", \"Liberation Mono\", \"Ubuntu Mono\", ui-monospace, \"SFMono-Regular\", \"SF Mono\", Menlo, Consolas, monospace";
 const LINUX_TOOLTIP_COLLISION_PADDING_TOP = 44;
 const LINUX_WINDOW_CONTROLS_SAFE_AREA_RIGHT = 138;
 const LINUX_WINDOW_CONTROLS_SAFE_AREA_PROP = "codexLinuxUseWindowControlsSafeArea";
-
-function applyLinuxSafeMonospaceFontStackPatch(currentSource) {
-  const safeLinuxMonoFontPattern =
-    /`[^`]*(?:Noto Sans Mono|DejaVu Sans Mono|Liberation Mono|Ubuntu Mono)[^`]*monospace[^`]*`/u;
-  if (safeLinuxMonoFontPattern.test(currentSource)) {
-    return currentSource;
-  }
-
-  const unsafeDefaultStack = "`ui-monospace, \"SFMono-Regular\", Menlo, Consolas, monospace`";
-  if (currentSource.includes(unsafeDefaultStack)) {
-    return currentSource.replace(
-      unsafeDefaultStack,
-      `\`${LINUX_SAFE_MONOSPACE_FONT_STACK}\``,
-    );
-  }
-
-  if (currentSource.includes("ui-monospace") && currentSource.includes("monospace")) {
-    console.warn(
-      "WARN: Could not find Linux monospace font stack insertion point — skipping default font stack patch",
-    );
-  }
-
-  return currentSource;
-}
 
 function applyLinuxSettingsSearchVisibilityPatch(currentSource) {
   if (currentSource.includes("function codexLinuxFilterSettingsSearchSection(")) {
@@ -1277,16 +1251,24 @@ function applyLinuxAppServerFeatureEnablementPatch(currentSource) {
   ].join("");
 }
 
+const AUTOMATION_UPDATE_EAGER_MARKER_PATTERN =
+  /[A-Za-z_$][\w$]*\.name===`automation_update`&&delete [A-Za-z_$][\w$]*\.deferLoading/u;
+const AUTOMATION_UPDATE_DYNAMIC_TOOLS_PATTERN =
+  /\.map\(([A-Za-z_$][\w$]*)=>\(\{type:`function`,\.\.\.\1,\.\.\.([A-Za-z_$][\w$]*)\.has\(\1\.name\)\?\{\}:\{deferLoading:!0\}\}\)\)/u;
+
+function matchesAutomationUpdateEagerToolContract(currentSource) {
+  return (
+    AUTOMATION_UPDATE_EAGER_MARKER_PATTERN.test(currentSource) ||
+    AUTOMATION_UPDATE_DYNAMIC_TOOLS_PATTERN.test(currentSource)
+  );
+}
+
 function applyAutomationUpdateEagerToolPatch(currentSource) {
-  const markerPattern =
-    /[A-Za-z_$][\w$]*\.name===`automation_update`&&delete [A-Za-z_$][\w$]*\.deferLoading/u;
-  if (markerPattern.test(currentSource)) {
+  if (AUTOMATION_UPDATE_EAGER_MARKER_PATTERN.test(currentSource)) {
     return currentSource;
   }
 
-  const dynamicToolsPattern =
-    /\.map\(([A-Za-z_$][\w$]*)=>\(\{type:`function`,\.\.\.\1,\.\.\.([A-Za-z_$][\w$]*)\.has\(\1\.name\)\?\{\}:\{deferLoading:!0\}\}\)\)/u;
-  if (!dynamicToolsPattern.test(currentSource)) {
+  if (!AUTOMATION_UPDATE_DYNAMIC_TOOLS_PATTERN.test(currentSource)) {
     if (currentSource.includes("automation_update") && currentSource.includes("deferLoading:!0")) {
       console.warn(
         "WARN: Could not find dynamic tools construction point — skipping automation_update eager tool patch",
@@ -1296,7 +1278,7 @@ function applyAutomationUpdateEagerToolPatch(currentSource) {
   }
 
   return currentSource.replace(
-    dynamicToolsPattern,
+    AUTOMATION_UPDATE_DYNAMIC_TOOLS_PATTERN,
     (_match, toolVar, eagerToolsVar) => {
       const descriptorVar = toolVar === "t" ? "codexLinuxAutomationDescriptor" : "t";
       return `.map(${toolVar}=>{let ${descriptorVar}={type:\`function\`,...${toolVar},...${eagerToolsVar}.has(${toolVar}.name)?{}:{deferLoading:!0}};return ${toolVar}.name===\`automation_update\`&&delete ${descriptorVar}.deferLoading,${descriptorVar}})`;
@@ -2432,6 +2414,7 @@ module.exports = {
   applyLinuxAppServerBackfillWaitPatch,
   applyLinuxAppServerFeatureEnablementPatch,
   applyAutomationUpdateEagerToolPatch,
+  matchesAutomationUpdateEagerToolContract,
   applyLinuxChatSearchHydrationPatch,
   applyLinuxBrowserUseAvailabilityPatch,
   applyLinuxBrowserUseExternalAvailabilityPatch,
@@ -2447,7 +2430,6 @@ module.exports = {
   applyLinuxThreadSidePanelNativeTooltipPatch,
   applyLinuxTooltipWindowControlsCollisionPatch,
   applyLinuxWindowControlsSafeAreaPatch,
-  applyLinuxSafeMonospaceFontStackPatch,
   applyLinuxSettingsSearchVisibilityPatch,
   applyLinuxFastModeModelGuardPatch,
   applyLinuxSkillsListDedupePatch,
