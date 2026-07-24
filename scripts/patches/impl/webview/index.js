@@ -34,7 +34,6 @@ function applyLinuxSettingsSearchVisibilityPatch(currentSource) {
     const text = currentSource.slice(match.index, closeBrace + 1);
     if (
       text.includes("isSystemBackdropSupported") &&
-      text.includes("?.platform===`darwin`") &&
       text.includes("sectionSlug===`appearance`")
     ) {
       settingsSearchFunction = {
@@ -48,17 +47,10 @@ function applyLinuxSettingsSearchVisibilityPatch(currentSource) {
     }
   }
 
-  const darwinVariable = settingsSearchFunction?.text.match(
-    /,([A-Za-z_$][\w$]*)=[A-Za-z_$][\w$]*\?\.platform===`darwin`,/u,
-  )?.[1];
   const resultVariable = settingsSearchFunction?.text.match(
     /return ([A-Za-z_$][\w$]*)\}$/u,
   )?.[1];
-  if (
-    settingsSearchFunction == null ||
-    darwinVariable == null ||
-    resultVariable == null
-  ) {
+  if (settingsSearchFunction == null || resultVariable == null) {
     if (
       currentSource.includes("settingsSearchDocuments") ||
       currentSource.includes("isSystemBackdropSupported")
@@ -71,10 +63,10 @@ function applyLinuxSettingsSearchVisibilityPatch(currentSource) {
   }
 
   const helper =
-    `var codexLinuxDarwinOnlySettingsSearchMessageIds=new Set([\`settings.general.appearance.dockIcon.chatGPT.ariaLabel\`,\`settings.general.appearance.dockIcon.codex.ariaLabel\`,\`settings.general.appearance.dockIcon.label\`,\`settings.general.appearance.dockIcon.row.description\`]);function codexLinuxFilterSettingsSearchSection(e,t){if(e.sectionSlug!==\`appearance\`||t)return e;let n=e.messages.filter(e=>!codexLinuxDarwinOnlySettingsSearchMessageIds.has(e.id));return n.length===e.messages.length?e:{...e,messages:n}}`;
+    `var codexLinuxDarwinOnlySettingsSearchMessageIds=new Set([\`settings.general.appearance.dockIcon.chatGPT.ariaLabel\`,\`settings.general.appearance.dockIcon.codex.ariaLabel\`,\`settings.general.appearance.dockIcon.label\`,\`settings.general.appearance.dockIcon.row.description\`]);function codexLinuxFilterSettingsSearchSection(e){if(e.sectionSlug!==\`appearance\`)return e;let t=e.messages.filter(e=>!codexLinuxDarwinOnlySettingsSearchMessageIds.has(e.id));return t.length===e.messages.length?e:{...e,messages:t}}`;
   const returnNeedle = `return ${resultVariable}}`;
   const returnPatch =
-    `return ${resultVariable}.map(e=>codexLinuxFilterSettingsSearchSection(e,${darwinVariable}))}`;
+    `return ${resultVariable}.map(codexLinuxFilterSettingsSearchSection)}`;
   const patchedFunction = settingsSearchFunction.text
     .replace(returnNeedle, returnPatch);
 
@@ -1708,156 +1700,27 @@ function applyLocalEnvironmentActionModalDraftPatch(currentSource) {
 }
 
 function applyBrowserAnnotationScreenshotPatch(currentSource) {
-  let patchedSource = currentSource;
-
-  const liveElementScreenshotNeedle =
-    "if(M&&j?.anchor.kind===`element`){let e=qu(j,y.current)??null,t=e==null?null:rd(e);he=t?.rect??md(j.anchor),_e=t?.borderRadius}";
-  const storedAnchorScreenshotPatch =
-    "if(M&&j?.anchor.kind===`element`){he=md(j.anchor),_e=void 0}";
-  if (patchedSource.includes(storedAnchorScreenshotPatch)) {
-    // Already patched.
-  } else if (
-    /if\([A-Za-z_$][\w$]*&&[A-Za-z_$][\w$]*\?\.anchor\.kind===`element`\)\{[A-Za-z_$][\w$]*=[A-Za-z_$][\w$]*\([A-Za-z_$][\w$]*\.anchor\),[A-Za-z_$][\w$]*=void 0\}/.test(patchedSource) ||
-    /if\([A-Za-z_$][\w$]*&&[A-Za-z_$][\w$]*\?\.annotation\.anchor\.kind===`element`\)\{[A-Za-z_$][\w$]*=[A-Za-z_$][\w$]*\([A-Za-z_$][\w$]*\.annotation\.anchor\),[A-Za-z_$][\w$]*=void 0,/.test(patchedSource)
-  ) {
-    // Already patched with the current upstream symbol names.
-  } else if (patchedSource.includes(liveElementScreenshotNeedle)) {
-    patchedSource = patchedSource.replace(liveElementScreenshotNeedle, storedAnchorScreenshotPatch);
-  } else {
-    const currentSelectedElementNeedle =
-      "if(ve&&M?.anchor.kind===`element`){let e=hl(M,y.current)??null,t=e==null?null:El(e);ke=t?.rect??Rl(M.anchor),je=t?.borderRadius,Ae=Xl(M.anchor,ke,_.width,_.height)}";
-    const currentSelectedElementPatch =
-      "if(ve&&M?.anchor.kind===`element`){ke=Rl(M.anchor),je=void 0,Ae=Xl(M.anchor,ke,_.width,_.height)}";
-    const currentCommentPreloadElementNeedle =
-      "if(M&&j?.annotation.anchor.kind===`element`){let e=tt==null?null:ed(tt);at=e?.rect??Td(j.annotation.anchor),st=e?.borderRadius,ot=Wd(j.annotation.anchor,at,S.width,S.height)}";
-    const currentCommentPreloadElementPatch =
-      "if(M&&j?.annotation.anchor.kind===`element`){at=Td(j.annotation.anchor),st=void 0,ot=Wd(j.annotation.anchor,at,S.width,S.height)}";
-    const currentElementScreenshotRegex =
-      /if\(([A-Za-z_$][\w$]*)&&([A-Za-z_$][\w$]*)\?\.anchor\.kind===`element`\)\{let e=[^;{}]+?\?\?null,t=e==null\?null:[A-Za-z_$][\w$]*\(e\);([A-Za-z_$][\w$]*)=t\?\.rect\?\?([A-Za-z_$][\w$]*)\(\2\.anchor\),([A-Za-z_$][\w$]*)=t\?\.borderRadius\}/;
-    const currentCommentPreloadElementRegex =
-      /if\(([A-Za-z_$][\w$]*)&&([A-Za-z_$][\w$]*)\?\.annotation\.anchor\.kind===`element`\)\{let e=([A-Za-z_$][\w$]*)==null\?null:[A-Za-z_$][\w$]*\(\3\);([A-Za-z_$][\w$]*)=e\?\.rect\?\?([A-Za-z_$][\w$]*)\(\2\.annotation\.anchor\),([A-Za-z_$][\w$]*)=e\?\.borderRadius,([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\(\2\.annotation\.anchor,\4,([A-Za-z_$][\w$]*)\.width,([A-Za-z_$][\w$]*)\.height\)\}/;
-    if (patchedSource.includes(currentSelectedElementNeedle)) {
-      patchedSource = patchedSource.replace(currentSelectedElementNeedle, currentSelectedElementPatch);
-    } else if (patchedSource.includes(currentCommentPreloadElementNeedle)) {
-      patchedSource = patchedSource.replace(
-        currentCommentPreloadElementNeedle,
-        currentCommentPreloadElementPatch,
-      );
-    } else if (currentElementScreenshotRegex.test(patchedSource)) {
-      const currentElementScreenshotMatch = patchedSource.match(currentElementScreenshotRegex);
-      const [, screenshotModeVar, selectedCommentVar, rectVar, anchorRectFn, radiusVar] = currentElementScreenshotMatch;
-      patchedSource = patchedSource.replace(
-        currentElementScreenshotRegex,
-        `if(${screenshotModeVar}&&${selectedCommentVar}?.anchor.kind===\`element\`){${rectVar}=${anchorRectFn}(${selectedCommentVar}.anchor),${radiusVar}=void 0}`,
-      );
-    } else if (currentCommentPreloadElementRegex.test(patchedSource)) {
-      patchedSource = patchedSource.replace(
-        currentCommentPreloadElementRegex,
-        (
-          _match,
-          screenshotModeVar,
-          selectedAnnotationVar,
-          _connectedElementVar,
-          rectVar,
-          anchorRectFn,
-          radiusVar,
-          highlightClassVar,
-          highlightFn,
-          widthSourceVar,
-          heightSourceVar,
-        ) =>
-          `if(${screenshotModeVar}&&${selectedAnnotationVar}?.annotation.anchor.kind===\`element\`){${rectVar}=${anchorRectFn}(${selectedAnnotationVar}.annotation.anchor),${radiusVar}=void 0,${highlightClassVar}=${highlightFn}(${selectedAnnotationVar}.annotation.anchor,${rectVar},${widthSourceVar}.width,${heightSourceVar}.height)}`,
-      );
-    } else {
-      console.warn("WARN: Could not find browser annotation screenshot element highlight — skipping screenshot anchor patch");
-    }
+  const storedAnchorRegex =
+    /if\([A-Za-z_$][\w$]*&&([A-Za-z_$][\w$]*)\?\.annotation\.anchor\.kind===`element`\)\{[^;{}]+;let ([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\(\1\.annotation\.anchor\);([A-Za-z_$][\w$]*)=void 0,/;
+  if (storedAnchorRegex.test(currentSource)) {
+    return currentSource;
   }
 
-  const allMarkersInScreenshotNeedle =
-    "de=u?.target.mode===`create`?ce.find(e=>Sd(e.anchor,u.anchor.value))??null:null,fe=!M&&de!=null?ce.filter(e=>e.id!==de.id):ce,";
-  const selectedMarkerInScreenshotPatch =
-    "de=u?.target.mode===`create`?ce.find(e=>Sd(e.anchor,u.anchor.value))??null:null,fe=M?ue:!M&&de!=null?ce.filter(e=>e.id!==de.id):ce,";
-  if (patchedSource.includes(selectedMarkerInScreenshotPatch)) {
-    // Already patched.
-  } else if (/=\([A-Za-z_$][\w$]*\?[A-Za-z_$][\w$]*:![A-Za-z_$][\w$]*&&[A-Za-z_$][\w$]*!=null\?[A-Za-z_$][\w$]*\.filter\(e=>e\.id!==[A-Za-z_$][\w$]*\.id\):[A-Za-z_$][\w$]*\)\.flatMap/.test(patchedSource)) {
-    // Already patched with the current upstream symbol names.
-  } else if (/=\([A-Za-z_$][\w$]*\?[A-Za-z_$][\w$]*\?\.kind===`comment`\?[A-Za-z_$][\w$]*\.filter\(e=>e\.id===[A-Za-z_$][\w$]*\.annotation\.id\):\[\]:[A-Za-z_$][\w$]*==null\?[A-Za-z_$][\w$]*:[A-Za-z_$][\w$]*\.filter\(e=>e\.id!==[A-Za-z_$][\w$]*\.id\)\)\.flatMap/.test(patchedSource)) {
-    // Already patched with the current comment-preload selected-comment shape.
-  } else if (patchedSource.includes(allMarkersInScreenshotNeedle)) {
-    patchedSource = patchedSource.replace(allMarkersInScreenshotNeedle, selectedMarkerInScreenshotPatch);
-  } else {
-    const currentMarkersNeedle = "be=(!ge&&ye!=null?A.filter(e=>e.id!==ye.id):A).flatMap";
-    const currentMarkersPatch = "be=(ge?he:!ge&&ye!=null?A.filter(e=>e.id!==ye.id):A).flatMap";
-    const currentSelectedMarkersNeedle = "Se=(!ve&&xe!=null?k.filter(e=>e.id!==xe.id):k).flatMap";
-    const currentSelectedMarkersPatch = "Se=(ve?_e:!ve&&xe!=null?k.filter(e=>e.id!==xe.id):k).flatMap";
-    const currentCommentPreloadMarkersNeedle =
-      "Xe=(M?j?.kind===`comment`?ge:[]:Ye==null?ge:ge.filter(e=>e.id!==Ye.id)).flatMap";
-    const currentCommentPreloadMarkersPatch =
-      "Xe=(M?j?.kind===`comment`?ge.filter(e=>e.id===j.annotation.id):[]:Ye==null?ge:ge.filter(e=>e.id!==Ye.id)).flatMap";
-    const latestCommentPreloadMarkersNeedle =
-      "Je=(We?N?.kind===`comment`?me:[]:qe==null?me:me.filter(e=>e.id!==qe.id)).flatMap";
-    const latestCommentPreloadMarkersPatch =
-      "Je=(We?N?.kind===`comment`?Ue:[]:qe==null?me:me.filter(e=>e.id!==qe.id)).flatMap";
-    const currentCommentPreloadSelectedMarkersNeedle =
-      "Ye=(Ge?M?.kind===`comment`?he:[]:Je==null?he:he.filter(e=>e.id!==Je.id)).flatMap";
-    const currentCommentPreloadSelectedMarkersPatch =
-      "Ye=(Ge?M?.kind===`comment`?We:[]:Je==null?he:he.filter(e=>e.id!==Je.id)).flatMap";
-    const electron42CommentPreloadMarkersNeedle =
-      "Ze=(qe?A?.kind===`comment`?ge:[]:Xe==null?ge:ge.filter(e=>e.id!==Xe.id)).flatMap";
-    const electron42CommentPreloadMarkersPatch =
-      "Ze=(qe?A?.kind===`comment`?Ke:[]:Xe==null?ge:ge.filter(e=>e.id!==Xe.id)).flatMap";
-    // 26.623 refactored the marker-list computation into imperative form and
-    // adopted the screenshot fix natively: when a comment is selected it now
-    // assigns `it=rt?[j.annotation]:ye`, i.e. only the selected comment's marker
-    // is shown in screenshot mode. Detect that native-safe shape so we skip the
-    // patch without warning.
-    const nativeCommentPreloadMarkersRegex =
-      /([A-Za-z_$][\w$]*)\?\.kind===`comment`\?([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\?\[\1\.annotation\]:([A-Za-z_$][\w$]*):\3\|\|[A-Za-z_$][\w$]*\?\2=\[\]:[A-Za-z_$][\w$]*!=null&&\(\2=\4\.filter\(e=>e\.id!==[A-Za-z_$][\w$]*\.id\)\)/;
-    if (patchedSource.includes(currentMarkersPatch)) {
-      // Already patched.
-    } else if (patchedSource.includes(currentSelectedMarkersPatch)) {
-      // Already patched.
-    } else if (patchedSource.includes(currentCommentPreloadMarkersPatch)) {
-      // Already patched.
-    } else if (patchedSource.includes(latestCommentPreloadMarkersPatch)) {
-      // Already patched.
-    } else if (patchedSource.includes(currentCommentPreloadSelectedMarkersPatch)) {
-      // Already patched.
-    } else if (patchedSource.includes(electron42CommentPreloadMarkersPatch)) {
-      // Already patched.
-    } else if (patchedSource.includes(currentMarkersNeedle)) {
-      patchedSource = patchedSource.replace(currentMarkersNeedle, currentMarkersPatch);
-    } else if (patchedSource.includes(currentSelectedMarkersNeedle)) {
-      patchedSource = patchedSource.replace(currentSelectedMarkersNeedle, currentSelectedMarkersPatch);
-    } else if (patchedSource.includes(currentCommentPreloadMarkersNeedle)) {
-      patchedSource = patchedSource.replace(
-        currentCommentPreloadMarkersNeedle,
-        currentCommentPreloadMarkersPatch,
-      );
-    } else if (patchedSource.includes(latestCommentPreloadMarkersNeedle)) {
-      patchedSource = patchedSource.replace(
-        latestCommentPreloadMarkersNeedle,
-        latestCommentPreloadMarkersPatch,
-      );
-    } else if (patchedSource.includes(currentCommentPreloadSelectedMarkersNeedle)) {
-      patchedSource = patchedSource.replace(
-        currentCommentPreloadSelectedMarkersNeedle,
-        currentCommentPreloadSelectedMarkersPatch,
-      );
-    } else if (patchedSource.includes(electron42CommentPreloadMarkersNeedle)) {
-      patchedSource = patchedSource.replace(
-        electron42CommentPreloadMarkersNeedle,
-        electron42CommentPreloadMarkersPatch,
-      );
-    } else if (nativeCommentPreloadMarkersRegex.test(patchedSource)) {
-      // Already native: upstream now scopes screenshot markers to the selected
-      // comment, so no marker patch is required for this build.
-    } else {
-      console.warn("WARN: Could not find browser annotation screenshot markers — skipping screenshot marker patch");
-    }
+  const liveAnchorRegex =
+    /(if\([A-Za-z_$][\w$]*&&([A-Za-z_$][\w$]*)\?\.annotation\.anchor\.kind===`element`\)\{[^;{}]+;)let e=([A-Za-z_$][\w$]*)==null\?null:[A-Za-z_$][\w$]*\(\3\),([A-Za-z_$][\w$]*)=e\?\.rect\?\?([A-Za-z_$][\w$]*)\(\2\.annotation\.anchor\);([A-Za-z_$][\w$]*)=e\?\.borderRadius,/;
+  const match = currentSource.match(liveAnchorRegex);
+  if (match == null) {
+    console.warn(
+      "WARN: Could not find browser annotation screenshot element highlight — skipping screenshot anchor patch",
+    );
+    return currentSource;
   }
 
-  return patchedSource;
+  const [, prefix, selectedAnnotationVar, , rectVar, anchorRectFn, radiusVar] = match;
+  return currentSource.replace(
+    liveAnchorRegex,
+    `${prefix}let ${rectVar}=${anchorRectFn}(${selectedAnnotationVar}.annotation.anchor);${radiusVar}=void 0,`,
+  );
 }
 
 function detectCurrentRateLimitFooterSymbols(source) {

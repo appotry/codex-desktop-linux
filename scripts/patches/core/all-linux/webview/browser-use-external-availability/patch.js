@@ -12,7 +12,7 @@ module.exports = webviewAssetPatch({
   phase: "webview-asset",
   order: 1092,
   ciPolicy: "optional",
-  pattern: /^(?:use-is-plugins-enabled|use-in-app-browser-use-availability)-.*\.js$|^app-initial~app-main~.*\.js$/,
+  pattern: /^app-initial-[^.]+\.js$/,
   missingDescription: "external Browser Use availability bundle",
   skipDescription: "Linux external Browser Use availability patch",
   apply: applyLinuxBrowserUseExternalAvailabilityPatch,

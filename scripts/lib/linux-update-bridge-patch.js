@@ -96,13 +96,13 @@ function applyCurrentBootstrapUpdaterBridgePatch(currentSource) {
 
   if (!patchedSource.includes("codexLinuxPackageUpdateBridge=process.platform===`linux`")) {
     const currentBridgeRegex =
-      /let ([A-Za-z_$][\w$]*)=new ([A-Za-z_$][\w$]*),([A-Za-z_$][\w$]*)=null,([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)=>\{[^]*?\},(?=[A-Za-z_$][\w$]*=)/;
+      /let ([A-Za-z_$][\w$]*)=new [A-Za-z_$][\w$]*,(?:[A-Za-z_$][\w$]*=null,){2}([A-Za-z_$][\w$]*)=[A-Za-z_$][\w$]*=>\{[^]*?\},(?=[A-Za-z_$][\w$]*=)/;
     const currentBridgeMatch = patchedSource.match(currentBridgeRegex);
     if (currentBridgeMatch == null) {
       console.warn("WARN: Could not find current updater callback bridge - skipping Linux updater bridge patch");
       return currentSource;
     }
-    const [bridgeDeclaration, quitControllerVar, , , quitFnVar] = currentBridgeMatch;
+    const [bridgeDeclaration, quitControllerVar, quitFnVar] = currentBridgeMatch;
     const bridgeSetup =
       `${bridgeDeclaration}codexLinuxPackageUpdateBridge=process.platform===\`linux\`?codexLinuxCreatePackageUpdateManager({allowQuit:()=>${quitControllerVar}.allowQuitTemporarilyForUpdateInstall(),${sendCallback}}):null;codexLinuxPackageUpdateBridge!=null&&(${sparkleVar}=codexLinuxPackageUpdateBridge.manager,${quitFnVar}=codexLinuxPackageUpdateBridge.quitForUpdate,setInterval(()=>codexLinuxPackageUpdateBridge.refresh(),3e4).unref?.());let `;
     patchedSource = patchedSource.replace(currentBridgeRegex, bridgeSetup);

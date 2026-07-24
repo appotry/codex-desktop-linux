@@ -474,7 +474,7 @@ test("semantic asset patch skips unknown contracts without writing", () => {
 
 test("Linux settings search hides controls that cannot render", () => {
   const source = [
-    "function qn(e){let t=(0,Zn.c)(17),n=re(),r=Bn(e),{data:i}=_(e),a=i?.isSystemBackdropSupported!==!1,o=i?.platform===`darwin`,{data:s}=T(k,e.selectedHostId),c,l=c;if(a){let e;e=e=>e.sectionSlug===`appearance`&&!a?{...e,messages:e.messages.filter(Jn)}:e.sectionSlug===`agent`?{...e,terms:[]}:e,m=r.map(e)}else m=r;return m}",
+    "function qn(e){let t=(0,Zn.c)(15),n=re(),r=Bn(e),{data:i}=_(e),a=i?.isSystemBackdropSupported!==!1,{data:s}=T(k,e.selectedHostId),c,l=c;if(a){let e;e=e=>e.sectionSlug===`appearance`&&!a?{...e,messages:e.messages.filter(Jn)}:e.sectionSlug===`agent`?{...e,terms:[]}:e,m=r.map(e)}else m=r;return m}",
     "function Jn(e){return!Qn.includes(e.id)}",
   ].join("");
 
@@ -484,7 +484,7 @@ test("Linux settings search hides controls that cannot render", () => {
   assert.match(patched, /settings\.general\.appearance\.dockIcon\.label/);
   assert.match(
     patched,
-    /return m\.map\(e=>codexLinuxFilterSettingsSearchSection\(e,o\)\)/,
+    /return m\.map\(codexLinuxFilterSettingsSearchSection\)/,
   );
   assert.equal(
     (patched.match(/function codexLinuxFilterSettingsSearchSection\(/g) || []).length,
@@ -510,15 +510,8 @@ test("Linux settings search hides controls that cannot render", () => {
     Array.from(context.filter({
       sectionSlug: "appearance",
       messages: [dockMessage, themeMessage],
-    }, false).messages, (message) => message.id),
+    }).messages, (message) => message.id),
     [themeMessage.id],
-  );
-  assert.deepEqual(
-    Array.from(context.filter({
-      sectionSlug: "appearance",
-      messages: [dockMessage, themeMessage],
-    }, true).messages, (message) => message.id),
-    [dockMessage.id, themeMessage.id],
   );
 });
 
@@ -1194,7 +1187,7 @@ test("app-server feature enablement descriptor matches current app-main chunks",
   assert.equal(descriptor.pattern.test("experimental-feature-visibility-Bvp90zWX.js"), false);
 });
 
-test("window controls safe-area descriptor matches current app shell chunks", () => {
+test("window controls safe-area descriptor matches the current monolithic app chunk", () => {
   const descriptor = corePatchDescriptors().find(
     (descriptor) => descriptor.id === "linux-window-controls-safe-area",
   );
@@ -1207,9 +1200,7 @@ test("window controls safe-area descriptor matches current app shell chunks", ()
     false,
   );
   assert.equal(
-    descriptor.pattern.test(
-      "app-initial~avatarOverlayCompositionSurface~artifact-tab-content.electron~app-main~appgen-s~j5d6n91g-DVu-pwEX.js",
-    ),
+    descriptor.pattern.test("app-initial-BTphDPeq.js"),
     true,
   );
   assert.equal(
@@ -1220,10 +1211,13 @@ test("window controls safe-area descriptor matches current app shell chunks", ()
   );
 });
 
-test("optional webview descriptors follow the current upstream chunk split", () => {
+test("optional webview descriptors follow the current monolithic app chunk", () => {
   const descriptors = corePatchDescriptors();
   const automationUpdate = descriptors.find(
     (descriptor) => descriptor.id === "automation-update-eager-tool",
+  );
+  const browserUseAvailability = descriptors.find(
+    (descriptor) => descriptor.id === "linux-browser-use-availability",
   );
   const tooltipCollision = descriptors.find(
     (descriptor) => descriptor.id === "linux-tooltip-window-controls-collision",
@@ -1231,14 +1225,14 @@ test("optional webview descriptors follow the current upstream chunk split", () 
 
   assert.ok(automationUpdate);
   assert.equal(
-    automationUpdate.pattern.test("app-initial~app-main~onboarding-page-CIkoyvFz.js"),
+    automationUpdate.pattern.test("app-initial-BTphDPeq.js"),
     true,
   );
   assert.equal(
     automationUpdate.pattern.test(
       "app-initial~app-main~onboarding-page~hotkey-window-thread-page~quick-chat-window-page~chatg~f5p8e1kp-BULs9Wt5.js",
     ),
-    true,
+    false,
   );
   assert.equal(
     automationUpdate.assetMatch(
@@ -1250,11 +1244,20 @@ test("optional webview descriptors follow the current upstream chunk split", () 
     automationUpdate.assetMatch("function unrelated(){return{deferLoading:!0}}"),
     false,
   );
+  assert.ok(browserUseAvailability);
+  assert.equal(
+    browserUseAvailability.pattern.test("app-initial-BTphDPeq.js"),
+    true,
+  );
+  assert.equal(
+    browserUseAvailability.pattern.test(
+      "use-in-app-browser-use-availability-B4Bdb14G.js",
+    ),
+    false,
+  );
   assert.ok(tooltipCollision);
   assert.equal(
-    tooltipCollision.pattern.test(
-      "app-initial~avatarOverlayCompositionSurface~artifact-tab-content.electron~notebook-preview-~kr7rxhqe-BaAm4SxE.js",
-    ),
+    tooltipCollision.pattern.test("app-initial-BTphDPeq.js"),
     true,
   );
   assert.equal(
@@ -1829,7 +1832,7 @@ function currentBootstrapUpdaterBundleFixture() {
     "var g6={enabled:!1,running:!1,state:`disabled`};",
     "async function v6(){",
     "let{startedAtMs:e,buildFlavor:i,desktopSentry:o,sparkleManager:s,productionAppcastStateStore:Q,setSparkleBridgeHandlers:c,setSecondInstanceArgsHandler:l}=n.k(),d=n.P.shouldIncludeSparkle(i,process.platform,process.env)||process.platform===`linux`;",
-    "let ee=new G5,P=null,te=e=>{if(e?.quitImmediately===!1){ee.allowQuitTemporarilyForUpdateInstall();return}ee.allowQuitTemporarilyForUpdateInstall(),r.app.quit()},F=F3({}),oe=iZ({}),se=oe.getWindowContext();",
+    "let ee=new G5,P=null,W=null,te=e=>{if(e?.quitImmediately===!1){ee.allowQuitTemporarilyForUpdateInstall();return}ee.allowQuitTemporarilyForUpdateInstall(),r.app.quit()},F=F3({}),oe=iZ({}),se=oe.getWindowContext();",
     "c({onDownloadProgressChanged:()=>{se.broadcastAppUpdateState()},onInstallProgressChanged:()=>{T&&se.broadcastAppUpdateState()},onUpdateReadyChanged:()=>{se.broadcastAppUpdateState()},onUpdateLifecycleStateChanged:()=>{se.broadcastAppUpdateState()},onRelaunchNoticeChanged:()=>{se.broadcastAppUpdateState()},onInstallUpdatesRequested:e=>{te(e)},isTrustedIpcEvent:M});",
     "}exports.runMainAppStartup=v6;",
   ].join("");
@@ -3374,62 +3377,40 @@ test("patches current webview opaque window default bundle shapes", () => {
   );
 });
 
-test("patches current comment preload screenshot anchor and marker shapes", () => {
+test("patches the current comment preload screenshot anchor shape", () => {
   const source = [
-    "let Xe=(M?j?.kind===`comment`?ge:[]:Ye==null?ge:ge.filter(e=>e.id!==Ye.id)).flatMap(e=>{let t=pe.get(e.id);if(t==null)return[];return[{comment:e,commentNumber:t}]}),",
-    "let at=null,ot=`hover-box`,st;if(M&&j?.annotation.anchor.kind===`element`){let e=tt==null?null:ed(tt);at=e?.rect??Td(j.annotation.anchor),st=e?.borderRadius,ot=Wd(j.annotation.anchor,at,S.width,S.height)}else if(M&&j?.kind===`comment`&&j.annotation.anchor.kind===`region`)at=Td(j.annotation.anchor),ot=Hd(j.annotation.anchor,at,S.width,S.height);",
+    "let mt=Te;M?.kind===`comment`?mt=pt?[M.annotation]:Te:pt||P?mt=[]:ft!=null&&(mt=Te.filter(e=>e.id!==ft.id));",
+    "let ht=mt.flatMap(e=>[e]),kt=null,At=`hover-box`,jt,Mt=0,I=[];",
+    "if(P&&M?.annotation.anchor.kind===`element`){Mt=xt[0]??0;let e=bt==null?null:hs(bt),t=e?.rect??Ss(M.annotation.anchor);jt=e?.borderRadius,At=Vs(M.annotation.anchor,t,C.width,C.height),kt=Is(M.annotation.anchor,t,bt),I=bc(F,C,{clipToVisibleArea:!0})}",
   ].join("");
 
   const patched = applyPatchTwice(applyBrowserAnnotationScreenshotPatch, source);
 
   assert.match(
     patched,
-    /Xe=\(M\?j\?\.kind===`comment`\?ge\.filter\(e=>e\.id===j\.annotation\.id\):\[\]:Ye==null\?ge:ge\.filter\(e=>e\.id!==Ye\.id\)\)\.flatMap/,
+    /if\(P&&M\?\.annotation\.anchor\.kind===`element`\)\{Mt=xt\[0\]\?\?0;let t=Ss\(M\.annotation\.anchor\);jt=void 0,At=Vs/,
   );
-  assert.match(
-    patched,
-    /if\(M&&j\?\.annotation\.anchor\.kind===`element`\)\{at=Td\(j\.annotation\.anchor\),st=void 0,ot=Wd\(j\.annotation\.anchor,at,S\.width,S\.height\)\}/,
-  );
+  assert.match(patched, /M\?\.kind===`comment`\?mt=pt\?\[M\.annotation\]:Te/);
+  assert.doesNotMatch(patched, /e\?\.rect\?\?Ss/);
 });
 
-test("patches drifted comment preload screenshot anchor helper names", () => {
+test("keeps the current stored annotation anchor shape unchanged", () => {
   const source =
-    "let rect=null,css=`hover-box`,radius;if(enabled&&selected?.annotation.anchor.kind===`element`){let e=node==null?null:measure(node);rect=e?.rect??anchorRect(selected.annotation.anchor),radius=e?.borderRadius,css=highlight(selected.annotation.anchor,rect,viewport.width,viewport.height)}";
+    "if(P&&M?.annotation.anchor.kind===`element`){Mt=xt[0]??0;let t=Ss(M.annotation.anchor);jt=void 0,At=Vs(M.annotation.anchor,t,C.width,C.height)}";
 
-  const patched = applyPatchTwice(applyBrowserAnnotationScreenshotPatch, source);
-
-  assert.match(
-    patched,
-    /if\(enabled&&selected\?\.annotation\.anchor\.kind===`element`\)\{rect=anchorRect\(selected\.annotation\.anchor\),radius=void 0,css=highlight\(selected\.annotation\.anchor,rect,viewport\.width,viewport\.height\)\}/,
-  );
-  assert.doesNotMatch(patched, /\bWd\(/);
-  assert.doesNotMatch(patched, /\bS\.width\b/);
+  assert.equal(applyPatchTwice(applyBrowserAnnotationScreenshotPatch, source), source);
 });
 
-test("patches current comment preload screenshot marker selection list", () => {
-  const source =
-    "let Ue=M?.annotation.id??null,We=M?.kind===`comment`?[M.annotation]:he,Ge=M!=null&&g!=null,Ke=m?.target.mode===`create`?oo(m.anchor):null,qe=m?.target.mode===`create`&&m.anchor.type===`element`?m.anchor.viewportSize:void 0,Je=Ke==null?null:he.find(e=>le(e.anchor,Ke))??null,Ye=(Ge?M?.kind===`comment`?he:[]:Je==null?he:he.filter(e=>e.id!==Je.id)).flatMap(e=>{let t=fe.get(e.id);if(t==null)return[];return[{comment:e,commentNumber:t}]})";
-
-  const patched = applyPatchTwice(applyBrowserAnnotationScreenshotPatch, source);
-
-  assert.match(
-    patched,
-    /Ye=\(Ge\?M\?\.kind===`comment`\?We:\[\]:Je==null\?he:he\.filter\(e=>e\.id!==Je\.id\)\)\.flatMap/,
+test("reports current comment preload screenshot anchor drift", () => {
+  const source = "if(P&&M?.annotation.anchor.kind===`element`){renderDriftedAnchor()}";
+  const { value, warnings } = captureWarns(() =>
+    applyBrowserAnnotationScreenshotPatch(source),
   );
-  assert.doesNotMatch(patched, /Ge\?M\?\.kind===`comment`\?he:\[\]/);
-});
 
-test("patches Electron 42 comment preload screenshot marker selection list", () => {
-  const source =
-    "let Ue=g==null?null:ge.find(e=>e.id===g)??null,We=g==null?null:we.find(e=>e.id===g)??null,A=Ue==null?We==null?null:{kind:`design`,annotation:We}:{kind:`comment`,annotation:Ue},Ge=A?.annotation.id??null,Ke=A?.kind===`comment`?[A.annotation]:ge,qe=A!=null&&g!=null,Je=m?.target.mode===`create`?ho(m.anchor):null,Ye=m?.target.mode===`create`&&m.anchor.type===`element`?m.anchor.viewportSize:void 0,Xe=Je==null?null:ge.find(e=>ue(e.anchor,Je))??null,Ze=(qe?A?.kind===`comment`?ge:[]:Xe==null?ge:ge.filter(e=>e.id!==Xe.id)).flatMap(e=>{let t=fe.get(e.id);if(t==null)return[];return[{comment:e,commentNumber:t}]})";
-
-  const patched = applyPatchTwice(applyBrowserAnnotationScreenshotPatch, source);
-
-  assert.match(
-    patched,
-    /Ze=\(qe\?A\?\.kind===`comment`\?Ke:\[\]:Xe==null\?ge:ge\.filter\(e=>e\.id!==Xe\.id\)\)\.flatMap/,
-  );
-  assert.doesNotMatch(patched, /qe\?A\?\.kind===`comment`\?ge:\[\]/);
+  assert.equal(value, source);
+  assert.deepEqual(warnings, [
+    "WARN: Could not find browser annotation screenshot element highlight — skipping screenshot anchor patch",
+  ]);
 });
 
 test("guards fast-mode model tier lookup when serviceTiers is missing", () => {
@@ -6750,17 +6731,23 @@ test("adds Linux package updater to current bootstrap updater wiring", () => {
 });
 
 test("fails soft when the current updater callback bridge drifts", () => {
-  const source = currentBootstrapUpdaterBundleFixture().replace(
-    "let ee=new G5,P=null,te=e=>",
-    "let ee=G5(),P=null,te=e=>",
-  );
+  for (const source of [
+    currentBootstrapUpdaterBundleFixture().replace(
+      "let ee=new G5,P=null,W=null,te=e=>",
+      "let ee=G5(),P=null,W=null,te=e=>",
+    ),
+    currentBootstrapUpdaterBundleFixture().replace(
+      "let ee=new G5,P=null,W=null,te=e=>",
+      "let ee=new G5,P=null,te=e=>",
+    ),
+  ]) {
+    const { value: patched, warnings } = captureWarns(() =>
+      applyLinuxAppUpdaterBridgePatch(source),
+    );
 
-  const { value: patched, warnings } = captureWarns(() =>
-    applyLinuxAppUpdaterBridgePatch(source),
-  );
-
-  assert.equal(patched, source);
-  assert.match(warnings.join("\n"), /Could not find current updater callback bridge/);
+    assert.equal(patched, source);
+    assert.match(warnings.join("\n"), /Could not find current updater callback bridge/);
+  }
 });
 
 test("enables the existing app update menu on Linux", () => {
@@ -7717,11 +7704,11 @@ test("keeps already patched external Browser Use availability unchanged", () => 
   assert.equal(applyPatchTwice(applyLinuxBrowserUseExternalAvailabilityPatch, source), source);
 });
 
-test("external Browser Use availability descriptor matches the current bundle name", () => {
+test("external Browser Use availability descriptor matches the current monolithic bundle", () => {
   const descriptor = require("./patches/core/all-linux/webview/browser-use-external-availability/patch.js");
 
-  assert.match("use-is-plugins-enabled-current.js", descriptor.pattern);
-  assert.match("use-in-app-browser-use-availability-B4Bdb14G.js", descriptor.pattern);
+  assert.match("app-initial-BTphDPeq.js", descriptor.pattern);
+  assert.doesNotMatch("use-in-app-browser-use-availability-B4Bdb14G.js", descriptor.pattern);
 });
 
 test("allows Browser Use non-local navigation on Linux without the upstream rollout flag", () => {
@@ -8342,7 +8329,7 @@ const browserUseRecoveryHostSource =
 const browserUseHiddenHostSource =
   "function f(e){return e}function A(e){let{browserUseTabIdsKey:n,conversationId:r}=e,c=e.isRouteOwner,B=e.visibleTabs;if(!c&&B.size>0)return null;let H=Symbol.for(`react.early_return_sentinel`);bb0:{let e=e=>!B.has(e);let a=n.split(`\\0`).map(f).filter(e);if(a.length===0){H=null;break bb0}return a}if(H!==Symbol.for(`react.early_return_sentinel`))return H}";
 
-test("patches the current split Browser webview store and host", () => {
+test("patches the current monolithic Browser webview store and host contracts", () => {
   const patchedStore = applyPatchTwice(
     applyLinuxBrowserUseWebviewRemountStorePatch,
     browserUseRecoveryStoreSource,
@@ -8575,7 +8562,7 @@ test("patches the current split Browser webview store and host", () => {
   assert.equal(store.linuxBrowserUseRecoveryStates.size, 0);
 });
 
-test("Browser webview recovery descriptors target the current renderer chunks", () => {
+test("Browser webview recovery descriptors target the current monolithic renderer chunk", () => {
   const descriptors = require("./patches/core/all-linux/webview/browser-use-attach-recovery/patch.js");
   const storeDescriptor = descriptors.find(
     (descriptor) => descriptor.id === "linux-browser-use-webview-attach-recovery-store",
@@ -8591,19 +8578,19 @@ test("Browser webview recovery descriptors target the current renderer chunks", 
   assert.ok(hostDescriptor);
   assert.ok(hiddenHostDescriptor);
   assert.match(
-    "app-initial~artifact-tab-content.electron~app-main~appgen-settings-page~page~pull-request-r~mxek7o2y-BH5mkLvE.js",
+    "app-initial-BTphDPeq.js",
     storeDescriptor.pattern,
   );
   assert.doesNotMatch(
-    "app-initial~app-main~onboarding-page-CIkoyvFz.js",
+    "app-initial~artifact-tab-content.electron~app-main~legacy.js",
     storeDescriptor.pattern,
   );
   assert.match(
-    "app-initial~app-main~pull-request-route~onboarding-page~hotkey-window-thread-page~quick-cha~mo2avlln-Be1pn_Z1.js",
+    "app-initial-BTphDPeq.js",
     hostDescriptor.pattern,
   );
   assert.doesNotMatch(
-    "app-initial~app-main~onboarding-page-CIkoyvFz.js",
+    "app-initial~app-main~onboarding-page-legacy.js",
     hostDescriptor.pattern,
   );
   assert.match(
@@ -8616,7 +8603,7 @@ test("Browser webview recovery descriptors target the current renderer chunks", 
   );
 });
 
-test("current split Browser webview assets apply all recovery descriptors without report drift", () => {
+test("current monolithic Browser webview asset applies all recovery descriptors without report drift", () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "codex-browser-webview-current-"));
   try {
     const buildDir = path.join(tempRoot, ".vite", "build");
@@ -8625,18 +8612,8 @@ test("current split Browser webview assets apply all recovery descriptors withou
     fs.mkdirSync(assetsDir, { recursive: true });
     fs.writeFileSync(path.join(buildDir, "main.js"), "module.exports={}");
     fs.writeFileSync(
-      path.join(
-        assetsDir,
-        "app-initial~artifact-tab-content.electron~app-main~appgen-settings-page~page~pull-request-r~mxek7o2y-BH5mkLvE.js",
-      ),
-      browserUseRecoveryStoreSource,
-    );
-    fs.writeFileSync(
-      path.join(
-        assetsDir,
-        "app-initial~app-main~pull-request-route~onboarding-page~hotkey-window-thread-page~quick-cha~mo2avlln-Be1pn_Z1.js",
-      ),
-      browserUseRecoveryHostSource,
+      path.join(assetsDir, "app-initial-BTphDPeq.js"),
+      `${browserUseRecoveryStoreSource}${browserUseRecoveryHostSource}`,
     );
     fs.writeFileSync(
       path.join(assetsDir, "browser-sidebar-hidden-browser-use-webview-host-DbLBblbO.js"),
@@ -8670,16 +8647,14 @@ test("current split Browser webview assets apply all recovery descriptors withou
   }
 });
 
-test("reports drift when current split Browser recovery assets lose their primary needles", () => {
+test("reports drift when current Browser recovery assets lose their primary needles", () => {
   const cases = [
     {
-      assetName:
-        "app-initial~artifact-tab-content.electron~app-main~appgen-settings-page~page~pull-request-r~mxek7o2y-BH5mkLvE.js",
+      assetName: "app-initial-BTphDPeq.js",
       patchName: "linux-browser-use-webview-attach-recovery-store",
     },
     {
-      assetName:
-        "app-initial~app-main~pull-request-route~onboarding-page~hotkey-window-thread-page~quick-cha~mo2avlln-Be1pn_Z1.js",
+      assetName: "app-initial-BTphDPeq.js",
       patchName: "linux-browser-use-webview-attach-recovery-host",
     },
     {
