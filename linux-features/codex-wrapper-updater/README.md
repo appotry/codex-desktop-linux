@@ -58,12 +58,9 @@ features the rebuild stages.
 - No display, no dialog tool, no recorded candidate catalog, or a dialog launch
   failure skips the prompt and leaves the current feature set unchanged.
 
-## Toolbar states
+## Update button states
 
-- A **SHA chip** shows the installed short commit when build metadata is
-  available (a git-ref-style pill, e.g. `5fcfea9`), so you can see which build
-  is running.
-- The action chip is color-coded:
+- The action button is color-coded:
   - **green Update** means a genuinely newer upstream build is available.
   - **amber dev mode** (non-clickable) means the installed build appears to be
     ahead of the tracked remote, so updating would be a downgrade; the update

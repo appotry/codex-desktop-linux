@@ -22,11 +22,23 @@ const {
   applyRecordReplayPluginGatePatch,
   applyRecordReplayMainBridgePatch,
   descriptors,
+  recordReplayBridgeSource,
   recordReplayHelperSource,
   recordReplayHudRuntimeSource,
 } = require("./patch.js");
 
 const featureDir = __dirname;
+
+function captureWarns(fn) {
+  const warnings = [];
+  const originalWarn = console.warn;
+  console.warn = (...args) => warnings.push(args.join(" "));
+  try {
+    return { value: fn(), warnings };
+  } finally {
+    console.warn = originalWarn;
+  }
+}
 
 function repoRoot() {
   return path.resolve(featureDir, "../..");
@@ -124,8 +136,12 @@ test("record-and-replay patch descriptor loads only when feature is enabled", ()
 test("record-and-replay dictation descriptor tracks moved upstream composer bundle", () => {
   const descriptor = descriptors.find((patch) => patch.id === "record-replay-dictation-transcript");
   assert.ok(descriptor);
-  assert.equal(descriptor.pattern.test("app-initial~app-main~onboarding-page-BUwCKIcU.js"), true);
-  assert.equal(descriptor.pattern.test("use-dictation-BUwCKIcU.js"), true);
+  assert.equal(descriptor.pattern.test("app-initial-C-fROkKo.js"), true);
+  assert.equal(descriptor.assetMatch(
+    "let a=i.trim();a.length>0&&(qf.getInstance().dispatchMessage(`global-dictation-record-history-item`,{text:a}),t===`send`?r.onTranscriptSend(a):r.onTranscriptInsert(a))",
+  ), true);
+  assert.equal(descriptor.pattern.test("app-initial~app-main~onboarding-page-BUwCKIcU.js"), false);
+  assert.equal(descriptor.pattern.test("use-dictation-BUwCKIcU.js"), false);
   assert.equal(descriptor.pattern.test("use-dictation-hotkey-BUwCKIcU.js"), false);
 });
 
@@ -141,6 +157,7 @@ test("record-and-replay bridge patch is idempotent and uses execFile", () => {
   assert.equal(descriptors.length, 5);
   const source = [
     "const cp=require(\"node:child_process\"),fs=require(\"node:fs\"),path=require(\"node:path\");",
+    "var tray={getChronicleSidecarControlState:()=>tt().skysight?$9:Se.appServerConnectionRegistry.getMaybeConnection(`local`)?.getChronicleSidecarControlState()??$9,toggleChronicleSidecar:async()=>{if(tt().skysight)return $9;let e=Se.appServerConnectionRegistry.getMaybeConnection(V);return e==null?$9:e.getChronicleSidecarControlState().running?e.pauseChronicleSidecar():e.resumeChronicleSidecar()}};",
     "var bridge={\"get-global-state\":async({key:e})=>null};",
   ].join("");
 
@@ -195,6 +212,60 @@ test("record-and-replay bridge patch is idempotent and uses execFile", () => {
   assert.doesNotMatch(patched, /"--target"/);
   assert.doesNotMatch(patched, /"--target-dir"/);
   assert.doesNotMatch(patched, /"--mode"/);
+});
+
+test("record-and-replay rejects incomplete current bridge variants byte-identically", () => {
+  const source = [
+    'const cp=require("node:child_process"),fs=require("node:fs"),path=require("node:path");',
+    "var tray={getChronicleSidecarControlState:()=>tt().skysight?$9:Se.appServerConnectionRegistry.getMaybeConnection(`local`)?.getChronicleSidecarControlState()??$9,toggleChronicleSidecar:async()=>{if(tt().skysight)return $9;let e=Se.appServerConnectionRegistry.getMaybeConnection(V);return e==null?$9:e.getChronicleSidecarControlState().running?e.pauseChronicleSidecar():e.resumeChronicleSidecar()}};",
+    'var bridge={"get-global-state":async({key:e})=>null};',
+  ].join("");
+  const patched = applyRecordReplayMainBridgePatch(source);
+  const bridgePayload = recordReplayBridgeSource({
+    childProcessVar: "cp",
+    fsVar: "fs",
+    pathVar: "path",
+  });
+  const helperPayload = recordReplayHelperSource({
+    childProcessVar: "cp",
+    fsVar: "fs",
+    pathVar: "path",
+  });
+  const trayStart = patched.indexOf("var tray=");
+  const trayEnd = patched.indexOf(";var bridge=", trayStart);
+  const trayStatement = patched.slice(trayStart, trayEnd + 1);
+  const variants = {
+    "legacy tray shape": patched
+      .replace(":tt().skysight?$9:", ":")
+      .replace("if(tt().skysight)return $9;", ""),
+    "missing Linux toggle branch": patched.replace(
+      "if(process.platform===`linux`)return codexLinuxChronicleToggleSidecar();",
+      "",
+    ),
+    "missing current bridge handler": patched.replace(
+      '"linux-record-replay-status":async',
+      '"linux-record-replay-status-missing":async',
+    ),
+    "misplaced bridge payload": `${patched.replace(
+      `${bridgePayload},"get-global-state":async`,
+      '"get-global-state":async',
+    )}var misplaced={${bridgePayload}};`,
+    "duplicate bridge payload": patched.replace(
+      `${bridgePayload},"get-global-state":async`,
+      `${bridgePayload},${bridgePayload},"get-global-state":async`,
+    ),
+    "helper-only partial": `${helperPayload}\n${source}`,
+    "duplicate helper payload": `${helperPayload}\n${patched}`,
+    "duplicate patched tray": `${patched}${trayStatement}`,
+  };
+
+  for (const [name, drifted] of Object.entries(variants)) {
+    assert.notEqual(drifted, patched, name);
+    const { value, warnings } = captureWarns(() => applyRecordReplayMainBridgePatch(drifted));
+    assert.equal(value, drifted, name);
+    assert.equal(warnings.length, 1, name);
+    assert.match(warnings[0], /incomplete Record & Replay main bridge patch/, name);
+  }
 });
 
 test("record-and-replay Chronicle helpers map Skysight status into upstream sidecar state", () => {
@@ -412,6 +483,7 @@ test("record-and-replay Chronicle setup probe does not churn start when summary 
 test("record-and-replay generic Skysight start can pass summary agent true or false", async () => {
   const source = [
     "const cp=require(\"node:child_process\"),fs=require(\"node:fs\"),path=require(\"node:path\");",
+    "var tray={getChronicleSidecarControlState:()=>tt().skysight?$9:Se.appServerConnectionRegistry.getMaybeConnection(`local`)?.getChronicleSidecarControlState()??$9,toggleChronicleSidecar:async()=>{if(tt().skysight)return $9;let e=Se.appServerConnectionRegistry.getMaybeConnection(V);return e==null?$9:e.getChronicleSidecarControlState().running?e.pauseChronicleSidecar():e.resumeChronicleSidecar()}};",
     "var bridge={\"get-global-state\":async({key:e})=>null};",
   ].join("");
   const patched = applyRecordReplayMainBridgePatch(source);
@@ -426,7 +498,7 @@ test("record-and-replay generic Skysight start can pass summary agent true or fa
 test("record-and-replay patch wires Linux Chronicle tray controls to Skysight", () => {
   const source = [
     'const cp=require("node:child_process"),fs=require("node:fs"),path=require("node:path");',
-    "var tray={getChronicleSidecarControlState:()=>ue.appServerConnectionRegistry.getMaybeConnection(`local`)?.getChronicleSidecarControlState()??$9,toggleChronicleSidecar:async()=>{let e=ue.appServerConnectionRegistry.getMaybeConnection(B);return e==null?$9:e.getChronicleSidecarControlState().running?e.pauseChronicleSidecar():e.resumeChronicleSidecar()}};",
+    "var tray={getChronicleSidecarControlState:()=>tt().skysight?$9:Se.appServerConnectionRegistry.getMaybeConnection(`local`)?.getChronicleSidecarControlState()??$9,toggleChronicleSidecar:async()=>{if(tt().skysight)return $9;let e=Se.appServerConnectionRegistry.getMaybeConnection(V);return e==null?$9:e.getChronicleSidecarControlState().running?e.pauseChronicleSidecar():e.resumeChronicleSidecar()}};",
     'var bridge={"get-global-state":async({key:e})=>null};',
   ].join("");
   const patched = applyRecordReplayMainBridgePatch(source);
@@ -435,23 +507,18 @@ test("record-and-replay patch wires Linux Chronicle tray controls to Skysight", 
   assert.equal(applyRecordReplayMainBridgePatch(patched), patched);
   assert.match(patched, /getChronicleSidecarControlState:\(\)=>process\.platform===`linux`\?codexLinuxChronicleSidecarControlState\(\)/);
   assert.match(patched, /toggleChronicleSidecar:async\(\)=>\{if\(process\.platform===`linux`\)return codexLinuxChronicleToggleSidecar\(\)/);
+  assert.match(patched, /if\(tt\(\)\.skysight\)return \$9/);
   assert.match(patched, /e\.pauseChronicleSidecar\(\):e\.resumeChronicleSidecar\(\)/);
 });
 
-test("record-and-replay bridge patch upgrades old patched bundles with active speech endpoint", () => {
-  const oldPatched =
-    'var bridge={"linux-record-replay-doctor":async()=>null,"linux-record-replay-speech-context":async()=>null,"linux-record-replay-browser-trace":async()=>null,"get-global-state":async({key:e})=>null};';
-  const patched = applyRecordReplayMainBridgePatch(oldPatched);
+test("record-and-replay rejects partial current Chronicle tray drift byte-identically", () => {
+  const source = [
+    'const cp=require("node:child_process"),fs=require("node:fs"),path=require("node:path");',
+    "var tray={getChronicleSidecarControlState:()=>tt().skysight?$9:Se.appServerConnectionRegistry.getMaybeConnection(`local`)?.getChronicleSidecarControlState()??$9,toggleChronicleSidecar:async()=>{if(tt().skysight)return $9;let e=Se.appServerConnectionRegistry.getMaybeConnection(V);return e==null?$9:e.getChronicleSidecarControlState().running?e.stopChronicleSidecar():e.resumeChronicleSidecar()}};",
+    'var bridge={"get-global-state":async({key:e})=>null};',
+  ].join("");
 
-  assert.notEqual(patched, oldPatched);
-  assert.equal(applyRecordReplayMainBridgePatch(patched), patched);
-  assert.match(patched, /"linux-record-replay-speech-context-active":async/);
-  assert.match(
-    patched,
-    /"linux-record-replay-speech-context":async\(\)=>null,"linux-record-replay-speech-context-active":async/,
-  );
-  assert.match(patched, /"linux-record-replay-browser-trace":async\(\)=>null/);
-  assert.doesNotMatch(patched, /"chronicle-permissions":async/);
+  assert.equal(applyRecordReplayMainBridgePatch(source), source);
 });
 
 test("record-and-replay docs mention pause resume and Chronicle-compatible resources", () => {
@@ -713,6 +780,67 @@ test("record-and-replay plugin gate is idempotent and linux-only", () => {
   assert.match(patched, /name:ft,isAvailable:\(\{features:e,platform:t\}\)=>t===`darwin`&&e\.computerUse/);
 });
 
+test("record-and-replay plugin gate rejects obsolete isEnabled availability contract", () => {
+  const source = [
+    "var lt=`browser-use`,ft=`computer-use`,pt=`latex-tectonic`;",
+    "var Kr=[{forceReload:!0,installWhenMissing:!0,name:lt,isAvailable:({features:e})=>e.inAppBrowserUseAllowed},{installWhenMissing:!0,name:`record-and-replay`,isEnabled:({platform:e})=>e===`linux`},{name:ft,isAvailable:({features:e,platform:t})=>t===`darwin`&&e.computerUse,migrate:vr},{name:pt,isAvailable:()=>!0}];",
+  ].join("");
+
+  assert.throws(
+    () => applyRecordReplayPluginGatePatch(source),
+    /obsolete isEnabled availability contract/,
+  );
+});
+
+test("record-and-replay plugin gate rejects mixed current and obsolete availability contracts", () => {
+  const source = [
+    "var lt=`browser-use`,ft=`computer-use`,pt=`latex-tectonic`;",
+    "var Kr=[{forceReload:!0,installWhenMissing:!0,name:lt,isAvailable:({features:e})=>e.inAppBrowserUseAllowed},{installWhenMissing:!0,name:`record-and-replay`,isAvailable:({platform:e})=>e===`linux`},{installWhenMissing:!0,name:`record-and-replay`,isEnabled:({platform:e})=>e===`linux`},{name:ft,isAvailable:({features:e,platform:t})=>t===`darwin`&&e.computerUse,migrate:vr},{name:pt,isAvailable:()=>!0}];",
+  ].join("");
+
+  assert.throws(
+    () => applyRecordReplayPluginGatePatch(source),
+    /obsolete isEnabled availability contract/,
+  );
+});
+
+test("record-and-replay plugin gate rejects a misplaced current availability contract", () => {
+  const source = [
+    "var misplaced={installWhenMissing:!0,name:`record-and-replay`,isAvailable:({platform:e})=>e===`linux`};",
+    "var lt=`browser-use`,ft=`computer-use`,pt=`latex-tectonic`;",
+    "var Kr=[{forceReload:!0,installWhenMissing:!0,name:lt,isAvailable:({features:e})=>e.inAppBrowserUseAllowed},{name:ft,isAvailable:({features:e,platform:t})=>t===`darwin`&&e.computerUse,migrate:vr},{name:pt,isAvailable:()=>!0}];",
+  ].join("");
+
+  assert.throws(
+    () => applyRecordReplayPluginGatePatch(source),
+    /invalid isAvailable availability contract/,
+  );
+});
+
+test("record-and-replay plugin gate rejects a non-Linux current availability predicate", () => {
+  const source = [
+    "var lt=`browser-use`,ft=`computer-use`,pt=`latex-tectonic`;",
+    "var Kr=[{forceReload:!0,installWhenMissing:!0,name:lt,isAvailable:({features:e})=>e.inAppBrowserUseAllowed},{installWhenMissing:!0,name:`record-and-replay`,isAvailable:()=>!0},{name:ft,isAvailable:({features:e,platform:t})=>t===`darwin`&&e.computerUse,migrate:vr},{name:pt,isAvailable:()=>!0}];",
+  ].join("");
+
+  assert.throws(
+    () => applyRecordReplayPluginGatePatch(source),
+    /invalid isAvailable availability contract/,
+  );
+});
+
+test("record-and-replay plugin gate rejects incomplete descriptor metadata", () => {
+  const source = [
+    "var lt=`browser-use`,ft=`computer-use`,pt=`latex-tectonic`;",
+    "var Kr=[{forceReload:!0,installWhenMissing:!0,name:lt,isAvailable:({features:e})=>e.inAppBrowserUseAllowed},{name:`record-and-replay`,isAvailable:({platform:e})=>e===`linux`},{name:ft,isAvailable:({features:e,platform:t})=>t===`darwin`&&e.computerUse,migrate:vr},{name:pt,isAvailable:()=>!0}];",
+  ].join("");
+
+  assert.throws(
+    () => applyRecordReplayPluginGatePatch(source),
+    /invalid isAvailable availability contract/,
+  );
+});
+
 test("record-and-replay plugin template matches upstream-shaped plugin UX", () => {
   const plugin = JSON.parse(fs.readFileSync(path.join(featureDir, "plugin-template/.codex-plugin/plugin.json"), "utf8"));
   const mcp = JSON.parse(fs.readFileSync(path.join(featureDir, "plugin-template/.mcp.json"), "utf8"));
@@ -873,26 +1001,26 @@ test("launcher rejects unsafe bundled plugin version path components", () => {
   }
 });
 
-test("record-and-replay stage hook uses upstream plugin shell when present", () => {
+test("record-and-replay stage hook uses the current upstream plugin shell when present", () => {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "codex-record-replay-stage-upstream-"));
   try {
     const installDir = path.join(workspace, "install");
     const fakeBinary = path.join(workspace, "codex-record-replay-linux");
     const upstreamPlugin = path.join(
       workspace,
-      "upstream/Codex.app/Contents/Resources/plugins/openai-bundled/plugins/record-and-replay",
+      "upstream/ChatGPT.app/Contents/Resources/plugins/openai-bundled/plugins/record-and-replay",
     );
     const marketplace = path.join(installDir, "resources/plugins/openai-bundled/.agents/plugins/marketplace.json");
     fs.mkdirSync(path.join(upstreamPlugin, ".codex-plugin"), { recursive: true });
     fs.mkdirSync(path.join(upstreamPlugin, "assets"), { recursive: true });
+    fs.mkdirSync(path.join(upstreamPlugin, "bin"), { recursive: true });
     fs.mkdirSync(path.join(upstreamPlugin, "skills/record-and-replay"), { recursive: true });
-    fs.mkdirSync(path.join(upstreamPlugin, "Codex Computer Use.app/Contents/MacOS"), { recursive: true });
     fs.mkdirSync(path.dirname(marketplace), { recursive: true });
     fs.writeFileSync(
       path.join(upstreamPlugin, ".codex-plugin/plugin.json"),
       JSON.stringify({
         name: "record-and-replay",
-        version: "1.0.857",
+        version: "1.0.1000502",
         description: "Record what I'm doing on my Mac",
         author: { name: "OpenAI" },
         mcpServers: "./.mcp.json",
@@ -911,16 +1039,18 @@ test("record-and-replay stage hook uses upstream plugin shell when present", () 
       JSON.stringify({
         mcpServers: {
           "event-stream": {
-            command: "./Codex Computer Use.app/Contents/SharedSupport/SkyComputerUseClient.app/Contents/MacOS/SkyComputerUseClient",
+            command: "./bin/computer-use-client-launcher",
             args: ["event-stream", "mcp"],
             cwd: ".",
+            env_vars: ["CODEX_HOME"],
           },
         },
       }),
     );
     fs.writeFileSync(path.join(upstreamPlugin, "assets/app-icon.png"), "official-png");
+    fs.writeFileSync(path.join(upstreamPlugin, "bin/computer-use-client-launcher"), "#!/bin/sh\nexec false\n");
+    fs.chmodSync(path.join(upstreamPlugin, "bin/computer-use-client-launcher"), 0o755);
     fs.writeFileSync(path.join(upstreamPlugin, "skills/record-and-replay/SKILL.md"), "official mac skill");
-    fs.writeFileSync(path.join(upstreamPlugin, "Codex Computer Use.app/Contents/MacOS/SkyComputerUseClient"), "mach-o");
     fs.writeFileSync(marketplace, JSON.stringify({ plugins: [] }));
     fs.writeFileSync(fakeBinary, "#!/bin/sh\nprintf '{\"ok\":true}\\n'\n");
     fs.chmodSync(fakeBinary, 0o755);
@@ -931,7 +1061,7 @@ test("record-and-replay stage hook uses upstream plugin shell when present", () 
         ...process.env,
         SCRIPT_DIR: repoRoot(),
         INSTALL_DIR: installDir,
-        CODEX_UPSTREAM_APP_DIR: path.join(workspace, "upstream/Codex.app"),
+        CODEX_UPSTREAM_APP_DIR: path.join(workspace, "upstream/ChatGPT.app"),
         CODEX_RECORD_REPLAY_LINUX_SOURCE: fakeBinary,
       },
       stdio: "pipe",
@@ -942,9 +1072,9 @@ test("record-and-replay stage hook uses upstream plugin shell when present", () 
     const stagedMcp = JSON.parse(fs.readFileSync(path.join(pluginDir, ".mcp.json"), "utf8"));
     const stagedSkill = fs.readFileSync(path.join(pluginDir, "skills/record-and-replay/SKILL.md"), "utf8");
 
-    assert.equal(fs.existsSync(path.join(pluginDir, "Codex Computer Use.app")), false);
+    assert.equal(fs.readFileSync(path.join(pluginDir, "bin/computer-use-client-launcher"), "utf8"), "#!/bin/sh\nexec false\n");
     assert.equal(fs.readFileSync(path.join(pluginDir, "assets/app-icon.png"), "utf8"), "official-png");
-    assert.equal(stagedPlugin.version, "1.0.857");
+    assert.equal(stagedPlugin.version, "1.0.1000502");
     assert.equal(stagedPlugin.description, "Record what I'm doing on Linux");
     assert.equal(stagedPlugin.interface.shortDescription, "Record what I'm doing on Linux and turn it into a Skill");
     assert.equal(stagedPlugin.interface.logo, "./assets/record-and-replay-plugin-icon.png");
@@ -959,6 +1089,76 @@ test("record-and-replay stage hook uses upstream plugin shell when present", () 
     assert.match(stagedSkill, /event_stream_start/);
     assert.equal(fs.existsSync(path.join(pluginDir, "bin/codex-record-replay-linux")), true);
     assert.equal(fs.existsSync(path.join(pluginDir, "bin/SkyLinuxComputerUseClient")), true);
+  } finally {
+    fs.rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test("record-and-replay stage hook rejects the obsolete nested-app plugin shell", () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "codex-record-replay-stage-obsolete-"));
+  try {
+    const installDir = path.join(workspace, "install");
+    const fakeBinary = path.join(workspace, "codex-record-replay-linux");
+    const upstreamPlugin = path.join(
+      workspace,
+      "upstream/ChatGPT.app/Contents/Resources/plugins/openai-bundled/plugins/record-and-replay",
+    );
+    const oldClient = path.join(
+      upstreamPlugin,
+      "Codex Computer Use.app/Contents/SharedSupport/SkyComputerUseClient.app/Contents/MacOS/SkyComputerUseClient",
+    );
+    const marketplace = path.join(installDir, "resources/plugins/openai-bundled/.agents/plugins/marketplace.json");
+    fs.mkdirSync(path.join(upstreamPlugin, ".codex-plugin"), { recursive: true });
+    fs.mkdirSync(path.join(upstreamPlugin, "bin"), { recursive: true });
+    fs.mkdirSync(path.join(upstreamPlugin, "skills/record-and-replay"), { recursive: true });
+    fs.mkdirSync(path.dirname(oldClient), { recursive: true });
+    fs.mkdirSync(path.dirname(marketplace), { recursive: true });
+    fs.writeFileSync(
+      path.join(upstreamPlugin, ".codex-plugin/plugin.json"),
+      JSON.stringify({
+        name: "record-and-replay",
+        version: "1.0.857",
+        mcpServers: "./.mcp.json",
+        skills: "./skills/",
+      }),
+    );
+    fs.writeFileSync(
+      path.join(upstreamPlugin, ".mcp.json"),
+      JSON.stringify({
+        mcpServers: {
+          "event-stream": {
+            command:
+              "./Codex Computer Use.app/Contents/SharedSupport/SkyComputerUseClient.app/Contents/MacOS/SkyComputerUseClient",
+            args: ["event-stream", "mcp"],
+            cwd: ".",
+          },
+        },
+      }),
+    );
+    fs.writeFileSync(path.join(upstreamPlugin, "skills/record-and-replay/SKILL.md"), "obsolete mac skill");
+    fs.writeFileSync(path.join(upstreamPlugin, "bin/computer-use-client-launcher"), "#!/bin/sh\nexec false\n");
+    fs.chmodSync(path.join(upstreamPlugin, "bin/computer-use-client-launcher"), 0o755);
+    fs.writeFileSync(oldClient, "mach-o");
+    fs.writeFileSync(marketplace, JSON.stringify({ plugins: [] }));
+    fs.writeFileSync(fakeBinary, "#!/bin/sh\nprintf '{\"ok\":true}\\n'\n");
+    fs.chmodSync(fakeBinary, 0o755);
+
+    execFileSync("bash", [path.join(featureDir, "stage.sh")], {
+      cwd: workspace,
+      env: {
+        ...process.env,
+        SCRIPT_DIR: repoRoot(),
+        INSTALL_DIR: installDir,
+        CODEX_UPSTREAM_APP_DIR: path.join(workspace, "upstream/ChatGPT.app"),
+        CODEX_RECORD_REPLAY_LINUX_SOURCE: fakeBinary,
+      },
+      stdio: "pipe",
+    });
+
+    const pluginDir = path.join(installDir, "resources/plugins/openai-bundled/plugins/record-and-replay");
+    const stagedPlugin = JSON.parse(fs.readFileSync(path.join(pluginDir, ".codex-plugin/plugin.json"), "utf8"));
+    assert.equal(stagedPlugin.version, "0.1.0-linux-alpha1");
+    assert.equal(fs.existsSync(path.join(pluginDir, "Codex Computer Use.app")), false);
   } finally {
     fs.rmSync(workspace, { recursive: true, force: true });
   }

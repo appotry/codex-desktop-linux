@@ -70,6 +70,7 @@ test("main bundle patch writes app-state wrapper marker", () => {
   assert.match(patched, /codex-wrapper-updater/);
   assert.match(patched, /wrapper_dev_mode/);
   assert.match(patched, /installed_wrapper_commit/);
+  assert.match(patched, /installed_commit/);
   assert.doesNotMatch(patched, /wrapper-update-pending/);
   assert.doesNotMatch(patched, /wrapper_status/);
 });
@@ -91,11 +92,11 @@ test("main bundle helper does not shadow minified module variables", () => {
   assert.doesNotMatch(patched, /__codexChild/);
 });
 
-test("webview runtime renders dev-mode and installed-sha chips", () => {
+test("webview runtime renders dev-mode without an installed SHA chip", () => {
   const patched = applyWebviewRuntimePatch("console.log('codex');");
 
-  assert.match(patched, /codex-linux-wrapper-sha/);
-  assert.match(patched, /installed_commit/);
+  assert.match(patched, /codex-wrapper-updater-v4/);
+  assert.doesNotMatch(patched, /codex-linux-wrapper-sha/);
   assert.match(patched, /dev-mode/);
   assert.match(patched, /\\u2699/);
   assert.match(patched, /\\u2193/);
