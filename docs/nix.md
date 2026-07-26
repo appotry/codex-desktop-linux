@@ -205,6 +205,7 @@ The Home Manager and NixOS modules accept these feature IDs through
 | Feature ID | Purpose |
 | --- | --- |
 | `appshots` | Linux AppShots capture integration |
+| `codex-micro` | Work Louder Codex Micro USB and Bluetooth HID integration |
 | `directory-only-working-tree-watch` | Bounded directory-only working-tree watches |
 | `frameless-titlebar` | Hide app-provided titlebar controls for compositor-managed decorations |
 | `mcp-helper-reaper` | Cleanup for stale configured MCP helper processes |
@@ -217,6 +218,11 @@ The list is validated during module evaluation, then deduplicated and sorted so
 equivalent configurations produce the same derivation. Features that are not in
 this Nix allowlist remain available through the regular opt-in feature flow but
 cannot be selected from a pure flake configuration.
+
+When `codex-micro` is selected, the NixOS module installs the feature's udev
+rule automatically. Home Manager and direct flake installs cannot change
+system-wide udev policy; follow the manual rule-installation steps in the
+[Codex Micro feature documentation](../linux-features/codex-micro/README.md).
 
 ## Home Manager / NixOS Module
 

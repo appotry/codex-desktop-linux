@@ -23,6 +23,9 @@ let
     inherit cfg flakePackages lib;
   };
   basePackage = packageSelection.package;
+  codexMicroEnabled =
+    cfg.package == null
+    && lib.elem "codex-micro" packageSelection.normalizedFeatureIds;
   codexCliPackage =
     if cfg.cliPackage != null then
       cfg.cliPackage
@@ -272,6 +275,10 @@ in
 
     environment.systemPackages = [
       desktopPackage
+    ];
+
+    services.udev.packages = lib.optionals codexMicroEnabled [
+      basePackage
     ];
 
     environment.sessionVariables = lib.mkIf (remoteCfg.enable && remoteCfg.disableLauncherAutostart) {
