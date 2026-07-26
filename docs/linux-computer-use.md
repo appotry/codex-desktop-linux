@@ -17,10 +17,10 @@ It supports:
 
 ## Runtime Dependencies
 
-Install `ydotool` 1.0 or newer when you need the fallback input path. Some
-Debian and Ubuntu releases still package the incompatible pre-1.0 CLI; the
-Computer Use readiness report detects and rejects it instead of sending unsafe
-input commands.
+Install `ydotool` 1.0.2 or newer when you need the fallback input path. Earlier
+releases lack wheel movement or functional stdin typing required by the
+backend. The Computer Use readiness report detects and rejects incompatible
+CLIs instead of sending unsafe input commands.
 
 ```bash
 # Debian / Ubuntu

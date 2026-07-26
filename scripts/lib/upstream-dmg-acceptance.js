@@ -4,7 +4,7 @@ const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
 
-const { sourceInfoFromGit } = require("./build-info.js");
+const { sourceInfo } = require("./build-info.js");
 const { enabledFeatureFailuresFromReport, optionalDriftFromReport } = require("./patch-report.js");
 const { readPatchReport, validatePatchReport } = require("./patch-validation.js");
 const { UPSTREAM_DMG_RELEASE_PROFILE } = require("./upstream-dmg-release-profile.js");
@@ -172,7 +172,8 @@ function evaluateUpstreamDmg(options) {
       : warnings.length > 0
         ? "accepted_with_warnings"
         : "accepted";
-  const source = buildInfo?.source ?? sourceInfoFromGit(options.repoRoot ?? process.cwd()) ?? null;
+  const discoveredSource = sourceInfo(options.repoRoot ?? process.cwd());
+  const source = buildInfo?.source ?? (discoveredSource.commit == null ? null : discoveredSource);
 
   return {
     schemaVersion: 1,
