@@ -8980,7 +8980,7 @@ const x={o:e=>e};let s=require(`node:url`),n=require(`electron`);n=x.o(n);let l=
 var pb=class{getNativeTrayMenuItems(){return[{label:this.systemQuitMenuItemLabel,click:()=>{n.app.quit()}}]}};
 function qB(r,o){if(o.type===`quit-app`){n.app.quit();return}return o}
 n.app.on(`before-quit`,o=>{let s=BI(),c=t.sr().some(e=>e.status===`ACTIVE`);if(e||i.canQuitWithoutPrompt()||r||!s&&!c){g=!0,a.markAppQuitting();return}let l=n.app.getName();if(n.dialog.showMessageBoxSync({type:`warning`,buttons:[`Quit`,`Cancel`],defaultId:0,cancelId:1,noLink:!0,title:`Quit ${l}?`,message:`Quit ${l}?`,detail:vB({hasInProgressLocalConversation:s,hasEnabledAutomations:c})})!==0){o.preventDefault();return}i.markQuitApproved(),g=!0,a.markAppQuitting()});
-n.app.on(`will-quit`,e=>{if(g=!0,!h){if(i.shouldSkipDrainBeforeQuit()){mB({hotkeyWindowLifecycleManager:c,globalDictationLifecycleManager:l,flushAndDisposeContexts:d,disposables:f});return}e.preventDefault(),h=!0,c.dispose(),l.dispose(),Promise.all([u.flush(),p.flush()]).finally(()=>{d(),f.dispose(),n.app.quit()})}});
+l.app.on(`will-quit`,e=>{if(y=!0,v)return;let t=()=>{U5(h,N5).then(()=>{g.dispose(),l.app.quit()})};if(r.shouldSkipDrainBeforeQuit()){e.preventDefault(),v=!0,c.dispose(),u.dispose(),Promise.allSettled([p(),m()]).then(t);return}e.preventDefault(),v=!0,c.dispose(),u.dispose(),Promise.allSettled([d.flush(),f.flush(),p(),m()]).then(t)});
 JS
 )"
     make_fake_extracted_asar "$extracted" "$bundle_body"
@@ -8992,9 +8992,18 @@ JS
     assert_contains "$extracted/.vite/build/main-test.js" 'if(o.type===`quit-app`){typeof codexLinuxPrepareForExplicitQuit===`function`?codexLinuxPrepareForExplicitQuit():typeof codexLinuxMarkQuitInProgress===`function`&&codexLinuxMarkQuitInProgress(),n.app.quit();return}'
     assert_contains "$extracted/.vite/build/main-test.js" 'if((typeof codexLinuxShouldBypassQuitPrompt===`function`&&codexLinuxShouldBypassQuitPrompt())||e||i.canQuitWithoutPrompt()||r||!s&&!c){process.platform===`linux`&&typeof codexLinuxMarkQuitInProgress===`function`&&codexLinuxMarkQuitInProgress(),g=!0,a.markAppQuitting();return}'
     assert_contains "$extracted/.vite/build/main-test.js" 'process.platform===`linux`&&typeof codexLinuxMarkQuitInProgress===`function`&&codexLinuxMarkQuitInProgress(),i.markQuitApproved(),g=!0,a.markAppQuitting()'
-    assert_contains "$extracted/.vite/build/main-test.js" 'codexLinuxFinalizeQuit=()=>{d(),f.dispose(),n.app.quit()},codexLinuxDrainPromise=Promise.all('
+    assert_contains "$extracted/.vite/build/main-test.js" 'codexLinuxLogQuitDrainResults=e=>{'
+    assert_contains "$extracted/.vite/build/main-test.js" 'codexLinuxFinalizeQuit=()=>{'
+    assert_not_contains "$extracted/.vite/build/main-test.js" 'codexLinuxQuitFinalized'
+    assert_contains "$extracted/.vite/build/main-test.js" 'WARN: Linux quit drain cleanup failed'
+    assert_contains "$extracted/.vite/build/main-test.js" 'WARN: Linux quit context cleanup failed'
+    assert_contains "$extracted/.vite/build/main-test.js" 'WARN: Linux quit disposables cleanup failed'
+    assert_contains "$extracted/.vite/build/main-test.js" 'finally{l.app.exit(0)}'
+    assert_not_contains "$extracted/.vite/build/main-test.js" 'finally{l.app.quit()}'
+    assert_occurrence_count "$extracted/.vite/build/main-test.js" 'codexLinuxRunQuitDrain(()=>{' '2'
+    assert_contains "$extracted/.vite/build/main-test.js" 'Promise.resolve().then(e).then(codexLinuxLogQuitDrainResults),new Promise'
     assert_contains "$extracted/.vite/build/main-test.js" 'codexLinuxExplicitQuitDrainTimeoutMs'
-    assert_contains "$extracted/.vite/build/main-test.js" 'setTimeout(e,typeof codexLinuxExplicitQuitDrainTimeoutMs'
+    assert_contains "$extracted/.vite/build/main-test.js" 'setTimeout(()=>e(Error(`Linux quit drain timed out`)),typeof codexLinuxExplicitQuitDrainTimeoutMs'
     assert_not_contains "$extracted/.vite/build/main-test.js" '\`number\`'
     assert_not_contains "$output_log" 'WARN: Could not find tray quit menu handler'
     assert_not_contains "$output_log" 'WARN: Could not find quit-app IPC handler'
@@ -9098,7 +9107,9 @@ NODE
     assert_occurrence_count "$extracted/.vite/build/main-test.js" 'codexLinuxShouldBypassQuitPrompt=()=>codexLinuxExplicitQuitApproved===!0' '1'
     assert_occurrence_count "$extracted/.vite/build/main-test.js" 'typeof codexLinuxPrepareForExplicitQuit===`function`?codexLinuxPrepareForExplicitQuit():typeof codexLinuxMarkQuitInProgress===`function`&&codexLinuxMarkQuitInProgress()' '2'
     assert_occurrence_count "$extracted/.vite/build/main-test.js" 'typeof codexLinuxShouldBypassQuitPrompt===`function`&&codexLinuxShouldBypassQuitPrompt()' '1'
-    assert_occurrence_count "$extracted/.vite/build/main-test.js" 'codexLinuxDrainPromise=Promise.all(' '1'
+    assert_occurrence_count "$extracted/.vite/build/main-test.js" 'codexLinuxLogQuitDrainResults=e=>{' '1'
+    assert_occurrence_count "$extracted/.vite/build/main-test.js" 'codexLinuxFinalizeQuit=()=>{' '1'
+    assert_occurrence_count "$extracted/.vite/build/main-test.js" 'codexLinuxRunQuitDrain(()=>{' '2'
 }
 
 test_keybinds_settings_tab_patch_smoke() {

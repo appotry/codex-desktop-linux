@@ -1839,7 +1839,7 @@ function inferRuntimeDependenciesFromSettingsSource(source) {
 function inferRuntimeDependenciesFromSettingsAssets(assetsDir) {
   const candidates = fs
     .readdirSync(assetsDir)
-    .filter((name) => /^settings-page-.*\.js$/.test(name) || /(?:^|~)settings-page(?:[-~].*)?\.js$/.test(name))
+    .filter((name) => /^settings-page-[^.]+\.js$/.test(name))
     .sort();
   for (const candidate of candidates) {
     const dependencies = inferRuntimeDependenciesFromSettingsSource(
@@ -1909,19 +1909,41 @@ function isAgentWorkspaceSettingsRouteBundleSource(currentSource) {
   );
 }
 
-function isAgentWorkspaceSettingsNavigationBundleSource(currentSource) {
-  return (
-    /[A-Za-z_$][\w$]*=\{[^;]*"local-environments":[A-Za-z_$][\w$]*,[^;]*worktrees:/.test(currentSource) &&
-    currentSource.includes("slugs:[`") &&
-    currentSource.includes("`local-environments`") &&
-    currentSource.includes("`worktrees`")
-  );
-}
-
 const CURRENT_SETTINGS_CATALOG_SLUGS = "local-environments.worktrees.environments";
 const PATCHED_SETTINGS_CATALOG_SLUGS = "local-environments.agent-workspaces.worktrees.environments";
 const CURRENT_SETTINGS_CATALOG_ITEMS = "{slug:`local-environments`},{slug:`worktrees`}";
 const PATCHED_SETTINGS_CATALOG_ITEMS = "{slug:`local-environments`},{slug:`agent-workspaces`},{slug:`worktrees`}";
+const CURRENT_SETTINGS_NAVIGATION_SLUGS = "local-environments.worktrees.browser-use";
+const PATCHED_SETTINGS_NAVIGATION_SLUGS = "local-environments.agent-workspaces.worktrees.browser-use";
+const CURRENT_SETTINGS_NAVIGATION_GROUP = "`local-environments`,`environments`,`worktrees`";
+const PATCHED_SETTINGS_NAVIGATION_GROUP =
+  "`local-environments`,`agent-workspaces`,`environments`,`worktrees`";
+const CURRENT_SETTINGS_VISIBILITY_CASES =
+  "case`worktrees`:case`local-environments`:case`environments`:return";
+const PATCHED_SETTINGS_VISIBILITY_CASES =
+  "case`worktrees`:case`local-environments`:case`agent-workspaces`:case`environments`:return";
+const CURRENT_SETTINGS_ICON_PATTERN =
+  /"local-environments":([A-Za-z_$][\w$]*),worktrees:([A-Za-z_$][\w$]*)/;
+const PATCHED_SETTINGS_ICON_PATTERN =
+  /"local-environments":([A-Za-z_$][\w$]*),"agent-workspaces":([A-Za-z_$][\w$]*),worktrees:([A-Za-z_$][\w$]*)/;
+
+function isAgentWorkspaceSettingsNavigationBundleSource(currentSource) {
+  return (
+    (currentSource.includes(CURRENT_SETTINGS_NAVIGATION_SLUGS) ||
+      currentSource.includes(PATCHED_SETTINGS_NAVIGATION_SLUGS)) &&
+    (currentSource.includes(CURRENT_SETTINGS_NAVIGATION_GROUP) ||
+      currentSource.includes(PATCHED_SETTINGS_NAVIGATION_GROUP))
+  );
+}
+
+function isAgentWorkspaceSettingsVisibilityBundleSource(currentSource) {
+  return (
+    (CURRENT_SETTINGS_ICON_PATTERN.test(currentSource) ||
+      PATCHED_SETTINGS_ICON_PATTERN.test(currentSource)) &&
+    (currentSource.includes(CURRENT_SETTINGS_VISIBILITY_CASES) ||
+      currentSource.includes(PATCHED_SETTINGS_VISIBILITY_CASES))
+  );
+}
 
 function isAgentWorkspaceSettingsCatalogBundleSource(currentSource) {
   return (
@@ -1950,50 +1972,6 @@ function applyAgentWorkspaceSettingsCatalogPatch(currentSource) {
   return currentSource
     .replace(CURRENT_SETTINGS_CATALOG_SLUGS, PATCHED_SETTINGS_CATALOG_SLUGS)
     .replace(CURRENT_SETTINGS_CATALOG_ITEMS, PATCHED_SETTINGS_CATALOG_ITEMS);
-}
-
-function addAgentWorkspaceToSettingsSlugLists(currentSource) {
-  return currentSource
-    .replaceAll(
-      "`local-environments`,`worktrees`",
-      "`local-environments`,`agent-workspaces`,`worktrees`",
-    )
-    .replaceAll(
-      "`local-environments`,`environments`,`worktrees`",
-      "`local-environments`,`agent-workspaces`,`environments`,`worktrees`",
-    );
-}
-
-function addAgentWorkspaceVisibilityCases(currentSource) {
-  let patchedSource = currentSource;
-  const replacements = [[
-    "case`worktrees`:case`local-environments`:case`environments`:return",
-    "case`worktrees`:case`local-environments`:case`agent-workspaces`:case`environments`:return",
-  ]];
-
-  for (const [needle, replacement] of replacements) {
-    if (!patchedSource.includes(replacement) && patchedSource.includes(needle)) {
-      patchedSource = patchedSource.replace(needle, replacement);
-    }
-  }
-
-  return patchedSource;
-}
-
-function addAgentWorkspaceLoadingCases(currentSource) {
-  let patchedSource = currentSource;
-  const replacements = [[
-    "case`local-environments`:case`worktrees`:case`environments`:",
-    "case`local-environments`:case`agent-workspaces`:case`worktrees`:case`environments`:",
-  ]];
-
-  for (const [needle, replacement] of replacements) {
-    if (!patchedSource.includes(replacement) && patchedSource.includes(needle)) {
-      patchedSource = patchedSource.replace(needle, replacement);
-    }
-  }
-
-  return patchedSource;
 }
 
 function applyAgentWorkspaceSettingsSharedPatch(currentSource) {
@@ -2047,34 +2025,45 @@ function applyAgentWorkspaceSettingsIndexPatch(currentSource) {
 
 function applyAgentWorkspaceSettingsPagePatch(currentSource) {
   let patchedSource = currentSource;
+  let matched = false;
 
-  // Reuse an existing icon alias instead of injecting a new minified-scope
-  // symbol. Upstream can wrap the icon map in initializer closures, and a
-  // dangling injected symbol breaks the whole Settings route.
-  const agentWorkspaceIcon = patchedSource.match(/"local-environments":([A-Za-z_$][\w$]*)/)?.[1] ?? null;
-
-  if (agentWorkspaceIcon != null) {
-    patchedSource = patchedSource.replace(
-      new RegExp(`"${SETTINGS_SLUG}":[A-Za-z_$][\\w$]*`),
-      `"${SETTINGS_SLUG}":${agentWorkspaceIcon}`,
-    );
+  if (isAgentWorkspaceSettingsNavigationBundleSource(patchedSource)) {
+    matched = true;
+    const slugsPatched = patchedSource.includes(PATCHED_SETTINGS_NAVIGATION_SLUGS);
+    const groupPatched = patchedSource.includes(PATCHED_SETTINGS_NAVIGATION_GROUP);
+    if (slugsPatched !== groupPatched) {
+      throw new Error("agent workspace settings navigation is partially patched");
+    }
+    if (!slugsPatched) {
+      patchedSource = patchedSource
+        .replace(CURRENT_SETTINGS_NAVIGATION_SLUGS, PATCHED_SETTINGS_NAVIGATION_SLUGS)
+        .replace(CURRENT_SETTINGS_NAVIGATION_GROUP, PATCHED_SETTINGS_NAVIGATION_GROUP);
+    }
   }
 
-  if (
-    !new RegExp(`[,{]"${SETTINGS_SLUG}":[A-Za-z_$][\\w$]*,worktrees`).test(patchedSource) &&
-    /"local-environments":([A-Za-z_$][\w$]*),worktrees:/.test(patchedSource)
-  ) {
-    patchedSource = patchedSource.replace(
-      /"local-environments":([A-Za-z_$][\w$]*),worktrees:/,
-      `"local-environments":$1,"${SETTINGS_SLUG}":${agentWorkspaceIcon ?? "$1"},worktrees:`,
-    );
+  if (isAgentWorkspaceSettingsVisibilityBundleSource(patchedSource)) {
+    matched = true;
+    const iconMatch = patchedSource.match(PATCHED_SETTINGS_ICON_PATTERN);
+    if (iconMatch != null && iconMatch[1] !== iconMatch[2]) {
+      throw new Error("agent workspace settings visibility has an unexpected icon");
+    }
+    const iconPatched = iconMatch != null && iconMatch[1] === iconMatch[2];
+    const casesPatched = patchedSource.includes(PATCHED_SETTINGS_VISIBILITY_CASES);
+    if (iconPatched !== casesPatched) {
+      throw new Error("agent workspace settings visibility is partially patched");
+    }
+    if (!iconPatched) {
+      patchedSource = patchedSource
+        .replace(
+          CURRENT_SETTINGS_ICON_PATTERN,
+          (_match, localEnvironmentsIcon, worktreesIcon) =>
+            `"local-environments":${localEnvironmentsIcon},"${SETTINGS_SLUG}":${localEnvironmentsIcon},worktrees:${worktreesIcon}`,
+        )
+        .replace(CURRENT_SETTINGS_VISIBILITY_CASES, PATCHED_SETTINGS_VISIBILITY_CASES);
+    }
   }
 
-  patchedSource = addAgentWorkspaceToSettingsSlugLists(patchedSource);
-  patchedSource = addAgentWorkspaceVisibilityCases(patchedSource);
-  patchedSource = addAgentWorkspaceLoadingCases(patchedSource);
-
-  if (!patchedSource.includes(`\`${SETTINGS_SLUG}\``)) {
+  if (!matched) {
     throw new Error("could not add agent workspace settings navigation");
   }
 
@@ -2090,13 +2079,15 @@ function collectAgentWorkspaceRouteAndNavigationPatches(extractedDir) {
   const candidates = fs
     .readdirSync(assetsDir)
     .filter((name) =>
-      /^app-initial~app-main~.*\.js$/.test(name) ||
-      /(?:^|~)settings-page(?:[-~].*)?\.js$/.test(name)
+      /^app-initial-[^.]+\.js$/.test(name) ||
+      /^settings-page-[^.]+\.js$/.test(name) ||
+      /^use-visible-settings-sections-[^.]+\.js$/.test(name)
     )
     .sort();
   let metadataMatched = false;
   let routeMatched = false;
   let navigationMatched = false;
+  let visibilityMatched = false;
   let catalogMatched = false;
   const patches = [];
 
@@ -2116,6 +2107,10 @@ function collectAgentWorkspaceRouteAndNavigationPatches(extractedDir) {
       navigationMatched = true;
       patchedSource = applyAgentWorkspaceSettingsPagePatch(patchedSource);
     }
+    if (isAgentWorkspaceSettingsVisibilityBundleSource(currentSource)) {
+      visibilityMatched = true;
+      patchedSource = applyAgentWorkspaceSettingsPagePatch(patchedSource);
+    }
     if (isAgentWorkspaceSettingsCatalogBundleSource(currentSource)) {
       catalogMatched = true;
       patchedSource = applyAgentWorkspaceSettingsCatalogPatch(patchedSource);
@@ -2133,6 +2128,9 @@ function collectAgentWorkspaceRouteAndNavigationPatches(extractedDir) {
   }
   if (!navigationMatched) {
     throw new Error("could not find webview settings navigation bundle");
+  }
+  if (!visibilityMatched) {
+    throw new Error("could not find webview settings visibility bundle");
   }
   if (!catalogMatched) {
     throw new Error("could not find current webview settings catalog bundle");

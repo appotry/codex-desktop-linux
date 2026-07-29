@@ -101,24 +101,61 @@ function applyDockIconMainPatch(source) {
   );
 }
 
-const currentSettingsGate =
-  "if(r!==`macOS`||ke.ChatGPT!==`chatgpt`||oe.Agent===`prod`)return null";
-const patchedSettingsGate =
-  "if(r!==`macOS`&&r!==`linux`||ke.ChatGPT!==`chatgpt`||oe.Agent===`prod`)return null";
+const currentSettingsGatePattern =
+  /if\(([A-Za-z_$][\w$]*)!==`macOS`\|\|([A-Za-z_$][\w$]*)\.ChatGPT!==`chatgpt`\|\|([A-Za-z_$][\w$]*)\.Agent===`prod`\)return null/g;
+const patchedSettingsGatePattern =
+  /if\(([A-Za-z_$][\w$]*)!==`macOS`&&\1!==`linux`\|\|([A-Za-z_$][\w$]*)\.ChatGPT!==`chatgpt`\|\|([A-Za-z_$][\w$]*)\.Agent===`prod`\)return null/g;
+const settingsRowAnchorPattern = /\.dockIconPreviews\b/g;
+
+function settingsGateMatches(source, pattern) {
+  pattern.lastIndex = 0;
+  return [...source.matchAll(pattern)];
+}
+
+function dockIconSettingsContract(source) {
+  if (typeof source !== "string") {
+    return "drifted";
+  }
+  const currentMatches = settingsGateMatches(source, currentSettingsGatePattern);
+  const patchedMatches = settingsGateMatches(source, patchedSettingsGatePattern);
+  const rowAnchors = settingsGateMatches(source, settingsRowAnchorPattern);
+  if (
+    rowAnchors.length === 1 &&
+    currentMatches.length === 1 &&
+    patchedMatches.length === 0
+  ) {
+    return "current";
+  }
+  if (
+    rowAnchors.length === 1 &&
+    currentMatches.length === 0 &&
+    patchedMatches.length === 1
+  ) {
+    return "patched";
+  }
+  return "drifted";
+}
 
 function applyDockIconSettingsPatch(source) {
-  const currentCount = countOccurrences(source, currentSettingsGate);
-  const patchedCount = countOccurrences(source, patchedSettingsGate);
-  if (currentCount === 0 && patchedCount === 1) {
+  const contract = dockIconSettingsContract(source);
+  if (contract === "patched") {
     return source;
   }
-  if (currentCount !== 1 || patchedCount !== 0) {
+  if (contract !== "current") {
     console.warn(
       "WARN: Could not find the current Dock icon settings contract - skipping Dock icon settings patch",
     );
     return source;
   }
-  return source.replace(currentSettingsGate, patchedSettingsGate);
+  return source.replace(
+    currentSettingsGatePattern,
+    (
+      _match,
+      platformAlias,
+      brandAlias,
+      buildFlavorAlias,
+    ) => `if(${platformAlias}!==\`macOS\`&&${platformAlias}!==\`linux\`||${brandAlias}.ChatGPT!==\`chatgpt\`||${buildFlavorAlias}.Agent===\`prod\`)return null`,
+  );
 }
 
 const currentSearchFilter =
@@ -156,8 +193,7 @@ const descriptors = [
     order: 20_950,
     ciPolicy: "optional",
     pattern: /^general-settings-[A-Za-z0-9_-]+\.js$/,
-    assetMatch: (source) =>
-      hasCompleteSinglePointContract(source, currentSettingsGate, patchedSettingsGate),
+    assetMatch: (source) => dockIconSettingsContract(source) !== "drifted",
     missingDescription: "General settings Dock icon bundle",
     skipDescription: "Dock icon settings row patch",
     enabled: dockIconEnabled,

@@ -50,7 +50,7 @@ const currentTraySource =
 const currentMainSource = currentAppInfoSource + currentRuntimeSource + currentTraySource;
 
 const currentSettingsSource =
-  "function oa(){let e=(0,Q.c)(27),t=B(C),n=z(),{platform:r}=_t(),{data:i}=H(Kn),a=V(K.dockIconPreference),o;if(e[0]===t)o=e[1];else{o=function(e){c(t,K.dockIconPreference,e)},e[0]=t,e[1]=o}let s=o;if(r!==`macOS`||ke.ChatGPT!==`chatgpt`||oe.Agent===`prod`)return null;let c=i?.dockIconPreviews;if(c==null)return null;return W(c,s)}";
+  "function oa(){let e=(0,Q.c)(27),t=B(C),n=z(),{platform:r}=_t(),{data:i}=H(Kn),a=V(K.dockIconPreference),o;if(e[0]===t)o=e[1];else{o=function(e){c(t,K.dockIconPreference,e)},e[0]=t,e[1]=o}let s=o;if(r!==`macOS`||un.ChatGPT!==`chatgpt`||yt.Agent===`prod`)return null;let c=i?.dockIconPreviews;if(c==null)return null;return W(c,s)}";
 
 const currentSearchSource = applyLinuxSettingsSearchVisibilityPatch([
   "function qn(e){let t=(0,Zn.c)(17),n=re(),r=Bn(e),{data:i}=_(e),a=i?.isSystemBackdropSupported!==!1,o=i?.platform===`darwin`,{data:s}=T(k,e.selectedHostId),c,l=c;if(a){let e;e=e=>e.sectionSlug===`appearance`&&!a?{...e,messages:e.messages.filter(Jn)}:e.sectionSlug===`agent`?{...e,terms:[]}:e,m=r.map(e)}else m=r;return m}",
@@ -242,13 +242,49 @@ test("settings patch exposes the native row on Linux", () => {
   assert.deepEqual(secondPass.warnings, []);
 });
 
+test("settings patch preserves current minified aliases across renderer churn", () => {
+  const nextAliases = currentSettingsSource.replace(
+    "if(r!==`macOS`||un.ChatGPT!==`chatgpt`||yt.Agent===`prod`)return null",
+    "if(platformAlias!==`macOS`||brandAlias.ChatGPT!==`chatgpt`||buildAlias.Agent===`prod`)return null",
+  );
+  const patched = applyDockIconSettingsPatch(nextAliases);
+  const secondPass = captureWarns(() => applyDockIconSettingsPatch(patched));
+
+  assert.match(
+    patched,
+    /if\(platformAlias!==`macOS`&&platformAlias!==`linux`\|\|brandAlias\.ChatGPT!==`chatgpt`\|\|buildAlias\.Agent===`prod`\)return null/,
+  );
+  assert.equal(secondPass.value, patched);
+  assert.deepEqual(secondPass.warnings, []);
+  assert.equal(descriptors[1].assetMatch(nextAliases), true);
+  assert.equal(descriptors[1].assetMatch(patched), true);
+});
+
 test("settings drift remains byte-identical", () => {
-  const drifted = currentSettingsSource.replace("oe.Agent===`prod`", "oe.Agent!==`prod`");
+  const drifted = currentSettingsSource.replace("yt.Agent===`prod`", "yt.Agent!==`prod`");
   const { value, warnings } = captureWarns(() => applyDockIconSettingsPatch(drifted));
 
   assert.equal(value, drifted);
   assert.equal(warnings.length, 1);
   assert.match(warnings[0], /current Dock icon settings contract/);
+});
+
+test("settings duplicate and mixed contracts remain byte-identical", () => {
+  const patched = applyDockIconSettingsPatch(currentSettingsSource);
+  const drifted = currentSettingsSource.replace("yt.Agent===`prod`", "yt.Agent!==`prod`");
+  for (const source of [
+    currentSettingsSource + currentSettingsSource,
+    currentSettingsSource + patched,
+    currentSettingsSource + drifted,
+    patched + drifted,
+    patched + patched,
+  ]) {
+    const { value, warnings } = captureWarns(() => applyDockIconSettingsPatch(source));
+    assert.equal(value, source);
+    assert.equal(warnings.length, 1);
+    assert.match(warnings[0], /current Dock icon settings contract/);
+    assert.equal(descriptors[1].assetMatch(source), false);
+  }
 });
 
 test("search patch restores Dock icon results after the Linux core patch", () => {

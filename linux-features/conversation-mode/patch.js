@@ -2,10 +2,7 @@
 
 const HANDLER_NAME = "linux-read-aloud";
 const RUNTIME_VERSION = "conversation-mode-v26";
-const CURRENT_DICTATION_ASSET_PATTERN =
-  /^app-initial~app-main~onboarding-page-[A-Za-z0-9_-]+\.js$/;
-const CURRENT_COMPOSER_ASSET_PATTERN =
-  /^app-initial~app-main~new-thread-panel-page~appgen-library-page~hotkey-window-thread-page~ho~iufn7mg3-[^.]+\.js$/;
+const CURRENT_APP_INITIAL_ASSET_PATTERN = /^app-initial-[A-Za-z0-9_-]+\.js$/;
 
 function warn(message, patchName) {
   console.warn(`WARN: ${message} - skipping ${patchName}`);
@@ -124,7 +121,10 @@ function objectPropVar(objectSource, name, fallback) {
 }
 
 function currentComposerBinding(source) {
-  const propsPattern = new RegExp(`function ${JS_IDENT}\\(\\{([^{}]*voiceControls:${JS_IDENT}[^{}]*)\\}\\)\\{`, "g");
+  const propsPattern = new RegExp(
+    `\\{([^{}]*voiceControls:${JS_IDENT}[^{}]*)\\}=${JS_IDENT}(?:,|;)`,
+    "g",
+  );
   for (const propsMatch of source.matchAll(propsPattern)) {
     const propsObject = propsMatch[1];
     const voiceControlsVar = objectPropVar(propsObject, "voiceControls", null);
@@ -136,7 +136,7 @@ function currentComposerBinding(source) {
       continue;
     }
     const functionBodyStart = propsMatch.index + propsMatch[0].length;
-    const composerPrefix = source.slice(functionBodyStart, functionBodyStart + 5000);
+    const composerPrefix = source.slice(functionBodyStart, functionBodyStart + 25000);
     const conversationId =
       composerPrefix.match(new RegExp(`conversationId:(${JS_IDENT}),hostId:${JS_IDENT}`))?.[1] ?? null;
     if (conversationId == null) {
@@ -259,9 +259,10 @@ function applyDictationEndpointPatch(source) {
     return source;
   }
 
-  const micConstraintsPattern = /([A-Za-z_$][\w$]*)=await ([A-Za-z_$][\w$]*)\(\{channelCount:1\}\)/u;
+  const micConstraintsPattern =
+    /stream:([A-Za-z_$][\w$]*)\(\{channelCount:1\}\)\.then\(/u;
   const cleanupPattern =
-    /([A-Za-z_$][\w$]*)&&\(\1\.ondataavailable=null,\1\.onstop=null\),([A-Za-z_$][\w$]*)\.current=null,([A-Za-z_$][\w$]*)\(\);/u;
+    /([A-Za-z_$][\w$]*)&&\(\1\.ondataavailable=null,\1\.onstop=null\),([A-Za-z_$][\w$]*)\.current=null,([A-Za-z_$][\w$]*)\(\),([A-Za-z_$][\w$]*)\(\),/u;
   const actionRef = source.match(/let [A-Za-z_$][\w$]*=([A-Za-z_$][\w$]*)\.current\?\?`insert`/)?.[1] ?? null;
   const recorderPattern =
     /let ([A-Za-z_$][\w$]*)=new MediaRecorder\(([A-Za-z_$][\w$]*)\);if\(([A-Za-z_$][\w$]*)\.current=\1,([A-Za-z_$][\w$]*)\.current=\[\],\1\.ondataavailable=([A-Za-z_$][\w$]*)=>\{\5\.data\.size>0&&\4\.current\.push\(\5\.data\)\},\1\.onstop=\(\)=>\{([A-Za-z_$][\w$]*)\(\)\},\1\.start\(\),([A-Za-z_$][\w$]*)\(!0\)/u;
@@ -281,11 +282,11 @@ function applyDictationEndpointPatch(source) {
 
   let patched = source.replace(
     micConstraintsPattern,
-    "$1=await $2({channelCount:1,echoCancellation:!0,noiseSuppression:!0,autoGainControl:!0})",
+    "stream:$1({channelCount:1,echoCancellation:!0,noiseSuppression:!0,autoGainControl:!0}).then(",
   );
   patched = patched.replace(
     cleanupPattern,
-    "$1?.codexLinuxConversationCleanup?.(),$1&&($1.ondataavailable=null,$1.onstop=null),$2.current=null,$3();",
+    "$1?.codexLinuxConversationCleanup?.(),$1&&($1.ondataavailable=null,$1.onstop=null),$2.current=null,$3(),$4(),",
   );
   patched = patched.replace(
     recorderPattern,
@@ -360,7 +361,7 @@ module.exports = {
       phase: "webview-asset",
       order: 20690,
       ciPolicy: "optional",
-      pattern: CURRENT_DICTATION_ASSET_PATTERN,
+      pattern: CURRENT_APP_INITIAL_ASSET_PATTERN,
       missingDescription: "current primary dictation bundle",
       skipDescription: "conversation mode dictation endpoint patch",
       apply: applyDictationEndpointPatch,
@@ -370,7 +371,7 @@ module.exports = {
       phase: "webview-asset",
       order: 20700,
       ciPolicy: "optional",
-      pattern: CURRENT_COMPOSER_ASSET_PATTERN,
+      pattern: CURRENT_APP_INITIAL_ASSET_PATTERN,
       missingDescription: "current primary composer bundle",
       skipDescription: "conversation mode composer control patch",
       apply: applyComposerPatch,
@@ -380,7 +381,7 @@ module.exports = {
       phase: "webview-asset",
       order: 20710,
       ciPolicy: "optional",
-      pattern: /^app-initial~app-main~onboarding-page-[A-Za-z0-9_-]+\.js$/,
+      pattern: CURRENT_APP_INITIAL_ASSET_PATTERN,
       missingDescription: "current primary thread assistant bundle",
       skipDescription: "conversation mode assistant observer patch",
       apply: applyAssistantRenderPatch,

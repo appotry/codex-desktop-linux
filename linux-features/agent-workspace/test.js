@@ -27,6 +27,7 @@ const {
   SETTINGS_PERMISSIONS_KEY,
   SETTINGS_SLUG,
   applyAgentWorkspaceMainBridgePatch,
+  applyAgentWorkspaceSettingsCatalogPatch,
   applyAgentWorkspaceSettingsIndexPatch,
   applyAgentWorkspaceSettingsPagePatch,
   applyAgentWorkspaceSettingsSharedPatch,
@@ -138,26 +139,47 @@ function buildBridgeHarness({ env = {}, globalState = new Map(), execFile, spawn
   return { handlers: host.handlers(), execCalls, spawnCalls };
 }
 
-function syntheticSettingsShared() {
+function syntheticCurrentSettingsMetadata() {
   return [
     "var c=r({",
     '"general-settings":{id:`settings.nav.general-settings`,defaultMessage:`General`,description:`Title for general settings section`},',
     '"local-environments":{id:`settings.nav.local-environments`,defaultMessage:`Environments`,description:`Title for environments settings section`},',
     "worktrees:{id:`settings.nav.worktrees`,defaultMessage:`Worktrees`,description:`Title for worktrees settings section`}",
     "});",
-    "function m(e){let t=(0,u.c)(3),{slug:r}=e;switch(r){",
-    "case`general-settings`:{return (0,d.jsx)(n,{id:`settings.section.general-settings`,defaultMessage:`General`})}",
-    "case`local-environments`:{return (0,d.jsx)(n,{id:`settings.section.local-environments`,defaultMessage:`Environments`})}",
-    "case`worktrees`:{return (0,d.jsx)(n,{id:`settings.section.worktrees`,defaultMessage:`Worktrees`})}",
+    "function m(e){let t=(0,u.c)(30),{slug:r}=e;switch(r){",
+    "case`general-settings`:{let e;return t[0]===Symbol.for(`react.memo_cache_sentinel`)?(e=(0,d.jsx)(n,{id:`settings.section.general-settings`,defaultMessage:`General`}),t[0]=e):e=t[0],e}",
+    "case`local-environments`:{let e;return t[21]===Symbol.for(`react.memo_cache_sentinel`)?(e=(0,d.jsx)(n,{id:`settings.section.local-environments`,defaultMessage:`Environments`}),t[21]=e):e=t[21],e}",
+    "case`worktrees`:{let e;return t[22]===Symbol.for(`react.memo_cache_sentinel`)?(e=(0,d.jsx)(n,{id:`settings.section.worktrees`,defaultMessage:`Worktrees`}),t[22]=e):e=t[22],e}",
     "}}",
   ].join("");
 }
 
-function syntheticCurrentAppMainRouteRegistry() {
+function syntheticCurrentAppInitialBundle() {
   return [
     "function render(e){return currentRouteMap[e.slug]}",
     'var currentRouteMap={"general-settings":BN(async()=>(await Y(async()=>{let{GeneralSettings:e}=await import(`./general-settings-TbWU8D8b.js`);return{GeneralSettings:e}},__vite__mapDeps([1,2]),import.meta.url)).GeneralSettings),',
     'import:BN(async()=>(await Y(async()=>{let{ImportSettings:e}=await import(`./import-settings-DmsueF_s.js`);return{ImportSettings:e}},__vite__mapDeps([3]),import.meta.url)).ImportSettings)};',
+    syntheticCurrentSettingsMetadata(),
+    syntheticCurrentSettingsCatalog(),
+  ].join("");
+}
+
+function syntheticCurrentSettingsNavigation() {
+  return [
+    'import{s as __toESM}from"./chunk-test.js";',
+    'import{r as ReactFactory,j as jsxFactory}from"./runtime-test.js";',
+    'var React=__toESM(ReactFactory(),1),$=jsxFactory();',
+    'function RuntimeProbe(){let [value]=(0,React.useState)(0);return (0,$.jsx)("span",{children:value})}',
+    "var nn=`general-settings.linux-desktop.import.profile.appearance.voice.chronicle.appshots.agent.personalization.pets.usage.debug.keyboard-shortcuts.codex-micro.mcp-settings.hooks-settings.connections.cloud-settings.cloud-environments.code-review.git-settings.local-environments.worktrees.browser-use.computer-use.data-controls`.split(`.`);",
+    "var rn=[{key:`personal`,slugs:[`general-settings`,`linux-desktop`]},{key:`coding`,slugs:[`hooks-settings`,`connections`,`cloud-settings`,`cloud-environments`,`code-review`,`git-settings`,`local-environments`,`environments`,`worktrees`]}];",
+  ].join("");
+}
+
+function syntheticCurrentSettingsVisibility() {
+  return [
+    "var H=e=>e,F=e=>e;",
+    'var it={"linux-desktop":H,"general-settings":H,"local-environments":H,worktrees:F,environments:H,"mcp-settings":H,connections:H};',
+    "function visible(S){switch(S.slug){case`computer-use`:return!0;case`browser-use`:return!0;case`appearance`:return!0;case`pets`:case`git-settings`:case`worktrees`:case`local-environments`:case`environments`:return!0;case`data-controls`:return!0;case`linux-desktop`:case`general-settings`:case`agent`:case`personalization`:return!0;}}",
   ].join("");
 }
 
@@ -216,30 +238,15 @@ function rewriteSettingsAssetsWithConsolidatedCurrentLayout(assetsDir) {
   );
   fs.writeFileSync(
     path.join(assetsDir, "settings-page-test.js"),
-    [
-      'import{s as __toESM}from"./chunk-test.js";',
-      'import{r as ReactFactory,j as jsxFactory}from"./runtime-test.js";',
-      'var React=__toESM(ReactFactory(),1),$=jsxFactory();',
-      'function RuntimeProbe(){let [value]=(0,React.useState)(0);return (0,$.jsx)("span",{children:value})}',
-      "var Z=$,S=e=>(0,Z.jsxs)(`svg`,{children:[]}),ln=S,F=S;",
-      'var Hn={"linux-desktop":S,"general-settings":S,"local-environments":ln,worktrees:F,environments:ln,"mcp-settings":S,connections:S};',
-      "var Wn=[`general-settings`,`linux-desktop`,`local-environments`,`worktrees`,`data-controls`],Gn=[{key:`personal`,slugs:[`general-settings`,`linux-desktop`]},{key:`coding`,slugs:[`local-environments`,`environments`,`worktrees`]}];",
-      "function visible(S){switch(S.slug){case`computer-use`:return!0;case`browser-use`:return!0;case`appearance`:return!0;case`pets`:case`git-settings`:case`worktrees`:case`local-environments`:case`environments`:return!0;case`data-controls`:return!0;case`linux-desktop`:case`general-settings`:case`agent`:case`personalization`:return!0;}}",
-      "function load(S){let T=!1;switch(S.slug){case`local-environments`:case`worktrees`:case`environments`:case`mcp-settings`:case`connections`:T=!1;break}return T}",
-      "var lr=[`profile`,`agent`,`personalization`,`mcp-settings`,`hooks-settings`,`local-environments`,`worktrees`,`data-controls`];",
-    ].join(""),
+    syntheticCurrentSettingsNavigation(),
   );
   fs.writeFileSync(
-    path.join(assetsDir, "app-initial~app-main~messages-test.js"),
-    syntheticSettingsShared(),
+    path.join(assetsDir, "app-initial-test.js"),
+    syntheticCurrentAppInitialBundle(),
   );
   fs.writeFileSync(
-    path.join(assetsDir, "app-initial~app-main~automations-page-test.js"),
-    syntheticCurrentAppMainRouteRegistry(),
-  );
-  fs.writeFileSync(
-    path.join(assetsDir, "app-initial~app-main~hotkey-window-thread-page~keyboard-shortcuts-settings~thread-app-shell~current-test.js"),
-    syntheticCurrentSettingsCatalog(),
+    path.join(assetsDir, "use-visible-settings-sections-test.js"),
+    syntheticCurrentSettingsVisibility(),
   );
 }
 
@@ -1588,31 +1595,45 @@ test("generated settings UI auto-opens the GPUI viewer after approved workspace 
 });
 
 test("settings asset patches add navigation, route, visibility, and title", () => {
-  const shared = applyAgentWorkspaceSettingsSharedPatch(syntheticSettingsShared());
+  const shared = applyAgentWorkspaceSettingsSharedPatch(syntheticCurrentAppInitialBundle());
   assert.match(shared, new RegExp(`settings\\.nav\\.${SETTINGS_SLUG}`));
   assert.match(shared, new RegExp(`settings\\.section\\.${SETTINGS_SLUG}`));
   assert.equal(applyAgentWorkspaceSettingsSharedPatch(shared), shared);
 
-  const currentAppMain = applyAgentWorkspaceSettingsIndexPatch(syntheticCurrentAppMainRouteRegistry());
+  const currentAppMain = applyAgentWorkspaceSettingsIndexPatch(shared);
   assert.match(
     currentAppMain,
     /"agent-workspaces":BN\(async\(\)=>\(await Y\(async\(\)=>\{let\{default:e\}=await import\(`\.\/agent-workspaces-linux\.js`\);return\{default:e\}\},\[\],import\.meta\.url\)\)\.default\),"general-settings":/,
   );
   assert.equal(applyAgentWorkspaceSettingsIndexPatch(currentAppMain), currentAppMain);
 
-  const settingsPage = applyAgentWorkspaceSettingsPagePatch(
-    [
-      'var Hn={"linux-desktop":S,"general-settings":S,"local-environments":ln,worktrees:F,environments:ln,"mcp-settings":S,connections:S};',
-      "var Wn=[`general-settings`,`linux-desktop`,`local-environments`,`worktrees`,`data-controls`],Gn=[{key:`coding`,slugs:[`local-environments`,`environments`,`worktrees`]}];",
-      "function visible(S){switch(S.slug){case`pets`:case`git-settings`:case`worktrees`:case`local-environments`:case`environments`:return!0;case`data-controls`:return!0;}}",
-      "function load(S){switch(S.slug){case`local-environments`:case`worktrees`:case`environments`:case`mcp-settings`:return!1}}",
-    ].join(""),
+  const catalog = applyAgentWorkspaceSettingsCatalogPatch(currentAppMain);
+  assert.match(catalog, /local-environments\.agent-workspaces\.worktrees/);
+  assert.match(catalog, /\{slug:`local-environments`\},\{slug:`agent-workspaces`\},\{slug:`worktrees`\}/);
+  assert.equal(applyAgentWorkspaceSettingsCatalogPatch(catalog), catalog);
+
+  const settingsNavigation = applyAgentWorkspaceSettingsPagePatch(
+    syntheticCurrentSettingsNavigation(),
   );
-  assert.match(settingsPage, new RegExp(`"local-environments":ln,"${SETTINGS_SLUG}":ln,worktrees`));
-  assert.match(settingsPage, /`local-environments`,`agent-workspaces`,`worktrees`/);
-  assert.match(settingsPage, /case`worktrees`:case`local-environments`:case`agent-workspaces`:case`environments`:return!0/);
-  assert.match(settingsPage, /case`local-environments`:case`agent-workspaces`:case`worktrees`:case`environments`/);
-  assert.equal(applyAgentWorkspaceSettingsPagePatch(settingsPage), settingsPage);
+  assert.match(settingsNavigation, /local-environments\.agent-workspaces\.worktrees\.browser-use/);
+  assert.match(
+    settingsNavigation,
+    /`local-environments`,`agent-workspaces`,`environments`,`worktrees`/,
+  );
+  assert.equal(applyAgentWorkspaceSettingsPagePatch(settingsNavigation), settingsNavigation);
+
+  const settingsVisibility = applyAgentWorkspaceSettingsPagePatch(
+    syntheticCurrentSettingsVisibility(),
+  );
+  assert.match(
+    settingsVisibility,
+    new RegExp(`"local-environments":H,"${SETTINGS_SLUG}":H,worktrees:F`),
+  );
+  assert.match(
+    settingsVisibility,
+    /case`worktrees`:case`local-environments`:case`agent-workspaces`:case`environments`:return!0/,
+  );
+  assert.equal(applyAgentWorkspaceSettingsPagePatch(settingsVisibility), settingsVisibility);
 });
 
 test("agent-workspace feature participates in ASAR patching and reports", () => {
@@ -1632,8 +1653,9 @@ test("agent-workspace feature participates in ASAR patching and reports", () => 
         assert.ok(fs.existsSync(path.join(assetsDir, SETTINGS_ASSET)));
         assert.match(fs.readFileSync(path.join(assetsDir, SETTINGS_ASSET), "utf8"), /AgentWorkspacesSettings/);
         assert.match(fs.readFileSync(path.join(assetsDir, "settings-page-test.js"), "utf8"), /agent-workspaces/);
-        assert.match(fs.readFileSync(path.join(assetsDir, "app-initial~app-main~messages-test.js"), "utf8"), /Agent Workspaces/);
-        assert.match(fs.readFileSync(path.join(assetsDir, "app-initial~app-main~automations-page-test.js"), "utf8"), new RegExp(SETTINGS_ASSET));
+        assert.match(fs.readFileSync(path.join(assetsDir, "use-visible-settings-sections-test.js"), "utf8"), /agent-workspaces/);
+        assert.match(fs.readFileSync(path.join(assetsDir, "app-initial-test.js"), "utf8"), /Agent Workspaces/);
+        assert.match(fs.readFileSync(path.join(assetsDir, "app-initial-test.js"), "utf8"), new RegExp(SETTINGS_ASSET));
         assert.equal(
           fs.readFileSync(path.join(assetsDir, "local-conversation-thread-test.js"), "utf8"),
           staleConversationMonitorBundle(),
@@ -1672,7 +1694,7 @@ test("agent-workspace settings resolve latest upstream request API asset", () =>
     const settingsSource = fs.readFileSync(path.join(assetsDir, SETTINGS_ASSET), "utf8");
     assert.match(settingsSource, /import\{l as __post\}from"\.\/setting-storage-test\.js"/);
     assert.match(settingsSource, /AgentWorkspacesSettings/);
-    assert.match(fs.readFileSync(path.join(assetsDir, "app-initial~app-main~automations-page-test.js"), "utf8"), new RegExp(SETTINGS_ASSET));
+    assert.match(fs.readFileSync(path.join(assetsDir, "app-initial-test.js"), "utf8"), new RegExp(SETTINGS_ASSET));
   } finally {
     fs.rmSync(tempApp, { recursive: true, force: true });
   }
@@ -1698,7 +1720,7 @@ test("agent-workspace settings infer runtime dependencies from bundled settings 
     assert.match(settingsSource, /function SettingsPage/);
     assert.match(settingsSource, /AgentWorkspacesSettings/);
     assert.match(fs.readFileSync(path.join(assetsDir, "settings-page-test.js"), "utf8"), /agent-workspaces/);
-    assert.match(fs.readFileSync(path.join(assetsDir, "app-initial~app-main~automations-page-test.js"), "utf8"), new RegExp(SETTINGS_ASSET));
+    assert.match(fs.readFileSync(path.join(assetsDir, "app-initial-test.js"), "utf8"), new RegExp(SETTINGS_ASSET));
   } finally {
     fs.rmSync(tempApp, { recursive: true, force: true });
   }
@@ -1721,27 +1743,29 @@ test("agent-workspace settings patch supports consolidated current settings bund
     assert.match(settingsSource, /function SettingsPage/);
 
     const settingsPageSource = fs.readFileSync(path.join(assetsDir, "settings-page-test.js"), "utf8");
-    assert.match(settingsPageSource, /"local-environments":ln,"agent-workspaces":ln,worktrees:F/);
-    assert.match(settingsPageSource, /`local-environments`,`agent-workspaces`,`worktrees`/);
-    assert.match(settingsPageSource, /slugs:\[`local-environments`,`agent-workspaces`,`environments`,`worktrees`\]/);
-    assert.match(settingsPageSource, /case`worktrees`:case`local-environments`:case`agent-workspaces`:case`environments`:return!0/);
-    assert.match(settingsPageSource, /case`local-environments`:case`agent-workspaces`:case`worktrees`:case`environments`/);
-    assert.match(settingsPageSource, /lr=\[`profile`,`agent`,`personalization`,`mcp-settings`,`hooks-settings`,`local-environments`,`agent-workspaces`,`worktrees`,`data-controls`\]/);
+    assert.match(settingsPageSource, /local-environments\.agent-workspaces\.worktrees\.browser-use/);
+    assert.match(
+      settingsPageSource,
+      /`local-environments`,`agent-workspaces`,`environments`,`worktrees`/,
+    );
 
-    const sharedSource = fs.readFileSync(path.join(assetsDir, "app-initial~app-main~messages-test.js"), "utf8");
-    assert.match(sharedSource, /settings\.nav\.agent-workspaces/);
-    assert.match(sharedSource, /settings\.section\.agent-workspaces/);
-
-    const routeSource = fs.readFileSync(path.join(assetsDir, "app-initial~app-main~automations-page-test.js"), "utf8");
-    assert.match(routeSource, new RegExp(SETTINGS_ASSET));
-    assert.match(routeSource, /"agent-workspaces":BN\(async\(\)=>\(await Y\(/);
-
-    const catalogSource = fs.readFileSync(
-      path.join(assetsDir, "app-initial~app-main~hotkey-window-thread-page~keyboard-shortcuts-settings~thread-app-shell~current-test.js"),
+    const visibilitySource = fs.readFileSync(
+      path.join(assetsDir, "use-visible-settings-sections-test.js"),
       "utf8",
     );
-    assert.match(catalogSource, /local-environments\.agent-workspaces\.worktrees/);
-    assert.match(catalogSource, /\{slug:`local-environments`\},\{slug:`agent-workspaces`\},\{slug:`worktrees`\}/);
+    assert.match(visibilitySource, /"local-environments":H,"agent-workspaces":H,worktrees:F/);
+    assert.match(
+      visibilitySource,
+      /case`worktrees`:case`local-environments`:case`agent-workspaces`:case`environments`:return!0/,
+    );
+
+    const appInitialSource = fs.readFileSync(path.join(assetsDir, "app-initial-test.js"), "utf8");
+    assert.match(appInitialSource, /settings\.nav\.agent-workspaces/);
+    assert.match(appInitialSource, /settings\.section\.agent-workspaces/);
+    assert.match(appInitialSource, new RegExp(SETTINGS_ASSET));
+    assert.match(appInitialSource, /"agent-workspaces":BN\(async\(\)=>\(await Y\(/);
+    assert.match(appInitialSource, /local-environments\.agent-workspaces\.worktrees/);
+    assert.match(appInitialSource, /\{slug:`local-environments`\},\{slug:`agent-workspaces`\},\{slug:`worktrees`\}/);
     assert.equal(patchAgentWorkspaceSettingsAssets(tempApp).changed, 0);
   } finally {
     fs.rmSync(tempApp, { recursive: true, force: true });
@@ -1754,7 +1778,7 @@ test("agent-workspace settings patch rejects a partially patched current catalog
     const { assetsDir } = writeSyntheticExtractedApp(tempApp);
     const catalogPath = path.join(
       assetsDir,
-      "app-initial~app-main~hotkey-window-thread-page~keyboard-shortcuts-settings~thread-app-shell~current-test.js",
+      "app-initial-test.js",
     );
     fs.writeFileSync(
       catalogPath,
