@@ -46,6 +46,7 @@ const {
   linuxDesktopSettingsAsset,
   applyLinuxDesktopSettingsIconPatch,
   applyLinuxDesktopSettingsIndexPatch,
+  applyLinuxDesktopSettingsNavigationGroupPatch,
   applyLinuxShortcutPhysicalKeyFallbackPatch,
   applyLinuxDesktopSettingsSectionsPatch,
   applyLinuxDesktopSettingsSharedPatch,
@@ -1768,6 +1769,14 @@ function createModernNativeKeyboardShortcutsSettingsFixture() {
     ].join(""),
   );
   writeAsset(
+    "settings-page-A.js",
+    [
+      "var nn=`general-settings.import.profile.appearance.voice.agent.personalization.pets.keyboard-shortcuts.usage.debug`.split(`.`),",
+      "rn=[{key:`personal`,heading:d({id:`settings.nav.heading.personal`,defaultMessage:`Personal`,description:`Heading for personal settings in the settings navigation`}),",
+      "slugs:[`general-settings`,`import`,`profile`,`appearance`,`voice`,`agent`,`personalization`,`pets`,`keyboard-shortcuts`,`usage`,`debug`]}];",
+    ].join(""),
+  );
+  writeAsset(
     "use-visible-settings-sections-A.js",
     [
       'var Hn={"general-settings":wt,import:it,profile:pt,"keyboard-shortcuts":xn};',
@@ -1872,7 +1881,7 @@ function createSplitRouteNativeKeyboardShortcutsSettingsFixture({
     "settings-page-A.js",
     [
       "var Wn=[`general-settings`,`import`,`profile`,`keyboard-shortcuts`];",
-      "var Qn=[{key:`app`,slugs:[`general-settings`,`import`,`profile`,`keyboard-shortcuts`]}];",
+      "var Qn=[{key:`personal`,heading:d({id:`settings.nav.heading.personal`,defaultMessage:`Personal`,description:`Heading for personal settings in the settings navigation`}),slugs:[`general-settings`,`import`,`profile`,`keyboard-shortcuts`]}];",
       "function loading(H){let W=!1;if(H)bb0:switch(H.slug){case`appearance`:case`general-settings`:case`agent`:case`git-settings`:case`data-controls`:case`personalization`:W=!1;break bb0;case`keyboard-shortcuts`:W=!1;break bb0}return W}",
     ].join(""),
   );
@@ -6380,6 +6389,14 @@ test("adds Linux desktop settings in the current monolithic app bundle", () => {
       routeChunkSource,
       /"linux-desktop":Ya\(async\(\)=>\(await Pr\(async\(\)=>\{let\{LinuxDesktopSettings:e\}=await import\(`\.\/linux-desktop-settings-linux\.js\?v=[a-f0-9]{12}`\);return\{LinuxDesktopSettings:e\}\},\[\],import\.meta\.url\)\)\.LinuxDesktopSettings\),"general-settings":/,
     );
+    const settingsPageSource = fs.readFileSync(
+      path.join(assetsDir, "settings-page-A.js"),
+      "utf8",
+    );
+    assert.match(
+      settingsPageSource,
+      /slugs:\[`general-settings`,`linux-desktop`,`import`,`profile`,`keyboard-shortcuts`\]/,
+    );
 
     const secondResult = patchKeybindsSettingsAssets(extractedDir);
     assert.equal(secondResult.matched, true);
@@ -6471,6 +6488,62 @@ test("adds Linux desktop section to current native Keyboard Shortcuts sections b
 
   assert.match(patched, /e=\[`general-settings`,`linux-desktop`,`profile`,`keyboard-shortcuts`/);
   assert.match(patched, /r=\[\{slug:`general-settings`\},\{slug:`linux-desktop`\},\{slug:`profile`\}/);
+});
+
+test("adds Linux desktop to the current personal settings navigation group", () => {
+  const source = [
+    "var nn=`general-settings.import.profile.appearance.keyboard-shortcuts`.split(`.`),",
+    "rn=[{key:`personal`,heading:d({id:`settings.nav.heading.personal`,defaultMessage:`Personal`,description:`Heading for personal settings in the settings navigation`}),",
+    "slugs:[`general-settings`,`import`,`profile`,`appearance`,`keyboard-shortcuts`]}];",
+  ].join("");
+
+  const patched = applyPatchTwice(applyLinuxDesktopSettingsNavigationGroupPatch, source);
+
+  assert.match(
+    patched,
+    /slugs:\[`general-settings`,`linux-desktop`,`import`,`profile`,`appearance`,`keyboard-shortcuts`\]/,
+  );
+});
+
+test("rejects ambiguous current personal settings navigation groups", () => {
+  const group =
+    "{key:`personal`,heading:d({id:`settings.nav.heading.personal`,defaultMessage:`Personal`,description:`Heading for personal settings in the settings navigation`}),slugs:[`general-settings`,`appearance`]}";
+
+  assert.throws(
+    () => applyLinuxDesktopSettingsNavigationGroupPatch(`[${group},${group}]`),
+    /expected exactly one current personal settings navigation group \(found 2, 0 already patched\)/,
+  );
+});
+
+test("skips Linux desktop settings when the current navigation group asset drifts", () => {
+  const { extractedDir, assetsDir } = createSplitRouteNativeKeyboardShortcutsSettingsFixture();
+  try {
+    const settingsPagePath = path.join(assetsDir, "settings-page-A.js");
+    fs.writeFileSync(
+      settingsPagePath,
+      fs.readFileSync(settingsPagePath, "utf8").replace(
+        "id:`settings.nav.heading.personal`",
+        "id:`settings.nav.heading.primary`",
+      ),
+      "utf8",
+    );
+
+    const { value: result, warnings } = captureWarns(() => patchKeybindsSettingsAssets(extractedDir));
+
+    assert.equal(result.matched, false);
+    assert.equal(result.changed, 0);
+    assert.match(result.reason, /exactly one current settings navigation group asset \(found 0\)/);
+    assert.ok(warnings.some((warning) => warning.includes(result.reason)));
+    assert.equal(fs.existsSync(path.join(assetsDir, linuxDesktopSettingsAsset)), false);
+
+    const report = createPatchReport();
+    captureWarns(() => patchExtractedApp(extractedDir, { report }));
+    const reportEntry = report.patches.find((patch) => patch.name === "keybinds-settings");
+    assert.equal(reportEntry.status, "skipped-optional");
+    assert.match(reportEntry.reason, /exactly one current settings navigation group asset \(found 0\)/);
+  } finally {
+    fs.rmSync(extractedDir, { recursive: true, force: true });
+  }
 });
 
 test("skips Linux desktop settings when the current visibility asset drifts", () => {

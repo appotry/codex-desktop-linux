@@ -632,6 +632,38 @@ function collectLinuxDesktopVisibilityPatch(extractedDir) {
   }];
 }
 
+function collectLinuxDesktopNavigationGroupPatch(extractedDir) {
+  const webviewAssetsDir = path.join(extractedDir, "webview", "assets");
+  if (!fs.existsSync(webviewAssetsDir)) {
+    throw new Error(`Required Keybinds settings patch failed: missing webview assets directory ${webviewAssetsDir}`);
+  }
+
+  const candidates = fs
+    .readdirSync(webviewAssetsDir)
+    .filter((name) => /^settings-page-[^.]+\.js$/.test(name))
+    .sort()
+    .filter((name) => {
+      const source = fs.readFileSync(path.join(webviewAssetsDir, name), "utf8");
+      return source.includes("id:`settings.nav.heading.personal`");
+    });
+
+  if (candidates.length !== 1) {
+    throw new Error(
+      `Required Keybinds settings patch failed: could not find exactly one current settings navigation group asset (found ${candidates.length})`,
+    );
+  }
+
+  const [candidate] = candidates;
+  const filePath = path.join(webviewAssetsDir, candidate);
+  const currentSource = fs.readFileSync(filePath, "utf8");
+  return [{
+    filePath,
+    currentSource,
+    patchedSource: applyLinuxDesktopSettingsNavigationGroupPatch(currentSource),
+    patchFn: applyLinuxDesktopSettingsNavigationGroupPatch,
+  }];
+}
+
 function collectLinuxDesktopIconMapPatches(extractedDir) {
   const webviewAssetsDir = path.join(extractedDir, "webview", "assets");
   if (!fs.existsSync(webviewAssetsDir)) {
@@ -801,6 +833,7 @@ function patchKeybindsSettingsAssets(extractedDir) {
         isSettingsSectionsMetadataBundleSource,
         applyLinuxDesktopSettingsSectionsPatch,
       ),
+      ...collectLinuxDesktopNavigationGroupPatch(extractedDir),
       ...collectLinuxDesktopVisibilityPatch(extractedDir),
       ...collectOptionalMatchingAssetPatches(
         extractedDir,
@@ -918,6 +951,29 @@ function applyLinuxDesktopSettingsSectionsPatch(currentSource) {
   }
 
   return patchedSource;
+}
+
+function applyLinuxDesktopSettingsNavigationGroupPatch(currentSource) {
+  const unpatchedGroupPattern =
+    /(\{key:`personal`,heading:[^;]{0,1200}?id:`settings\.nav\.heading\.personal`[^;]{0,1200}?slugs:\[`general-settings`,)(?!`linux-desktop`,)/g;
+  const patchedGroupPattern =
+    /\{key:`personal`,heading:[^;]{0,1200}?id:`settings\.nav\.heading\.personal`[^;]{0,1200}?slugs:\[`general-settings`,`linux-desktop`,/g;
+  const unpatchedCount = currentSource.match(unpatchedGroupPattern)?.length ?? 0;
+  const patchedCount = currentSource.match(patchedGroupPattern)?.length ?? 0;
+
+  if (unpatchedCount === 0 && patchedCount === 1) {
+    return currentSource;
+  }
+  if (unpatchedCount !== 1 || patchedCount !== 0) {
+    throw new Error(
+      `Required Keybinds settings patch failed: expected exactly one current personal settings navigation group (found ${unpatchedCount}, ${patchedCount} already patched)`,
+    );
+  }
+
+  return currentSource.replace(
+    unpatchedGroupPattern,
+    "$1`linux-desktop`,",
+  );
 }
 
 // Inserts a new `titleForSection` switch case after the upstream
@@ -1217,6 +1273,7 @@ module.exports = {
   applyKeybindsSettingsSharedPatch,
   applyLinuxDesktopSettingsIndexPatch,
   applyLinuxDesktopSettingsIconPatch,
+  applyLinuxDesktopSettingsNavigationGroupPatch,
   applyLinuxDesktopSettingsRoutePatch,
   applyLinuxDesktopSettingsSectionsPatch,
   applyLinuxDesktopSettingsSharedPatch,
