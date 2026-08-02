@@ -21,15 +21,12 @@ const REMOTE_CONTROL_SETTINGS_VISIBILITY_NEEDLE =
 const REMOTE_CONTROL_SETTINGS_UX_MARKER = "codexLinuxRemoteControlSettingsTabs";
 const REMOTE_CONTROL_SETTINGS_TABS_HELPER =
   "function codexLinuxRemoteControlSettingsTabs(e){return e}";
-const REMOTE_CONTROL_SETTINGS_TABS_OLD_HELPER =
-  "function codexLinuxRemoteControlSettingsTabs(e){return typeof navigator!=`undefined`&&navigator.userAgent.includes(`Linux`)?e.filter(e=>e.key!==`access-other-devices`):e}";
 const REMOTE_CONTROL_SSH_INSTALL_ACTION_MARKER = "codexLinuxRemoteControlSshInstallActions";
 const REMOTE_CONTROL_SSH_INSTALL_RELEASE_MARKER = "codexLinuxRemoteControlSshInstallRelease";
 const REMOTE_CONNECTIONS_REFRESH_MARKER = "codexLinuxRemoteConnectionsRefreshNow";
 const REMOTE_MOBILE_CHROME_BRIDGE_MARKER = "codexLinuxRemoteMobileBrowserBackends";
 const REMOTE_CONTROL_LOAD_GATE_MARKER = "codexLinuxRemoteControlLoadGateEnabled";
 const REMOTE_CONTROL_FEATURE_SYNC_MARKER = "codexLinuxRemoteControlFeatureSyncEnabled";
-const REMOTE_CONTROL_FEATURE_SYNC_HOST_SCOPE_MARKER = "codexLinuxRemoteControlFeatureSyncHostScoped";
 const REMOTE_CONTROL_LOAD_GATE_NEEDLE =
   /function ([A-Za-z_$][\w$]*)\(\)\{return ([A-Za-z_$][\w$]*)\(`1042620455`\)\}/u;
 const REMOTE_MOBILE_THREAD_RUNTIME_MARKER = "codexLinuxRemoteMobileThreadRuntimeStatus";
@@ -369,85 +366,50 @@ function applyLinuxRemoteControlFeatureSyncPatch(source) {
   if (!source.includes("set-experimental-feature-enablement-for-host")) {
     return source;
   }
-
-  // The current per-host feature enablement helper copies the supported
-  // defaults, then adds remote_plugin without remote_control. Current app
-  // servers use remote_plugin for remote marketplace data, so Linux adds only
-  // remote_control while preserving the upstream remote_plugin assignment.
-  let patched = source;
-  let changed = false;
-  const enablementRegex =
-    /(for\(let ([A-Za-z_$][\w$]*) of [A-Za-z_$][\w$]*\)\{let ([A-Za-z_$][\w$]*)=[A-Za-z_$][\w$]*\[\2\];\3!=null&&\(([A-Za-z_$][\w$]*)\[\2\]=\3\)\})return \4\[([A-Za-z_$][\w$]*)\]=([A-Za-z_$][\w$]*),\4\}/u;
-  if (!patched.includes(REMOTE_CONTROL_FEATURE_SYNC_MARKER)) {
-    const match = patched.match(enablementRegex);
-    if (match != null) {
-      const [, loopBlock, , , enablementVar, remotePluginVar, remotePluginValue] = match;
-      const replacement =
-        `${loopBlock}return typeof navigator!=\`undefined\`&&navigator.userAgent.includes(\`Linux\`)` +
-        `?(${REMOTE_CONTROL_FEATURE_SYNC_MARKER}(arguments[2],arguments[3])&&(${enablementVar}.remote_control=!0),${enablementVar}[${remotePluginVar}]=${remotePluginValue},${enablementVar})` +
-        `:(${enablementVar}[${remotePluginVar}]=${remotePluginValue},${enablementVar})}` +
-        `function ${REMOTE_CONTROL_FEATURE_SYNC_MARKER}(e,t){return e==null||t==null||e===t}`;
-      patched = patched.replace(enablementRegex, replacement);
-      changed = true;
-    }
-  }
-
-  const scoped = applyLinuxRemoteControlFeatureSyncHostScopePatch(patched);
-  if (scoped !== patched) {
-    patched = scoped;
-    changed = true;
-  }
-
-  if (changed || patched.includes(REMOTE_CONTROL_FEATURE_SYNC_MARKER)) {
-    return patched;
-  }
-
-  console.warn("WARN: Could not find app-server feature sync list - skipping Linux remote-control feature sync patch");
-  return source;
-}
-
-function applyLinuxRemoteControlFeatureSyncHostScopePatch(source) {
-  if (source.includes(REMOTE_CONTROL_FEATURE_SYNC_HOST_SCOPE_MARKER)) {
+  if (source.includes(`function ${REMOTE_CONTROL_FEATURE_SYNC_MARKER}(`)) {
     return source;
   }
 
-  const builderCallRegex =
-    /let ([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*),([A-Za-z_$][\w$]*|![01])\),([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\.get\(([A-Za-z_$][\w$]*)\),/u;
-  const builderCallMatch = source.match(builderCallRegex);
-  if (builderCallMatch == null) {
-    return source;
-  }
-
-  const [
-    ,
-    enablementVar,
-    builderFn,
-    featureConfigVar,
-    remotePluginValueVar,
-    localHostVar,
-  ] = builderCallMatch;
   const id = "[A-Za-z_$][\\w$]*";
+  const syncSetupRegex = new RegExp(
+    `let (${id})=(${id})\\((${id}),(${id}),(${id})\\),` +
+      `(${id})=(${id})\\.get\\((${id})\\),(${id})=new Set\\(`,
+    "u",
+  );
+  const setupMatch = source.match(syncSetupRegex);
+  const enablementVar = setupMatch?.[1];
+  const localHostVar = setupMatch?.[6];
+  const activeHostsVar = setupMatch?.[9];
+  if (enablementVar == null || localHostVar == null || activeHostsVar == null) {
+    console.warn("WARN: Could not find app-server feature sync setup - skipping Linux remote-control feature sync patch");
+    return source;
+  }
+
   const flatMapRegex = new RegExp(
-    `\\(0,(${id})\\.(${id})\\)\\((${id})\\.get\\((${id})\\),${enablementVar}\\)\\?\\[\\]:` +
-      `\\(\\3\\.set\\(\\4,${enablementVar}\\),\\[(${id})\\(\\x60set-experimental-feature-enablement-for-host\\x60,` +
-      `\\{hostId:\\4,enablement:${enablementVar}\\}\\)`,
+    `Array\\.from\\(${activeHostsVar}\\)\\.flatMap\\((${id})=>` +
+      `\\(0,(${id})\\.default\\)\\((${id})\\.get\\(\\1\\),${enablementVar}\\)\\?\\[\\]:` +
+      `\\(\\3\\.set\\(\\1,${enablementVar}\\),\\[(${id})\\(\\x60set-experimental-feature-enablement-for-host\\x60,` +
+      `\\{hostId:\\1,enablement:${enablementVar}\\}\\)`,
     "u",
   );
   const match = source.match(flatMapRegex);
   if (match == null) {
+    console.warn("WARN: Could not find app-server feature sync list - skipping Linux remote-control feature sync patch");
     return source;
   }
 
-  const [needle, compareNamespaceVar, compareFnVar, cacheMapVar, hostVar, requestFnVar] = match;
-  const helperName = "codexLinuxRemoteControlFeatureSyncForHost";
+  const [needle, hostVar, compareNamespaceVar, cacheMapVar, requestFnVar] = match;
   const scopedEnablement =
-    `${helperName}(${builderFn},${featureConfigVar},${remotePluginValueVar},${hostVar},${localHostVar})`;
+    `${REMOTE_CONTROL_FEATURE_SYNC_MARKER}(${enablementVar},${localHostVar},${hostVar})`;
   const replacement =
-    `(0,${compareNamespaceVar}.${compareFnVar})(${cacheMapVar}.get(${hostVar}),${scopedEnablement})?[]:` +
+    `Array.from(${activeHostsVar}).flatMap(${hostVar}=>(0,${compareNamespaceVar}.default)` +
+    `(${cacheMapVar}.get(${hostVar}),${scopedEnablement})?[]:` +
     `(${cacheMapVar}.set(${hostVar},${scopedEnablement}),[${requestFnVar}(\`set-experimental-feature-enablement-for-host\`,` +
-    `{hostId:${hostVar},enablement:${scopedEnablement}})/*${REMOTE_CONTROL_FEATURE_SYNC_HOST_SCOPE_MARKER}*/`;
+    `{hostId:${hostVar},enablement:${scopedEnablement}})`;
   const helper =
-    `function ${helperName}(e,t,n,r,i){return e(t,n,r,i)}`;
+    `function ${REMOTE_CONTROL_FEATURE_SYNC_MARKER}(e,t,n){return ` +
+    `typeof navigator!=\`undefined\`&&navigator.userAgent.includes(\`Linux\`)&&t===n` +
+    `?{...e,remote_control:!0}:e}`;
 
   return `${source.replace(needle, replacement)}\n${helper}`;
 }
@@ -528,28 +490,17 @@ function applyLinuxRemoteControlSshInstallActionPatch(source) {
   }
 
   const actionGateRegex =
-    /let ([A-Za-z_$][\w$]*)=([^;]+?)&&\(([A-Za-z_$][\w$]*)\?\.code===`remote-codex-not-found`\|\|\3\?\.code===`update-required`\);([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)==null\|\|\1\?null:([A-Za-z_$][\w$]*)\(\{action:\5\.action,/u;
+    /let ([A-Za-z_$][\w$]*)=\([^;]{1,160}\)&&\(([A-Za-z_$][\w$]*)\?\.code===`remote-codex-not-found`\|\|\2\?\.code===`update-required`\)(?=,[A-Za-z_$][\w$]*;)/u;
   const match = source.match(actionGateRegex);
-  if (match != null) {
-    const [, gateVar, , , renderedActionVar, connectionActionVar, renderActionFn] = match;
-    return source.replace(
-      actionGateRegex,
-      `let ${gateVar}=/*${REMOTE_CONTROL_SSH_INSTALL_ACTION_MARKER}*/!1;${renderedActionVar}=${connectionActionVar}==null?null:${renderActionFn}({action:${connectionActionVar}.action,`,
-    );
-  }
-
-  const currentActionGateRegex =
-    /let ([A-Za-z_$][\w$]*)=([^;,]+?)&&\(([A-Za-z_$][\w$]*)\?\.code===`remote-codex-not-found`\|\|\3\?\.code===`update-required`\),([\s\S]*?)([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)==null\|\|\1\?null:([A-Za-z_$][\w$]*)\(\{action:\6\.action,/u;
-  const currentMatch = source.match(currentActionGateRegex);
-  if (currentMatch == null) {
+  if (match == null) {
     console.warn("WARN: Could not find remote-control SSH install action gate - skipping Linux install action patch");
     return source;
   }
 
-  const [, gateVar, , , betweenGateAndAction, renderedActionVar, connectionActionVar, renderActionFn] = currentMatch;
+  const [, gateVar] = match;
   return source.replace(
-    currentActionGateRegex,
-    `let ${gateVar}=/*${REMOTE_CONTROL_SSH_INSTALL_ACTION_MARKER}*/!1,${betweenGateAndAction}${renderedActionVar}=${connectionActionVar}==null?null:${renderActionFn}({action:${connectionActionVar}.action,`,
+    actionGateRegex,
+    `let ${gateVar}=/*${REMOTE_CONTROL_SSH_INSTALL_ACTION_MARKER}*/!1`,
   );
 }
 
@@ -561,120 +512,41 @@ function applyLinuxRemoteControlSshInstallReleasePatch(source) {
     return source;
   }
 
-  const actionBuilderRegex =
-    /function ([A-Za-z_$][\w$]*)\(\{action:([A-Za-z_$][\w$]*),disabled:([A-Za-z_$][\w$]*),hostId:([A-Za-z_$][\w$]*),installCodexPending:([A-Za-z_$][\w$]*),onAuthenticate:([A-Za-z_$][\w$]*),onInstallCodex:([A-Za-z_$][\w$]*)(?:,onRestart:([A-Za-z_$][\w$]*))?\}\)\{if\(\2==null\)return null;switch\(\2\.kind\)\{case`install-codex`:return\{disabled:\3,label:\2\.label,loading:\5,loadingLabel:\2\.loadingLabel,renderInElectronOnly:!0,tooltipText:\2\.tooltipText,onClick:\(\)=>\7\(\4\)\}/u;
-  const actionCallRegex =
-    /let ([A-Za-z_$][\w$]*)=([^;]+?)&&\(([A-Za-z_$][\w$]*)\?\.code===`remote-codex-not-found`\|\|\3\?\.code===`update-required`\);([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)==null\|\|\1\?null:([A-Za-z_$][\w$]*)\(\{action:\5\.action,disabled:([A-Za-z_$][\w$]*),hostId:([A-Za-z_$][\w$]*)\.hostId,installCodexPending:([A-Za-z_$][\w$]*),(?:onRestart:([A-Za-z_$][\w$]*),)?onAuthenticate:([A-Za-z_$][\w$]*),onInstallCodex:([A-Za-z_$][\w$]*)\}\)/u;
-  const mutationRegex =
-    /([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)=>\{([A-Za-z_$][\w$]*)\.mutate\(\{hostId:\2\},\{onSuccess:\(\{state:([A-Za-z_$][\w$]*),error:([A-Za-z_$][\w$]*)\}\)=>\{([A-Za-z_$][\w$]*)\(\2,\4,\5\)\}\}\)\}/u;
-  const localVersionRegex =
-    /function ([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*)\)\{let ([A-Za-z_$][\w$]*)=\(0,([A-Za-z_$][\w$]*)\.c\)\((\d+)\),\{connection:([A-Za-z_$][\w$]*),disabled:([A-Za-z_$][\w$]*),installCodexPending:([A-Za-z_$][\w$]*),([\s\S]*?)onAuthenticate:([A-Za-z_$][\w$]*),([\s\S]*?)onInstallCodex:([A-Za-z_$][\w$]*),([\s\S]*?)\}=\2,([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\(\),\{appServerVersion:([A-Za-z_$][\w$]*),error:([A-Za-z_$][\w$]*),installedCodexVersion:([A-Za-z_$][\w$]*),state:([A-Za-z_$][\w$]*)\}=([A-Za-z_$][\w$]*)\(\6\.hostId\),([A-Za-z_$][\w$]*)=\6\.displayName/u;
-  const currentActionCallRegex =
-    /let ([A-Za-z_$][\w$]*)=([^;,]+?)&&\(([A-Za-z_$][\w$]*)\?\.code===`remote-codex-not-found`\|\|\3\?\.code===`update-required`\),([\s\S]*?)([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)==null\|\|\1\?null:([A-Za-z_$][\w$]*)\(\{action:\6\.action,disabled:([A-Za-z_$][\w$]*),hostId:([A-Za-z_$][\w$]*)\.hostId,installCodexPending:([A-Za-z_$][\w$]*),(?:onRestart:([A-Za-z_$][\w$]*),)?onAuthenticate:([A-Za-z_$][\w$]*),onInstallCodex:([A-Za-z_$][\w$]*)\}\)/u;
-  const currentLocalVersionRegex =
-    /\{appServerVersion:([A-Za-z_$][\w$]*),error:([A-Za-z_$][\w$]*),installedCodexVersion:([A-Za-z_$][\w$]*),state:([A-Za-z_$][\w$]*)\}=([A-Za-z_$][\w$]*)\(([A-Za-z_$][\w$]*)\.hostId\),([A-Za-z_$][\w$]*)=\6\.displayName/u;
-
-  const actionBuilderMatch = source.match(actionBuilderRegex);
-  const actionCallMatch = source.match(actionCallRegex);
-  const mutationMatch = source.match(mutationRegex);
-  const localVersionMatch = source.match(localVersionRegex);
+  const id = "[A-Za-z_$][\\w$]*";
+  const currentActionBuilderRegex = new RegExp(
+    `function (${id})\\(\\{action:(${id}),disabled:(${id}),hostId:(${id}),` +
+      `installCodexPending:(${id}),onAuthenticate:(${id}),onInstallCodex:(${id}),` +
+      `onReconnect:(${id}),onRestart:(${id})\\}\\)\\{if\\(\\2==null\\)return null;` +
+      `switch\\(\\2\\.kind\\)\\{case\\x60install-codex\\x60:return\\{disabled:\\3,label:\\2\\.label,` +
+      `loading:\\5,loadingLabel:\\2\\.loadingLabel,renderInElectronOnly:!0,` +
+      `tooltipText:\\2\\.tooltipText,onClick:\\(\\)=>\\7\\(\\4\\)\\}`,
+    "u",
+  );
+  const currentActionCallRegex = new RegExp(
+    `(${id})\\(\\{action:(${id})\\.action,disabled:(${id}),hostId:(${id})\\.hostId,` +
+      `installCodexPending:(${id}),onReconnect:(${id}),onRestart:(${id}),` +
+      `onAuthenticate:(${id}),onInstallCodex:(${id})\\}\\)`,
+    "u",
+  );
+  const currentLocalVersionRegex = new RegExp(
+    `\\{appServerVersion:(${id}),error:(${id}),installedCodexVersion:(${id}),state:(${id})\\}` +
+      `=(${id})\\((${id})\\.hostId\\),(${id})=\\6\\.displayName`,
+    "u",
+  );
+  const currentMutationRegex = new RegExp(
+    `(${id})=(${id})=>\\{(${id})\\.mutate\\(\\{hostId:\\2\\},` +
+      `\\{onSuccess:\\(\\{state:(${id}),error:(${id})\\}\\)=>\\{(${id})\\(\\2,\\4,\\5\\)\\}\\}\\)\\}`,
+    "u",
+  );
+  const currentActionBuilderMatch = source.match(currentActionBuilderRegex);
   const currentActionCallMatch = source.match(currentActionCallRegex);
   const currentLocalVersionMatch = source.match(currentLocalVersionRegex);
+  const currentMutationMatch = source.match(currentMutationRegex);
   if (
-    actionBuilderMatch != null &&
-    mutationMatch != null &&
-    currentActionCallMatch != null &&
-    currentLocalVersionMatch != null
-  ) {
-    const [
-      ,
-      builderFn,
-      builderActionVar,
-      builderDisabledVar,
-      builderHostVar,
-      builderPendingVar,
-      builderAuthVar,
-      builderInstallVar,
-      builderRestartVar,
-    ] = actionBuilderMatch;
-    const builderRestartPart = builderRestartVar == null ? "" : `,onRestart:${builderRestartVar}`;
-    const actionBuilderReplacement =
-      `function ${builderFn}({action:${builderActionVar},disabled:${builderDisabledVar},hostId:${builderHostVar},installCodexPending:${builderPendingVar},` +
-      `installCodexRelease:codexLinuxRemoteControlSshInstallReleaseTarget,onAuthenticate:${builderAuthVar},onInstallCodex:${builderInstallVar}${builderRestartPart}}){` +
-      `if(${builderActionVar}==null)return null;switch(${builderActionVar}.kind){case\`install-codex\`:return{disabled:${builderDisabledVar},label:${builderActionVar}.label,loading:${builderPendingVar},` +
-      `loadingLabel:${builderActionVar}.loadingLabel,renderInElectronOnly:!0,tooltipText:${builderActionVar}.tooltipText,onClick:()=>${builderInstallVar}(${builderHostVar},codexLinuxRemoteControlSshInstallReleaseTarget)}`;
-
-    const [
-      ,
-      gateVar,
-      gateExpression,
-      errorVar,
-      betweenGateAndAction,
-      renderedActionVar,
-      connectionActionVar,
-      renderActionFn,
-      disabledVar,
-      connectionVar,
-      pendingVar,
-      restartVar,
-      authenticateVar,
-      installVar,
-    ] = currentActionCallMatch;
-    const restartPart = restartVar == null ? "" : `onRestart:${restartVar},`;
-    const actionCallReplacement =
-      `let ${gateVar}=${gateExpression}&&(${errorVar}?.code===\`remote-codex-not-found\`||${errorVar}?.code===\`update-required\`),` +
-      `${betweenGateAndAction}${renderedActionVar}=${connectionActionVar}==null||${gateVar}?null:${renderActionFn}({action:${connectionActionVar}.action,disabled:${disabledVar},hostId:${connectionVar}.hostId,` +
-      `installCodexPending:${pendingVar},installCodexRelease:${REMOTE_CONTROL_SSH_INSTALL_RELEASE_MARKER}(${errorVar}),${restartPart}onAuthenticate:${authenticateVar},onInstallCodex:${installVar}})`;
-
-    const [
-      ,
-      currentAppServerVersionVar,
-      currentErrorVar,
-      currentInstalledVersionVar,
-      currentStateVar,
-      currentConnectionStateFn,
-      currentConnectionVar,
-      currentDisplayNameVar,
-    ] = currentLocalVersionMatch;
-    const currentLocalVersionReplacement =
-      `{appServerVersion:${currentAppServerVersionVar},error:${currentErrorVar},installedCodexVersion:${currentInstalledVersionVar},state:${currentStateVar}}=${currentConnectionStateFn}(${currentConnectionVar}.hostId),` +
-      `{appServerVersion:codexLinuxRemoteControlSshInstallLocalVersion}=${currentConnectionStateFn}(\`local\`);` +
-      `codexLinuxRemoteControlSshInstallDefaultRelease=codexLinuxRemoteControlValidRelease(codexLinuxRemoteControlSshInstallLocalVersion)??codexLinuxRemoteControlSshInstallDefaultRelease;` +
-      `let ${currentDisplayNameVar}=${currentConnectionVar}.displayName`;
-
-    const [
-      ,
-      mutationHandlerVar,
-      mutationHostVar,
-      mutationVar,
-      mutationStateVar,
-      mutationErrorVar,
-      syncStateFn,
-    ] = mutationMatch;
-    const mutationReplacement =
-      `${mutationHandlerVar}=(${mutationHostVar},codexLinuxRemoteControlSshInstallTargetRelease)=>{` +
-      `let codexLinuxRemoteControlSshInstallRequest={hostId:${mutationHostVar}},` +
-      `codexLinuxRemoteControlSshInstallResolvedRelease=codexLinuxRemoteControlSshInstallTargetRelease??codexLinuxRemoteControlSshInstallDefaultRelease;` +
-      `codexLinuxRemoteControlSshInstallResolvedRelease!=null&&(codexLinuxRemoteControlSshInstallRequest.release=codexLinuxRemoteControlSshInstallResolvedRelease),` +
-      `${mutationVar}.mutate(codexLinuxRemoteControlSshInstallRequest,{onSuccess:({state:${mutationStateVar},error:${mutationErrorVar}})=>{${syncStateFn}(${mutationHostVar},${mutationStateVar},${mutationErrorVar})}})}`;
-
-    const helper = [
-      "let codexLinuxRemoteControlSshInstallDefaultRelease=null;",
-      "function codexLinuxRemoteControlValidRelease(e){return typeof e==`string`&&e.trim().length>0?e.trim():null}",
-      `function ${REMOTE_CONTROL_SSH_INSTALL_RELEASE_MARKER}(e){return e?.code===\`update-required\`?codexLinuxRemoteControlValidRelease(e.minRequiredVersion):null}`,
-    ].join("");
-
-    return helper + source
-      .replace(currentLocalVersionRegex, currentLocalVersionReplacement)
-      .replace(actionBuilderRegex, actionBuilderReplacement)
-      .replace(currentActionCallRegex, actionCallReplacement)
-      .replace(mutationRegex, mutationReplacement);
-  }
-  if (
-    actionBuilderMatch == null ||
-    actionCallMatch == null ||
-    mutationMatch == null ||
-    localVersionMatch == null
+    currentActionBuilderMatch == null ||
+    currentActionCallMatch == null ||
+    currentLocalVersionMatch == null ||
+    currentMutationMatch == null
   ) {
     console.warn("WARN: Could not find remote-control SSH install release needles - skipping Linux install release patch");
     return source;
@@ -682,76 +554,63 @@ function applyLinuxRemoteControlSshInstallReleasePatch(source) {
 
   const [
     ,
-    rowComponentFn,
-    rowPropsVar,
-    rowCacheVar,
-    rowCompilerVar,
-    rowCacheSize,
-    rowConnectionVar,
-    rowDisabledVar,
-    rowInstallPendingVar,
-    rowBetweenPendingAndAuth,
-    rowAuthenticateVar,
-    rowBetweenAuthAndInstall,
-    rowInstallVar,
-    rowTrailingProps,
-    rowFormatVar,
-    rowFormatFn,
-    rowAppServerVersionVar,
-    rowErrorVar,
-    rowInstalledVersionVar,
-    rowStateVar,
-    rowConnectionStateFn,
-    rowDisplayNameVar,
-  ] = localVersionMatch;
-  const localVersionReplacement =
-    `function ${rowComponentFn}(${rowPropsVar}){let ${rowCacheVar}=(0,${rowCompilerVar}.c)(${rowCacheSize}),` +
-    `{connection:${rowConnectionVar},disabled:${rowDisabledVar},installCodexPending:${rowInstallPendingVar},` +
-    `${rowBetweenPendingAndAuth}onAuthenticate:${rowAuthenticateVar},${rowBetweenAuthAndInstall}` +
-    `onInstallCodex:${rowInstallVar},${rowTrailingProps}}=${rowPropsVar},${rowFormatVar}=${rowFormatFn}(),` +
-    `{appServerVersion:${rowAppServerVersionVar},error:${rowErrorVar},installedCodexVersion:${rowInstalledVersionVar},state:${rowStateVar}}=${rowConnectionStateFn}(${rowConnectionVar}.hostId),` +
-    `{appServerVersion:codexLinuxRemoteControlSshInstallLocalVersion}=${rowConnectionStateFn}(\`local\`);` +
-    `codexLinuxRemoteControlSshInstallDefaultRelease=codexLinuxRemoteControlValidRelease(codexLinuxRemoteControlSshInstallLocalVersion)??codexLinuxRemoteControlSshInstallDefaultRelease;` +
-    `let ${rowDisplayNameVar}=${rowConnectionVar}.displayName`;
-
-  const [
-    ,
     builderFn,
-    builderActionVar,
-    builderDisabledVar,
-    builderHostVar,
-    builderPendingVar,
-    builderAuthVar,
-    builderInstallVar,
-    builderRestartVar,
-  ] = actionBuilderMatch;
-  const builderRestartPart = builderRestartVar == null ? "" : `,onRestart:${builderRestartVar}`;
-  const actionBuilderReplacement =
-    `function ${builderFn}({action:${builderActionVar},disabled:${builderDisabledVar},hostId:${builderHostVar},installCodexPending:${builderPendingVar},` +
-    `installCodexRelease:codexLinuxRemoteControlSshInstallReleaseTarget,onAuthenticate:${builderAuthVar},onInstallCodex:${builderInstallVar}${builderRestartPart}}){` +
-    `if(${builderActionVar}==null)return null;switch(${builderActionVar}.kind){case\`install-codex\`:return{disabled:${builderDisabledVar},label:${builderActionVar}.label,loading:${builderPendingVar},` +
-    `loadingLabel:${builderActionVar}.loadingLabel,renderInElectronOnly:!0,tooltipText:${builderActionVar}.tooltipText,onClick:()=>${builderInstallVar}(${builderHostVar},codexLinuxRemoteControlSshInstallReleaseTarget)}`;
-
-  const [
-    ,
-    gateVar,
-    loadGateVar,
-    errorVar,
-    renderedActionVar,
-    connectionActionVar,
-    renderActionFn,
+    actionVar,
     disabledVar,
-    connectionVar,
+    hostVar,
     pendingVar,
-    restartVar,
     authenticateVar,
     installVar,
-  ] = actionCallMatch;
-  const restartPart = restartVar == null ? "" : `onRestart:${restartVar},`;
+    reconnectVar,
+    restartVar,
+  ] = currentActionBuilderMatch;
+  const actionBuilderReplacement =
+    `function ${builderFn}({action:${actionVar},disabled:${disabledVar},hostId:${hostVar},` +
+    `installCodexPending:${pendingVar},installCodexRelease:codexLinuxRemoteControlSshInstallReleaseTarget,` +
+    `onAuthenticate:${authenticateVar},onInstallCodex:${installVar},onReconnect:${reconnectVar},onRestart:${restartVar}}){` +
+    `if(${actionVar}==null)return null;switch(${actionVar}.kind){case\`install-codex\`:return{` +
+    `disabled:${disabledVar},label:${actionVar}.label,loading:${pendingVar},loadingLabel:${actionVar}.loadingLabel,` +
+    `renderInElectronOnly:!0,tooltipText:${actionVar}.tooltipText,` +
+    `onClick:()=>${installVar}(${hostVar},codexLinuxRemoteControlSshInstallReleaseTarget)}`;
+
+  const [
+    ,
+    actionFn,
+    connectionActionVar,
+    callDisabledVar,
+    connectionVar,
+    callPendingVar,
+    callReconnectVar,
+    callRestartVar,
+    callAuthenticateVar,
+    callInstallVar,
+  ] = currentActionCallMatch;
   const actionCallReplacement =
-    `let ${gateVar}=${loadGateVar}&&(${errorVar}?.code===\`remote-codex-not-found\`||${errorVar}?.code===\`update-required\`);` +
-    `${renderedActionVar}=${connectionActionVar}==null||${gateVar}?null:${renderActionFn}({action:${connectionActionVar}.action,disabled:${disabledVar},hostId:${connectionVar}.hostId,` +
-    `installCodexPending:${pendingVar},installCodexRelease:${REMOTE_CONTROL_SSH_INSTALL_RELEASE_MARKER}(${errorVar}),${restartPart}onAuthenticate:${authenticateVar},onInstallCodex:${installVar}})`;
+    `${actionFn}({action:${connectionActionVar}.action,disabled:${callDisabledVar},` +
+    `hostId:${connectionVar}.hostId,installCodexPending:${callPendingVar},` +
+    `installCodexRelease:${REMOTE_CONTROL_SSH_INSTALL_RELEASE_MARKER}(codexLinuxRemoteControlSshInstallError),` +
+    `onReconnect:${callReconnectVar},onRestart:${callRestartVar},` +
+    `onAuthenticate:${callAuthenticateVar},onInstallCodex:${callInstallVar}})`;
+
+  const [
+    ,
+    appServerVersionVar,
+    errorVar,
+    installedVersionVar,
+    stateVar,
+    connectionStateFn,
+    localConnectionVar,
+    displayNameVar,
+  ] = currentLocalVersionMatch;
+  const localVersionReplacement =
+    `{appServerVersion:${appServerVersionVar},error:${errorVar},` +
+    `installedCodexVersion:${installedVersionVar},state:${stateVar}}=` +
+    `${connectionStateFn}(${localConnectionVar}.hostId),` +
+    `{appServerVersion:codexLinuxRemoteControlSshInstallLocalVersion}=${connectionStateFn}(\`local\`),` +
+    `codexLinuxRemoteControlSshInstallError=${errorVar},` +
+    `${displayNameVar}=(codexLinuxRemoteControlSshInstallDefaultRelease=` +
+    `codexLinuxRemoteControlValidRelease(codexLinuxRemoteControlSshInstallLocalVersion)??` +
+    `codexLinuxRemoteControlSshInstallDefaultRelease,${localConnectionVar}.displayName)`;
 
   const [
     ,
@@ -761,34 +620,33 @@ function applyLinuxRemoteControlSshInstallReleasePatch(source) {
     mutationStateVar,
     mutationErrorVar,
     syncStateFn,
-  ] = mutationMatch;
+  ] = currentMutationMatch;
   const mutationReplacement =
     `${mutationHandlerVar}=(${mutationHostVar},codexLinuxRemoteControlSshInstallTargetRelease)=>{` +
     `let codexLinuxRemoteControlSshInstallRequest={hostId:${mutationHostVar}},` +
-    `codexLinuxRemoteControlSshInstallResolvedRelease=codexLinuxRemoteControlSshInstallTargetRelease??codexLinuxRemoteControlSshInstallDefaultRelease;` +
-    `codexLinuxRemoteControlSshInstallResolvedRelease!=null&&(codexLinuxRemoteControlSshInstallRequest.release=codexLinuxRemoteControlSshInstallResolvedRelease),` +
-    `${mutationVar}.mutate(codexLinuxRemoteControlSshInstallRequest,{onSuccess:({state:${mutationStateVar},error:${mutationErrorVar}})=>{${syncStateFn}(${mutationHostVar},${mutationStateVar},${mutationErrorVar})}})}`;
+    `codexLinuxRemoteControlSshInstallResolvedRelease=` +
+    `codexLinuxRemoteControlSshInstallTargetRelease??codexLinuxRemoteControlSshInstallDefaultRelease;` +
+    `codexLinuxRemoteControlSshInstallResolvedRelease!=null&&` +
+    `(codexLinuxRemoteControlSshInstallRequest.release=codexLinuxRemoteControlSshInstallResolvedRelease),` +
+    `${mutationVar}.mutate(codexLinuxRemoteControlSshInstallRequest,{onSuccess:({state:${mutationStateVar},` +
+    `error:${mutationErrorVar}})=>{${syncStateFn}(${mutationHostVar},${mutationStateVar},${mutationErrorVar})}})}`;
 
   const helper = [
-    "let codexLinuxRemoteControlSshInstallDefaultRelease=null;",
+    "let codexLinuxRemoteControlSshInstallDefaultRelease=null,codexLinuxRemoteControlSshInstallError=null;",
     "function codexLinuxRemoteControlValidRelease(e){return typeof e==`string`&&e.trim().length>0?e.trim():null}",
     `function ${REMOTE_CONTROL_SSH_INSTALL_RELEASE_MARKER}(e){return e?.code===\`update-required\`?codexLinuxRemoteControlValidRelease(e.minRequiredVersion):null}`,
   ].join("");
 
   return helper + source
-    .replace(localVersionRegex, localVersionReplacement)
-    .replace(actionBuilderRegex, actionBuilderReplacement)
-    .replace(actionCallRegex, actionCallReplacement)
-    .replace(mutationRegex, mutationReplacement);
+    .replace(currentLocalVersionRegex, localVersionReplacement)
+    .replace(currentActionBuilderRegex, actionBuilderReplacement)
+    .replace(currentActionCallRegex, actionCallReplacement)
+    .replace(currentMutationRegex, mutationReplacement);
 }
 
 function applyLinuxRemoteControlSettingsUxPatch(source) {
   let patched = applyLinuxRemoteControlSshInstallReleasePatch(replaceLinuxRemoteControlCopy(source).patched);
   patched = applyLinuxRemoteControlSshInstallActionPatch(patched);
-
-  if (patched.includes(REMOTE_CONTROL_SETTINGS_TABS_OLD_HELPER)) {
-    patched = patched.replace(REMOTE_CONTROL_SETTINGS_TABS_OLD_HELPER, REMOTE_CONTROL_SETTINGS_TABS_HELPER);
-  }
 
   if (!patched.includes(REMOTE_CONTROL_SETTINGS_UX_MARKER)) {
     const helperNeedle = /function ([A-Za-z_$][\w$]*)\(e,t\)\{return e\.displayName\.localeCompare\(t\.displayName\)\}/u;
@@ -1254,9 +1112,15 @@ function applyLinuxRemoteControlEnablementBridgePatch(source) {
 
   patched = applyLinuxRemoteControlEnableForHostParamsPatch(patched);
 
-  const markerIndex = patched.indexOf("[remote-connections/slingshot-gate-bridge]");
+  const markerIndex = patched.indexOf("[remote-connections/gate-bridge]");
   const enablementIndex = patched.indexOf("set-remote-control-connections-enabled");
   if (markerIndex < 0 || enablementIndex < 0) {
+    if (
+      !patched.includes(REMOTE_CONTROL_ENABLEMENT_BRIDGE_MARKER) ||
+      !patched.includes(REMOTE_CONTROL_SELF_AUTO_CONNECT_MARKER)
+    ) {
+      console.warn("WARN: Could not find current remote-control enablement bridge anchors - skipping Linux remote-control bridge patch");
+    }
     return patched;
   }
   if (Math.abs(markerIndex - enablementIndex) > 4_500) {
@@ -1272,11 +1136,14 @@ function applyLinuxRemoteControlEnablementBridgePatch(source) {
 
   if (!patched.includes(REMOTE_CONTROL_ENABLEMENT_BRIDGE_MARKER)) {
     const currentBridgePattern =
-      /function ([A-Za-z_$][\w$]*)\(\)\{let ([A-Za-z_$][\w$]*)=\(0,([A-Za-z_$][\w$]*)\.c\)\(6\),\{checkGate:([A-Za-z_$][\w$]*),isLoading:([A-Za-z_$][\w$]*)\}=([A-Za-z_$][\w$]*)\(\),([A-Za-z_$][\w$]*);\2\[0\]===\4\?\7=\2\[1\]:\(\7=\4\(`1042620455`\),\2\[0\]=\4,\2\[1\]=\7\);let ([A-Za-z_$][\w$]*)=\7,([A-Za-z_$][\w$]*),([A-Za-z_$][\w$]*);return /u;
+      /function ([A-Za-z_$][\w$]*)\(\)\{let ([A-Za-z_$][\w$]*)=\(0,([A-Za-z_$][\w$]*)\.c\)\(6\),\{checkGate:([A-Za-z_$][\w$]*),isLoading:([A-Za-z_$][\w$]*)\}=([A-Za-z_$][\w$]*)\(\),([A-Za-z_$][\w$]*);\2\[0\]===\4\?\7=\2\[1\]:\(\7=\4\(`1042620455`\)\|\|\4\(`2055603567`\),\2\[0\]=\4,\2\[1\]=\7\);let ([A-Za-z_$][\w$]*)=\7,([A-Za-z_$][\w$]*),([A-Za-z_$][\w$]*);return /u;
     let patchedRegion = region.replace(
       currentBridgePattern,
-      (_needle, functionName, cacheVar, compilerVar, checkGateVar, isLoadingVar, gateHookVar, gateValueVar, enabledVar, callbackVar, depsVar) =>
-        `function ${functionName}(){let ${cacheVar}=(0,${compilerVar}.c)(6),{checkGate:${checkGateVar},isLoading:${isLoadingVar}}=${gateHookVar}(),${gateValueVar};${cacheVar}[0]===${checkGateVar}?${gateValueVar}=${cacheVar}[1]:(${gateValueVar}=${checkGateVar}(\`1042620455\`),${cacheVar}[0]=${checkGateVar},${cacheVar}[1]=${gateValueVar});let ${enabledVar}=${gateValueVar}||/*${REMOTE_CONTROL_ENABLEMENT_BRIDGE_MARKER}*/typeof navigator!=\`undefined\`&&navigator.userAgent.includes(\`Linux\`),${callbackVar},${depsVar};return `,
+      (needle, _functionName, _cacheVar, _compilerVar, _checkGateVar, _isLoadingVar, _gateHookVar, gateValueVar, enabledVar) =>
+        needle.replace(
+          `let ${enabledVar}=${gateValueVar},`,
+          `let ${enabledVar}=${gateValueVar}||/*${REMOTE_CONTROL_ENABLEMENT_BRIDGE_MARKER}*/typeof navigator!=\`undefined\`&&navigator.userAgent.includes(\`Linux\`),`,
+        ),
     );
     if (patchedRegion === region) {
       console.warn("WARN: Could not find remote-control enablement bridge needle - skipping Linux remote-control bridge patch");
@@ -1291,10 +1158,10 @@ function applyLinuxRemoteControlEnablementBridgePatch(source) {
   }
 
   const selfAutoConnectReplacement = (desktopHostRequestFn, enabledVar, errorVar, loggerVar, logPrefixVar) =>
-    `${desktopHostRequestFn}(\`set-remote-control-connections-enabled\`,{params:{enabled:${enabledVar}}}).then(async e=>{if(${enabledVar}&&typeof navigator!=\`undefined\`&&navigator.userAgent.includes(\`Linux\`)){let t=e?.remoteControlConnections??e?.sharedObjects?.remote_control_connections??e?.connections??[],n=e?.sharedObjects?.local_remote_control_installation_id??e?.local_remote_control_installation_id??e?.localRemoteControlInstallationId??e?.installationId??e?.installation_id??null;if(t.length===0)try{let e=await ${desktopHostRequestFn}(\`refresh-remote-control-connections\`,{params:{}});t=e?.remoteControlConnections??e?.sharedObjects?.remote_control_connections??e?.connections??[],n=n??e?.sharedObjects?.local_remote_control_installation_id??e?.local_remote_control_installation_id??e?.localRemoteControlInstallationId??e?.installationId??e?.installation_id??null}catch(e){${loggerVar}.warning(\`\${${logPrefixVar}} self_auto_connect_refresh_failed\`,{safe:{},sensitive:{error:e}})}if(n==null)try{let e=await ${desktopHostRequestFn}(\`get-global-state\`,{params:{key:\`electron-local-remote-control-installation-id\`}});n=e?.value??e?.state?.value??e?.globalState?.[\`electron-local-remote-control-installation-id\`]??null}catch(e){${loggerVar}.warning(\`\${${logPrefixVar}} self_auto_connect_identity_failed\`,{safe:{},sensitive:{error:e}})}let r=t.filter(e=>typeof e?.hostId==\`string\`&&e.hostId.startsWith(\`remote-control:\`)),i=new Set(r.filter(e=>n!=null&&(e.installationId??e.installation_id)===n).map(e=>e.hostId));await Promise.all(r.map(e=>${desktopHostRequestFn}(\`set-remote-connection-auto-connect\`,{params:{hostId:e.hostId,autoConnect:i.has(e.hostId)}}).catch(t=>{${loggerVar}.warning(\`\${${logPrefixVar}} self_auto_connect_failed\`,{safe:{autoConnect:i.has(e.hostId)},sensitive:{hostId:e.hostId,error:t}})})))}}/*${REMOTE_CONTROL_SELF_AUTO_CONNECT_MARKER}*/).catch(${errorVar}=>{${loggerVar}.warning(\`\${${logPrefixVar}} sync_failed\`,{safe:{enabled:${enabledVar}},sensitive:{error:${errorVar}}})})`;
+    `${desktopHostRequestFn}(\`set-remote-control-connections-enabled\`,{params:{enabled:${enabledVar}}}).then(async e=>{if(${enabledVar}&&typeof navigator!=\`undefined\`&&navigator.userAgent.includes(\`Linux\`)){let t=e?.remoteControlConnections??e?.sharedObjects?.remote_control_connections??e?.connections??[],n=e?.sharedObjects?.local_remote_control_installation_id??e?.local_remote_control_installation_id??e?.localRemoteControlInstallationId??e?.installationId??e?.installation_id??null;if(t.length===0)try{let e=await ${desktopHostRequestFn}(\`refresh-remote-control-connections\`,{params:{}});t=e?.remoteControlConnections??e?.sharedObjects?.remote_control_connections??e?.connections??[],n=n??e?.sharedObjects?.local_remote_control_installation_id??e?.local_remote_control_installation_id??e?.localRemoteControlInstallationId??e?.installationId??e?.installation_id??null}catch(e){${loggerVar}.warning(\`\${${logPrefixVar}} self_auto_connect_refresh_failed\`,{safe:{},sensitive:{error:e}})}if(n==null)try{let e=await ${desktopHostRequestFn}(\`get-global-state\`,{params:{key:\`electron-local-remote-control-installation-id\`}});n=e?.value??e?.state?.value??e?.globalState?.[\`electron-local-remote-control-installation-id\`]??null}catch(e){${loggerVar}.warning(\`\${${logPrefixVar}} self_auto_connect_identity_failed\`,{safe:{},sensitive:{error:e}})}let r=t.filter(e=>typeof e?.hostId==\`string\`&&e.hostId.startsWith(\`remote-control:\`)),i=new Set(r.filter(e=>n!=null&&(e.installationId??e.installation_id)===n).map(e=>e.hostId));await Promise.all(r.filter(e=>i.has(e.hostId)).map(e=>${desktopHostRequestFn}(\`set-remote-connection-auto-connect\`,{params:{hostId:e.hostId,autoConnect:!0}}).catch(t=>{${loggerVar}.warning(\`\${${logPrefixVar}} self_auto_connect_failed\`,{safe:{autoConnect:!0},sensitive:{hostId:e.hostId,error:t}})})))}}/*${REMOTE_CONTROL_SELF_AUTO_CONNECT_MARKER}*/).catch(${errorVar}=>{${loggerVar}.warning(\`\${${logPrefixVar}} sync_failed\`,{safe:{enabled:${enabledVar}},sensitive:{error:${errorVar}}})})`;
 
   const selfAutoConnectPattern =
-    /([A-Za-z_$][\w$]*)\(`set-remote-control-connections-enabled`,\{params:\{enabled:([A-Za-z_$][\w$]*)\}\}\)\.catch\(([A-Za-z_$][\w$]*)=>\{([A-Za-z_$][\w$]*)\.warning\(`\$\{([A-Za-z_$][\w$]*)\} sync_failed`,\{safe:\{(?:enabled|slingshotEnabled):\2\},sensitive:\{error:\3\}\}\)\}\)/u;
+    /([A-Za-z_$][\w$]*)\(`set-remote-control-connections-enabled`,\{params:\{enabled:([A-Za-z_$][\w$]*)\}\}\)\.catch\(([A-Za-z_$][\w$]*)=>\{([A-Za-z_$][\w$]*)\.warning\(`\$\{([A-Za-z_$][\w$]*)\} sync_failed`,\{safe:\{remoteControlConnectionsEnabled:\2\},sensitive:\{error:\3\}\}\)\}\)/u;
   const selfAutoConnectRegion = region.replace(
     selfAutoConnectPattern,
     (_needle, desktopHostRequestFn, enabledVar, errorVar, loggerVar, logPrefixVar) =>

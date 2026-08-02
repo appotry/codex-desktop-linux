@@ -591,8 +591,73 @@ test("classifies required patch-report failures as acceptance blockers", () =>
     });
 
     assert.ok(findClassification(driftReport, "record_and_replay_event_stream", "PATCH_BROKEN"));
+    assert.ok(
+      !findClassification(
+        driftReport,
+        "record_and_replay_event_stream",
+        "PATCH_INTEGRITY_BROKEN",
+      ),
+    );
     assert.ok(!findClassification(driftReport, "record_and_replay_event_stream", "PATCH_REVIEW"));
   }));
+
+test("classifies patch integrity failures as acceptance blockers", () =>
+  withTempDir((workspace) => {
+    const candidateApp = createFixtureApp(workspace, "candidate");
+    const candidate = extractProtectedSurfaces({
+      inventory: createInventory({ registry, sourcePath: candidateApp }),
+      registry,
+      repoRoot: process.cwd(),
+    });
+
+    const driftReport = compareProtectedSurfaces({
+      candidate,
+      patchReport: {
+        patches: [
+          {
+            name: "record-and-replay bridge patch",
+            status: "failed-integrity",
+            reason: "rollback could not restore original bytes",
+            surfaceId: "record_and_replay_event_stream",
+          },
+        ],
+      },
+    });
+
+    assert.ok(
+      findClassification(
+        driftReport,
+        "record_and_replay_event_stream",
+        "PATCH_INTEGRITY_BROKEN",
+      ),
+    );
+    assert.ok(!findClassification(driftReport, "record_and_replay_event_stream", "PATCH_BROKEN"));
+    assert.ok(!findClassification(driftReport, "record_and_replay_event_stream", "PATCH_REVIEW"));
+  }));
+
+test("renders a remediation for patch integrity blockers", () => {
+  const actionPlan = renderActionPlanMarkdown(
+    {
+      surfaceDrift: [
+        {
+          surfaceId: "record_and_replay_event_stream",
+          classification: "PATCH_INTEGRITY_BROKEN",
+          patches: [
+            {
+              name: "record-and-replay bridge patch",
+              status: "failed-integrity",
+            },
+          ],
+        },
+      ],
+    },
+    { source: { path: "candidate.app" } },
+  );
+
+  assert.match(actionPlan, /stop candidate acceptance/);
+  assert.match(actionPlan, /rebuild from the fresh current DMG/);
+  assert.match(actionPlan, /do not promote bytes whose original state cannot be proven/);
+});
 
 test("classifies unresolved Linux settings patch symbols as acceptance blockers", () =>
   withTempDir((workspace) => {

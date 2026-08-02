@@ -82,7 +82,8 @@ test("Linux IAB socket alignment patch hardens the directory and socket modes", 
 });
 
 test("Linux external open env patch wraps electron require with helper", () => {
-  const source = '"use strict";let e=require("electron");';
+  const source =
+    '"use strict";let e=require("electron"),t=require("electron");';
   const patched = applyLinuxExternalOpenEnvPatch(source);
 
   assert.match(patched, /codexLinuxPatchExternalOpen\(require\(("|`)electron\1\)\)/);
@@ -90,7 +91,8 @@ test("Linux external open env patch wraps electron require with helper", () => {
 });
 
 test("Linux external open env patch injects env var guard in helper", () => {
-  const source = '"use strict";let e=require("electron");';
+  const source =
+    '"use strict";let e=require("electron"),t=require("electron");';
   const patched = applyLinuxExternalOpenEnvPatch(source);
 
   assert.match(
@@ -101,14 +103,102 @@ test("Linux external open env patch injects env var guard in helper", () => {
 });
 
 test("Linux external open env patch is idempotent", () => {
-  const source = '"use strict";let e=require("electron");';
+  const source =
+    '"use strict";let e=require("electron"),t=require("electron");';
   const first = applyLinuxExternalOpenEnvPatch(source);
   const second = applyLinuxExternalOpenEnvPatch(first);
 
   assert.equal(second, first, "second application should not change the source");
 });
 
-test("Linux external open env patch warns when no electron require found", () => {
+test("Linux external open env patch preserves exact aliases with prefix and prototype names", () => {
+  const sources = [
+    '"use strict";let e=require("electron"),be=require("electron");',
+    '"use strict";let constructor=require("electron"),__proto__=require("electron");',
+  ];
+
+  for (const source of sources) {
+    const first = applyLinuxExternalOpenEnvPatch(source);
+    const warnings = [];
+    const originalWarn = console.warn;
+    console.warn = (message) => warnings.push(message);
+    try {
+      assert.equal(applyLinuxExternalOpenEnvPatch(first), first);
+    } finally {
+      console.warn = originalWarn;
+    }
+    assert.deepEqual(warnings, []);
+  }
+});
+
+test("Linux external open env patch ignores feature-owned Electron requires after its complete marker", () => {
+  const source =
+    '"use strict";let e=require("electron"),t=require("electron");';
+  const patched = applyLinuxExternalOpenEnvPatch(source);
+  const composed =
+    `${patched}function featureRuntime(){let featureElectron=require(\`electron\`);return featureElectron.app}`;
+  const warnings = [];
+  const originalWarn = console.warn;
+  console.warn = (message) => warnings.push(message);
+  try {
+    assert.equal(applyLinuxExternalOpenEnvPatch(composed), composed);
+  } finally {
+    console.warn = originalWarn;
+  }
+
+  assert.deepEqual(warnings, []);
+  assert.match(composed, /featureElectron=require\(`electron`\)/);
+});
+
+test("Linux external open env patch rejects partial marker states byte-identically", () => {
+  const complete = applyLinuxExternalOpenEnvPatch(
+    '"use strict";let e=require("electron"),t=require("electron");',
+  );
+  const variants = [
+    '"use strict";function codexLinuxPatchExternalOpen(e){return e}let featureElectron=require(`electron`);',
+    '"use strict";let e=codexLinuxPatchExternalOpen(require(`electron`));',
+    complete.replace("return __codexEnv}", "return process.env}"),
+    complete + complete,
+  ];
+
+  for (const source of variants) {
+    const warnings = [];
+    const originalWarn = console.warn;
+    console.warn = (message) => warnings.push(message);
+    try {
+      assert.equal(applyLinuxExternalOpenEnvPatch(source), source);
+    } finally {
+      console.warn = originalWarn;
+    }
+    assert.deepEqual(warnings, [
+      "WARN: Found incomplete Linux external open environment patch — skipping",
+    ]);
+  }
+});
+
+test("Linux external open env patch rejects a partially restored core target", () => {
+  const complete = applyLinuxExternalOpenEnvPatch(
+    '"use strict";let e=require("electron"),t=require("electron");',
+  );
+  const partial = complete.replace(
+    "codexLinuxPatchExternalOpen(require(\"electron\"))",
+    "require(\"electron\")",
+  );
+  const warnings = [];
+  const originalWarn = console.warn;
+  console.warn = (message) => warnings.push(message);
+  try {
+    assert.equal(applyLinuxExternalOpenEnvPatch(partial), partial);
+  } finally {
+    console.warn = originalWarn;
+  }
+
+  assert.deepEqual(warnings, [
+    "WARN: Found incomplete Linux external open environment patch — skipping",
+  ]);
+});
+
+test("Linux external open env patch warns when current Electron require targets are missing", () => {
   const source = '"use strict";const fs=require("node:fs");';
   const warnings = [];
   const originalWarn = console.warn;
@@ -117,7 +207,10 @@ test("Linux external open env patch warns when no electron require found", () =>
     const patched = applyLinuxExternalOpenEnvPatch(source);
     assert.equal(patched, source, "source should be unchanged");
     assert.ok(warnings.length > 0, "should have warned about missing require");
-    assert.match(warnings[0], /Could not find Electron require initializer/);
+    assert.match(
+      warnings[0],
+      /Expected 2 current Electron require initializers, found 0/,
+    );
   } finally {
     console.warn = originalWarn;
   }

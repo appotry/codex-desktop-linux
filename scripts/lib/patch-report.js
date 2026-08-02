@@ -7,6 +7,7 @@ const CRITICAL_CI_POLICY = "required-upstream";
 const PATCH_STATUS_APPLIED = "applied";
 const PATCH_STATUS_ALREADY_APPLIED = "already-applied";
 const PATCH_STATUS_APPLIED_WITH_WARNINGS = "applied-with-warnings";
+const PATCH_STATUS_FAILED_INTEGRITY = "failed-integrity";
 const PATCH_STATUS_FAILED_REQUIRED = "failed-required";
 const PATCH_STATUS_SKIPPED_DISABLED = "skipped-disabled";
 const PATCH_STATUS_SKIPPED_OPTIONAL = "skipped-optional";
@@ -21,6 +22,11 @@ function isCriticalPolicy(ciPolicy) {
   return ciPolicy === CRITICAL_CI_POLICY;
 }
 
+function isCriticalPatchStatus(status) {
+  return status === PATCH_STATUS_FAILED_INTEGRITY ||
+    status === PATCH_STATUS_FAILED_REQUIRED;
+}
+
 function reportEntryFailure(patch) {
   return {
     name: patch.name,
@@ -31,7 +37,11 @@ function reportEntryFailure(patch) {
 
 function criticalFailuresFromReport(report) {
   return (report?.patches ?? [])
-    .filter((patch) => isCriticalPolicy(patch.ciPolicy))
+    .filter(
+      (patch) =>
+        isCriticalPatchStatus(patch.status) ||
+        isCriticalPolicy(patch.ciPolicy),
+    )
     .filter((patch) => !SUCCESS_STATUSES.has(patch.status) && !NOT_APPLICABLE_STATUSES.has(patch.status))
     .map(reportEntryFailure);
 }
@@ -39,6 +49,7 @@ function criticalFailuresFromReport(report) {
 function optionalDriftFromReport(report) {
   return (report?.patches ?? [])
     .filter((patch) => !isCriticalPolicy(patch.ciPolicy))
+    .filter((patch) => !isCriticalPatchStatus(patch.status))
     .filter((patch) => !SUCCESS_STATUSES.has(patch.status) && !NOT_APPLICABLE_STATUSES.has(patch.status))
     .map(reportEntryFailure);
 }
@@ -117,6 +128,9 @@ function patchStatusFromChange(changed, warnings, ciPolicy = "optional") {
 }
 
 function patchGroupForEntry(entry) {
+  if (entry.status === PATCH_STATUS_FAILED_INTEGRITY) {
+    return "integrityFailures";
+  }
   if (isCriticalPolicy(entry.ciPolicy)) {
     return "requiredCore";
   }
@@ -125,6 +139,7 @@ function patchGroupForEntry(entry) {
 
 function summarizePatchReport(report) {
   const groups = {
+    integrityFailures: { count: 0, statusCounts: {} },
     requiredCore: { count: 0, statusCounts: {} },
     optionalCore: { count: 0, statusCounts: {} },
     optionalFeatures: { count: 0, statusCounts: {}, byFeature: {} },
@@ -156,6 +171,7 @@ module.exports = {
   PATCH_STATUS_ALREADY_APPLIED,
   PATCH_STATUS_APPLIED,
   PATCH_STATUS_APPLIED_WITH_WARNINGS,
+  PATCH_STATUS_FAILED_INTEGRITY,
   PATCH_STATUS_FAILED_REQUIRED,
   PATCH_STATUS_SKIPPED_DISABLED,
   PATCH_STATUS_SKIPPED_OPTIONAL,
@@ -166,6 +182,7 @@ module.exports = {
   criticalFailuresFromReport,
   enabledFeatureFailuresFromReport,
   isCriticalPolicy,
+  isCriticalPatchStatus,
   optionalDriftFromReport,
   patchStatusFromChange,
   recordPatch,

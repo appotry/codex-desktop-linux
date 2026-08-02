@@ -1060,7 +1060,11 @@ function patchFindingsBySurface(patchReport, surfacesById = {}) {
     if (SUCCESSFUL_PATCH_STATUSES.has(patch.status)) {
       continue;
     }
-    const classification = BLOCKING_PATCH_STATUSES.has(patch.status) ? "PATCH_BROKEN" : "PATCH_REVIEW";
+    const classification = patch.status === "failed-integrity"
+      ? "PATCH_INTEGRITY_BROKEN"
+      : BLOCKING_PATCH_STATUSES.has(patch.status)
+        ? "PATCH_BROKEN"
+        : "PATCH_REVIEW";
     const explicitSurfaceId = patch.surfaceId ?? patch.protectedSurfaceId ?? null;
     const matchedSurfaceIds = new Set();
     if (explicitSurfaceId != null) {
@@ -1627,6 +1631,8 @@ function renderActionPlanMarkdown(driftReport, candidateProtected, mapDrift = nu
       lines.push("Action: decide whether Linux needs a port, shim, explicit unsupported gate, or new optional feature.");
     } else if (item.classification === "PATCH_BROKEN") {
       lines.push("Action: repair the patch descriptor or feature patch before accepting the DMG.");
+    } else if (item.classification === "PATCH_INTEGRITY_BROKEN") {
+      lines.push("Action: stop candidate acceptance, diagnose the transactional patch or rollback failure, and rebuild from the fresh current DMG; do not promote bytes whose original state cannot be proven.");
     } else if (item.classification === "PATCH_REVIEW") {
       lines.push("Action: review optional patch warning/skip details; do not block DMG acceptance unless a protected surface is also missing or broken.");
     } else if (item.classification === "LINUX_SUBSTRATE_GAP") {

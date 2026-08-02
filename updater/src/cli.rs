@@ -1,7 +1,7 @@
 //! Command-line interface definition for the updater binary.
 
 use clap::{Parser, Subcommand};
-use std::path::PathBuf;
+use std::{ffi::OsString, path::PathBuf};
 
 #[derive(Debug, Parser)]
 #[command(name = "codex-update-manager")]
@@ -51,6 +51,19 @@ pub enum Commands {
         install_dir: Option<PathBuf>,
         #[arg(long)]
         print_path: bool,
+    },
+    RepairCli,
+    #[command(hide = true)]
+    RunNpmSupervisor {
+        #[arg(long)]
+        owner_pid: u32,
+        #[arg(long)]
+        timeout_millis: u64,
+        #[arg(long)]
+        install_lock_fd: i32,
+        program: PathBuf,
+        #[arg(last = true, allow_hyphen_values = true)]
+        args: Vec<OsString>,
     },
     PromptInstallCli {
         #[arg(long)]

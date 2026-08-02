@@ -22,6 +22,59 @@ installer instead of being replaced through npm. Homebrew/Linuxbrew installs
 are reused and reported, but the updater does not replace them with an
 npm-managed install.
 
+If an interrupted npm upgrade leaves a stale Arborist retirement directory,
+automatic daemon, status, and launcher paths record the exact condition but do
+not remove it or retry npm. A functional existing Codex CLI remains selected,
+and updater status directs the user to the read-only diagnostic command:
+
+```bash
+codex-update-manager diagnose
+```
+
+The diagnostic output explains the stale npm condition and prints the explicit
+repair command:
+
+```bash
+codex-update-manager repair-cli
+```
+
+`repair-cli` acquires the shared CLI install lock, reloads the dedicated repair
+journal, derives and revalidates the managed npm paths, and records each planned
+quarantine before moving the stale directory. It then retries npm once with a
+bounded subprocess. Quarantines are preserved and reported after both
+successful and failed repairs, including when npm recreates the same retirement
+directory during a later explicit retry. A failed or interrupted repair remains
+visible in later `diagnose` output and can be retried explicitly.
+
+Mutating npm commands run under an internal bounded supervisor that retains the
+CLI install lock while preventing npm and its descendants from inheriting the
+lock descriptor. The supervisor and npm share one dedicated process group; the
+supervisor terminates remaining npm members before it exits, and the updater
+keeps the supervisor unreaped while applying the same cleanup if the supervisor
+itself fails. If the updater parent exits abruptly, the supervisor cleans the
+group before releasing the lock. Its own timeout remains active independently
+of the updater parent. When an entrypoint first encounters contention, its PID
+is recorded in the updater log.
+
+CLI maintenance and the updater lifecycle merge their separately owned fields
+under a shared state lock. Concurrent daemon, status, and launcher processes
+therefore cannot overwrite a newer CLI result with an older full-state
+snapshot. Before routine CLI state writes, the process acquires the CLI install
+lock and reloads the repair journal so a late registry result cannot hide a
+newer actionable repair condition. The final state write also compares the CLI
+fields with the caller's original snapshot; if another CLI writer completed
+while the caller was waiting, the caller reloads that result instead of
+overwriting it. A pending journal overrides only CLI status and error text on
+top of the latest persisted CLI identity. Operations that need both locks
+acquire the CLI install lock first and hold the state lock only for the final
+reload, comparison, merge, and atomic write.
+
+Missing-CLI launcher preflight acquires the install lock before changing state
+or consulting the npm registry. After contention, it reloads the latest
+CLI-owned state and re-resolves both the requested and persisted CLI paths. If
+another entrypoint completed installation or repair while it waited, preflight
+uses that CLI without a second registry lookup or install attempt.
+
 The updater scopes permission hardening to the official standalone installer
 process. New managed releases use the caller's existing umask plus the
 group/world write restrictions from `0022`; stricter policies such as `0027`
@@ -113,6 +166,9 @@ Runtime files:
 ```text
 ~/.config/codex-update-manager/config.toml
 ~/.local/state/codex-update-manager/state.json
+~/.local/state/codex-update-manager/state.lock
+~/.local/state/codex-update-manager/cli-install.lock
+~/.local/state/codex-update-manager/cli-repair.json
 ~/.local/state/codex-update-manager/service.log
 ~/.cache/codex-update-manager/
 ~/.cache/codex-desktop/launcher.log

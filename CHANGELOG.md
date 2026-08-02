@@ -35,6 +35,38 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- The opt-in Dock icon tweak now targets the current upstream main-process
+  bundle, restoring Linux window, tray, and desktop icon synchronization.
+- The opt-in shallow repository watcher now patches both current app bundles
+  and routes the Linux Parcel working-tree path through the same shallow host,
+  restoring bounded watches on the latest upstream DMG.
+- Open Target Discovery now resolves the selected Linux editor or terminal
+  through the current private open-target command path. Command-path drift is
+  reported before the feature changes the main bundle, so enabled-feature
+  acceptance cannot mistake a partially patched bundle for success.
+- Repeated current-DMG patch passes now keep composed native and frameless
+  titlebars, external-open handling, Record & Replay, and Browser Use runtime
+  resolution byte-identical. Complete markers no longer depend on
+  function-local minified aliases, while partial markers remain fail-soft and
+  leave drifted assets untouched.
+- Remote mobile control now patches the current 26.721 dual-gate enablement
+  bridge instead of reporting it as already applied. Startup auto-connects the
+  environment owned by this Desktop without overwriting saved choices for
+  other enrolled hosts.
+- Updater-managed npm Codex CLI installs now serialize across daemon, launcher,
+  and status processes. If npm reports the exact stale Arborist retirement
+  directory failure, automatic paths preserve the working CLI and direct the
+  user to read-only diagnostics. The explicit `repair-cli` command revalidates
+  the condition under the shared lock, records crash-durable quarantines, and
+  retries npm once per explicit invocation without discarding failed recovery
+  state or concurrent updater state. A parent-independent bounded supervisor
+  retains the lock while mutating npm children run without inheriting it,
+  terminates their complete process group, and releases the lock only after
+  cleanup if the updater parent or supervisor exits abruptly or the npm leader
+  leaves a background descendant.
+  Late routine CLI checks revalidate both the repair journal and their original
+  CLI state before persisting a result. Missing-CLI preflight also re-resolves a
+  CLI installed while it waited for the lock before consulting npm.
 - Concurrent updater entrypoints now serialize state reloads and cache cleanup
   before persisting startup state. A second process can no longer prune an
   active rebuild workspace, while forced checks wait for startup maintenance

@@ -7,7 +7,6 @@ const {
   findLastRegexMatch,
   findLinuxGlobalStateExpression,
   findMatchingBrace,
-  inferModuleAlias,
 } = require("../lib/minified-js.js");
 const {
   linuxSettingsKeys,
@@ -27,67 +26,29 @@ function applyLinuxSettingsPersistencePatch(currentSource) {
 
   if (
     !patchedSource.includes('"set-global-state"') &&
-    !patchedSource.includes(".codex-global-state.json")
+    !patchedSource.includes("function codexLinuxPersistSettingsState(")
   ) {
     return patchedSource;
   }
 
   if (!patchedSource.includes("function codexLinuxPersistSettingsState(")) {
-    const pathVar = inferModuleAlias(patchedSource, "node:path");
-    const fsVar = inferModuleAlias(patchedSource, "node:fs");
     const stateFileHelperSource =
-      (stateFileVar) =>
-        `${stateFileVar == null ? "" : `var ${stateFileVar}=\`.codex-global-state.json\`;`}function codexLinuxSettingsAppId(){let e=process.env.CODEX_LINUX_APP_ID||process.env.CODEX_APP_ID||\`codex-desktop\`;return/^[A-Za-z0-9._-]+$/.test(e)?e:\`codex-desktop\`}function codexLinuxSettingsPath(){let e=process.env.CODEX_LINUX_SETTINGS_FILE;if(typeof e===\`string\`&&e.length>0)return e;let t=process.env.XDG_CONFIG_HOME||process.env.HOME&&${pathVar}.join(process.env.HOME,\`.config\`);return t?${pathVar}.join(t,codexLinuxSettingsAppId(),\`settings.json\`):null}function codexLinuxReadSettingsFile(){let e=codexLinuxSettingsPath();if(!e||!${fsVar}.existsSync(e))return{};try{let t=${fsVar}.readFileSync(e,\`utf8\`),n=JSON.parse(t);return n&&typeof n===\`object\`&&!Array.isArray(n)?n:{}}catch(e){return{}}}function codexLinuxPersistSettingsState(e,t){if(process.platform!==\`linux\`||!${persistedLinuxSettingsKeysSource()}.includes(e))return;try{let n=codexLinuxSettingsPath();if(!n)return;let r=codexLinuxReadSettingsFile();t===void 0?delete r[e]:r[e]=t,${fsVar}.mkdirSync(${pathVar}.dirname(n),{recursive:!0,mode:448}),${fsVar}.writeFileSync(n,JSON.stringify(r,null,2)+\`\\n\`,\`utf8\`)}catch(e){}}`;
-    const stateFileCommaRegex = /var ([A-Za-z_$][\w$]*)=`\.codex-global-state\.json`,/;
-    const stateFileSemicolonRegex = /var ([A-Za-z_$][\w$]*)=`\.codex-global-state\.json`;/;
-    if (pathVar == null || fsVar == null) {
-      console.warn("WARN: Could not find Linux settings state file marker — skipping settings persistence patch");
-      return patchedSource;
-    }
-    if (stateFileCommaRegex.test(patchedSource)) {
-      patchedSource = patchedSource.replace(
-        stateFileCommaRegex,
-        (_match, stateFileVar) => `${stateFileHelperSource(stateFileVar)}var `,
-      );
-    } else if (stateFileSemicolonRegex.test(patchedSource)) {
-      patchedSource = patchedSource.replace(
-        stateFileSemicolonRegex,
-        (_match, stateFileVar) => stateFileHelperSource(stateFileVar),
-      );
-    } else {
-      const strictDirective = '"use strict";';
-      const helperInsertionIndex = patchedSource.startsWith(strictDirective)
-        ? strictDirective.length
-        : 0;
-      patchedSource =
-        patchedSource.slice(0, helperInsertionIndex) +
-        stateFileHelperSource(null) +
-        patchedSource.slice(helperInsertionIndex);
-    }
-  } else if (!patchedSource.includes("function codexLinuxSettingsAppId()")) {
-    const legacySettingsPathRegex =
-      /function codexLinuxSettingsPath\(\)\{let ([A-Za-z_$][\w$]*)=process\.env\.XDG_CONFIG_HOME\|\|process\.env\.HOME&&([A-Za-z_$][\w$]*)\.join\(process\.env\.HOME,`\.config`\);return \1\?\2\.join\(\1,`codex-desktop`,`settings\.json`\):null\}/;
-    patchedSource = patchedSource.replace(
-      legacySettingsPathRegex,
-      (_match, _configVar, pathVar) =>
-        `function codexLinuxSettingsAppId(){let e=process.env.CODEX_LINUX_APP_ID||process.env.CODEX_APP_ID||\`codex-desktop\`;return/^[A-Za-z0-9._-]+$/.test(e)?e:\`codex-desktop\`}function codexLinuxSettingsPath(){let e=process.env.CODEX_LINUX_SETTINGS_FILE;if(typeof e===\`string\`&&e.length>0)return e;let t=process.env.XDG_CONFIG_HOME||process.env.HOME&&${pathVar}.join(process.env.HOME,\`.config\`);return t?${pathVar}.join(t,codexLinuxSettingsAppId(),\`settings.json\`):null}`,
-    );
+      `function codexLinuxSettingsAppId(){let e=process.env.CODEX_LINUX_APP_ID||process.env.CODEX_APP_ID||\`codex-desktop\`;return/^[A-Za-z0-9._-]+$/.test(e)?e:\`codex-desktop\`}function codexLinuxSettingsPath(){let __codexSettingsFile=process.env.CODEX_LINUX_SETTINGS_FILE;if(typeof __codexSettingsFile===\`string\`&&__codexSettingsFile.length>0)return __codexSettingsFile;let __codexPath=require(\`node:path\`),__codexConfigRoot=process.env.XDG_CONFIG_HOME||process.env.HOME&&__codexPath.join(process.env.HOME,\`.config\`);return __codexConfigRoot?__codexPath.join(__codexConfigRoot,codexLinuxSettingsAppId(),\`settings.json\`):null}function codexLinuxReadSettingsFile(){let __codexSettingsPath=codexLinuxSettingsPath(),__codexFs=require(\`node:fs\`);if(!__codexSettingsPath||!__codexFs.existsSync(__codexSettingsPath))return{};try{let __codexSettingsText=__codexFs.readFileSync(__codexSettingsPath,\`utf8\`),__codexSettings=JSON.parse(__codexSettingsText);return __codexSettings&&typeof __codexSettings===\`object\`&&!Array.isArray(__codexSettings)?__codexSettings:{}}catch(e){return{}}}function codexLinuxPersistSettingsState(e,t){if(process.platform!==\`linux\`||!${persistedLinuxSettingsKeysSource()}.includes(e))return;try{let __codexSettingsPath=codexLinuxSettingsPath();if(!__codexSettingsPath)return;let __codexSettings=codexLinuxReadSettingsFile(),__codexFs=require(\`node:fs\`),__codexPath=require(\`node:path\`);t===void 0?delete __codexSettings[e]:__codexSettings[e]=t,__codexFs.mkdirSync(__codexPath.dirname(__codexSettingsPath),{recursive:!0,mode:448}),__codexFs.writeFileSync(__codexSettingsPath,JSON.stringify(__codexSettings,null,2)+\`\\n\`,\`utf8\`)}catch(e){}}`;
+    const strictDirective = '"use strict";';
+    const helperInsertionIndex = patchedSource.startsWith(strictDirective)
+      ? strictDirective.length
+      : 0;
+    patchedSource =
+      patchedSource.slice(0, helperInsertionIndex) +
+      stateFileHelperSource +
+      patchedSource.slice(helperInsertionIndex);
   }
 
-  const settingsKeysGuard = `!${persistedLinuxSettingsKeysSource()}.includes(e)`;
-  if (!patchedSource.includes(settingsKeysGuard)) {
-    const oldSettingsKeysGuardRegex = /!\[[^\]]*`codex-linux-[^`]+`[^\]]*\]\.includes\(e\)/;
-    patchedSource = patchedSource.replace(oldSettingsKeysGuardRegex, settingsKeysGuard);
-  }
-
-  if (/"set-global-state":async\(\{key:[A-Za-z_$][\w$]*,value:[A-Za-z_$][\w$]*,origin:[A-Za-z_$][\w$]*\}\)=>\([\s\S]{0,300}?codexLinuxPersistSettingsState\(/.test(patchedSource)) {
-    return patchedSource;
-  }
-  if (/"set-global-state":async\(\{key:[A-Za-z_$][\w$]*,value:[A-Za-z_$][\w$]*,origin:[A-Za-z_$][\w$]*\}\)=>\(this\.setGlobalStateValue\([A-Za-z_$][\w$]*,[A-Za-z_$][\w$]*,[A-Za-z_$][\w$]*\),codexLinuxPersistSettingsState\(/.test(patchedSource)) {
+  if (/"set-global-state":async\(\{key:[A-Za-z_$][\w$]*,value:[A-Za-z_$][\w$]*\}\)=>\([\s\S]{0,300}?codexLinuxPersistSettingsState\(/.test(patchedSource)) {
     return patchedSource;
   }
   const setGlobalStateRegex =
-    /"set-global-state":async\(\{key:([A-Za-z_$][\w$]*),value:([A-Za-z_$][\w$]*),origin:([A-Za-z_$][\w$]*)\}\)=>\((this\.(?:globalState\.set\(\1,\2\)|setGlobalStateValue\(\1,\2,\3\))),/;
+    /"set-global-state":async\(\{key:([A-Za-z_$][\w$]*),value:([A-Za-z_$][\w$]*)\}\)=>\((this\.setGlobalStateValue\(\1,\2\)),/;
   if (!setGlobalStateRegex.test(patchedSource)) {
     console.warn("WARN: Could not find Linux set-global-state needle — skipping settings persistence hook");
     return patchedSource;
@@ -95,8 +56,8 @@ function applyLinuxSettingsPersistencePatch(currentSource) {
 
   return patchedSource.replace(
     setGlobalStateRegex,
-    (_match, keyVar, valueVar, originVar, setterCall) =>
-      `"set-global-state":async({key:${keyVar},value:${valueVar},origin:${originVar}})=>(${setterCall},codexLinuxPersistSettingsState(${keyVar},${valueVar}),`,
+    (_match, keyVar, valueVar, setterCall) =>
+      `"set-global-state":async({key:${keyVar},value:${valueVar}})=>(${setterCall},codexLinuxPersistSettingsState(${keyVar},${valueVar}),`,
   );
 }
 

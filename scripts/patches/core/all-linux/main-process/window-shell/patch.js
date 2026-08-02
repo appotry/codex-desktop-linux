@@ -9,6 +9,7 @@ const {
   applyLinuxApplicationMenuPatch,
   applyLinuxWindowOptionsPatch,
   applyLinuxNativeTitlebarPatch,
+  applyLinuxManagedWindowSystemContextMenuPatch,
   applyLinuxMenuPatch,
   applyLinuxSetIconPatch,
   applyLinuxReadyToShowWindowStatePatch,
@@ -56,6 +57,13 @@ module.exports = [
     order: 50,
     ciPolicy: "required-upstream",
     apply: (source, context) => applyLinuxWindowOptionsPatch(source, context.iconAsset),
+  }),
+  mainBundlePatch({
+    id: "linux-managed-window-system-context-menu",
+    phase: "main-bundle",
+    order: 59,
+    ciPolicy: "optional",
+    apply: applyLinuxManagedWindowSystemContextMenuPatch,
   }),
   mainBundlePatch({
     id: "linux-menu",

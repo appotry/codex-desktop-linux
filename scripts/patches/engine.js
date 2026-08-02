@@ -4,6 +4,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const {
   PATCH_STATUS_APPLIED,
+  PATCH_STATUS_FAILED_INTEGRITY,
   PATCH_STATUS_FAILED_REQUIRED,
   PATCH_STATUS_SKIPPED_DISABLED,
   PATCH_STATUS_SKIPPED_OPTIONAL,
@@ -13,6 +14,9 @@ const {
   patchStatusFromChange,
   recordPatch,
 } = require("../lib/patch-report.js");
+const {
+  isPatchIntegrityError,
+} = require("./integrity-error.js");
 const {
   linuxTargetSummary,
 } = require("../lib/linux-target-context.js");
@@ -27,6 +31,7 @@ const {
   PHASE_MAIN_BUNDLE,
   PHASE_WEBVIEW_ASSET,
   PATCH_PHASES,
+  normalizeComposesPatches,
 } = require("./descriptor.js");
 const {
   drainStrategies,
@@ -69,10 +74,18 @@ function normalizeDescriptor(descriptor, sourcePath = null, index = 0) {
     sourceKind: descriptor.sourceKind ?? (descriptor.featureId != null ? "feature" : "core"),
     order: descriptor.order ?? 10_000 + index,
     sourcePath,
+    ...(descriptor.composesPatches == null
+      ? {}
+      : { composesPatches: normalizeComposesPatches(descriptor.composesPatches, id) }),
   };
   if (!PATCH_PHASES.has(normalized.phase)) {
     throw new Error(
       `Patch descriptor '${id}' has unsupported phase '${normalized.phase}' in ${sourcePath ?? "inline descriptor"}`,
+    );
+  }
+  if (normalized.composesPatches != null && normalized.sourceKind !== "feature") {
+    throw new Error(
+      `Patch descriptor '${id}' composesPatches is supported only for Linux feature descriptors`,
     );
   }
   return normalized;
@@ -164,11 +177,15 @@ function descriptorFailureStatus(descriptor) {
 
 function describePatchError(descriptor, error) {
   const message = error instanceof Error ? error.message : String(error);
+  if (isPatchIntegrityError(error)) {
+    return `Patch '${descriptor.id}' integrity failure: ${message}`;
+  }
   return `Patch '${descriptor.id}' threw: ${message}`;
 }
 
-// Runs a descriptor's apply function so that a throw never escapes the engine:
-// the descriptor's ciPolicy — not the throw — decides whether the build fails.
+// Runs a descriptor's apply function so ordinary errors can follow ciPolicy.
+// PatchIntegrityError is recorded by the caller and then rethrown because the
+// patch could not prove that a failed mutation restored the original bytes.
 // Strategy telemetry recorded during the apply is drained into the result so
 // it can be attributed to this descriptor's report entry.
 function runDescriptorApply(descriptor, fn, fallbackValue) {
@@ -223,11 +240,19 @@ function recordDescriptorError(report, descriptor, error, context, strategies = 
   recordDescriptorPatch(
     report,
     descriptor,
-    descriptorFailureStatus(descriptor),
+    isPatchIntegrityError(error)
+      ? PATCH_STATUS_FAILED_INTEGRITY
+      : descriptorFailureStatus(descriptor),
     describePatchError(descriptor, error),
     context,
     { error: true, ...(strategyMetadata(strategies) ?? {}) },
   );
+}
+
+function rethrowPatchIntegrityError(error) {
+  if (isPatchIntegrityError(error)) {
+    throw error;
+  }
 }
 
 function descriptorAppliesTo(descriptor, context) {
@@ -275,6 +300,8 @@ function applyMainBundlePatchDescriptors(source, descriptors, context, report) {
     context.reportWarnings = result.warnings;
     if (result.error != null) {
       recordDescriptorError(report, descriptor, result.error, context, result.strategies);
+      delete context.reportWarnings;
+      rethrowPatchIntegrityError(result.error);
     } else {
       recordDescriptorPatch(
         report,
@@ -368,6 +395,8 @@ function applyWebviewAssetPatchDescriptors(extractedDir, descriptors, context, r
     if (error != null) {
       warnings.push(`WARN: ${describePatchError(descriptor, error)}`);
       recordDescriptorError(report, descriptor, error, context, strategies);
+      delete context.reportWarnings;
+      rethrowPatchIntegrityError(error);
     } else {
       recordAssetDescriptorPatch(report, descriptor, result, warnings, context, strategies);
     }
@@ -399,6 +428,7 @@ function applyExtractedAppPatchDescriptors(extractedDir, descriptors, context, r
       warnings.push(`WARN: ${describePatchError(descriptor, error)}`);
       recordDescriptorError(report, descriptor, error, context, strategies);
       delete context.reportWarnings;
+      rethrowPatchIntegrityError(error);
       continue;
     }
     const statusResult = typeof descriptor.status === "function"

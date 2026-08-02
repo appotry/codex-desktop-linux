@@ -24,6 +24,8 @@ const {
   applyExtractedAppPatchDescriptors,
   applyMainBundlePatchDescriptors,
   applyWebviewAssetPatchDescriptors,
+  descriptorAppliesTo,
+  descriptorEnabled,
   discoverCorePatchDescriptors,
   normalizePatchDescriptors,
 } = require("./engine.js");
@@ -75,15 +77,19 @@ function featurePatchOptions(options = {}) {
 
 function createMainBundleContext(iconAsset, options = {}) {
   const linux = options.linuxTarget ?? detectLinuxTargetContext(options.linuxTargetOptions);
+  const currentFeaturePatchOptions = featurePatchOptions(options);
+  const enabledFeatureIds = options.enabledFeatureIds ??
+    enabledLinuxFeatureIds(currentFeaturePatchOptions);
   return {
     enableComputerUseUi: isComputerUseUiEnabled(),
+    enabledFeatureIds: [...enabledFeatureIds],
     iconAsset,
     iconPathExpression:
       iconAsset == null ? null : `process.resourcesPath+\`/../content/webview/assets/${iconAsset}\``,
     linux,
     linuxTarget: linux,
     corePatchRoot: options.corePatchRoot,
-    featurePatchOptions: featurePatchOptions(options),
+    featurePatchOptions: currentFeaturePatchOptions,
   };
 }
 
@@ -113,8 +119,76 @@ function mainBundlePatchDescriptors(context) {
   ]);
 }
 
+function patchCompositionDelegates(descriptors, context = {}) {
+  const coreOwners = new Map(
+    descriptors
+      .filter((descriptor) => descriptor.sourceKind === "core")
+      .map((descriptor) => [descriptor.id, descriptor]),
+  );
+  const delegates = new Map();
+  for (const descriptor of descriptors) {
+    if (
+      descriptor.sourceKind !== "feature" ||
+      typeof descriptor.featureId !== "string" ||
+      !Array.isArray(descriptor.composesPatches)
+    ) {
+      continue;
+    }
+    if (
+      !descriptorAppliesTo(descriptor, context) ||
+      !descriptorEnabled(descriptor, context)
+    ) {
+      continue;
+    }
+    for (const ownerPatchId of descriptor.composesPatches) {
+      const owner = coreOwners.get(ownerPatchId);
+      if (owner == null) {
+        throw new Error(
+          `Feature descriptor '${descriptor.id}' composes unknown core patch '${ownerPatchId}'`,
+        );
+      }
+      if (owner.phase !== descriptor.phase) {
+        throw new Error(
+          `Feature descriptor '${descriptor.id}' composes core patch '${ownerPatchId}' across phases`,
+        );
+      }
+      if (
+        !descriptorAppliesTo(owner, context) ||
+        !descriptorEnabled(owner, context)
+      ) {
+        throw new Error(
+          `Feature descriptor '${descriptor.id}' composes inactive core patch '${ownerPatchId}'`,
+        );
+      }
+      if (descriptor.order <= owner.order) {
+        throw new Error(
+          `Feature descriptor '${descriptor.id}' must run after composed core patch '${ownerPatchId}'`,
+        );
+      }
+      const existing = delegates.get(ownerPatchId);
+      if (existing != null) {
+        throw new Error(
+          `Core patch '${ownerPatchId}' has multiple active composition delegates: '${existing}' and '${descriptor.id}'`,
+        );
+      }
+      delegates.set(ownerPatchId, descriptor.featureId);
+    }
+  }
+  return Object.fromEntries(
+    [...delegates.entries()].map(([ownerPatchId, featureId]) => [
+      ownerPatchId,
+      [featureId],
+    ]),
+  );
+}
+
 function applyMainBundlePatches(source, context, report) {
-  return applyMainBundlePatchDescriptors(source, mainBundlePatchDescriptors(context), context, report);
+  const descriptors = mainBundlePatchDescriptors(context);
+  context.patchCompositionDelegates = {
+    ...(context.patchCompositionDelegates ?? {}),
+    ...patchCompositionDelegates(descriptors, context),
+  };
+  return applyMainBundlePatchDescriptors(source, descriptors, context, report);
 }
 
 function patchMainBundleSource(source, iconAsset, options = {}) {
@@ -132,7 +206,7 @@ function patchExtractedApp(extractedDir, options = {}) {
 
   setReportLinuxTarget(report, baseContext.linux);
   if (report != null) {
-    report.enabledFeatures = enabledLinuxFeatureIds(featuresOptions);
+    report.enabledFeatures = [...baseContext.enabledFeatureIds];
   }
 
   const main = findMainBundle(extractedDir);
@@ -158,8 +232,11 @@ function patchExtractedApp(extractedDir, options = {}) {
 
   const assetContext = createMainBundleContext(iconAsset, {
     ...options,
+    enabledFeatureIds: baseContext.enabledFeatureIds,
     linuxTarget: baseContext.linux,
   });
+  assetContext.patchCompositionDelegates =
+    patchCompositionDelegates(patchDescriptors, assetContext);
   assetContext.report = report;
 
   if (main != null) {
@@ -255,6 +332,7 @@ module.exports = {
   createMainBundleContext,
   featurePatchDescriptors,
   patchExtractedApp,
+  patchCompositionDelegates,
   patchMainBundleSource,
   requiredPatchNamesForProfile,
 };

@@ -12,18 +12,20 @@ module.exports = [
     order: 180,
     ciPolicy: "optional",
     apply: patchLinuxChromeNativeHostRuntimeAssets,
-    status: (result, warnings) => ({
-      status: result?.changed
-        ? "applied"
-        : result?.matched
-          ? warnings.length > 0
-            ? "skipped-optional"
-            : "already-applied"
-          : "skipped-optional",
-      reason:
-        result?.reason ??
-        warnings[0] ??
-        (result?.matched ? null : "Chrome native host runtime resolver not found"),
-    }),
+    status: (result, warnings) => {
+      return {
+        status: result?.changed
+          ? "applied"
+          : result?.matched
+            ? warnings.length > 0
+              ? "skipped-optional"
+              : "already-applied"
+            : "skipped-optional",
+        reason:
+          result?.reason ??
+          warnings[0] ??
+          (result?.matched ? null : "Chrome native host runtime resolver not found"),
+      };
+    },
   }),
 ];

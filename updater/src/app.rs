@@ -52,6 +52,23 @@ const POLKIT_AUTH_AGENT_PROCESS_TOKENS: &[&str] = &[
 
 /// Runs the updater command-line entrypoint.
 pub async fn run(cli: Cli) -> Result<()> {
+    if let Commands::RunNpmSupervisor {
+        owner_pid,
+        timeout_millis,
+        install_lock_fd,
+        program,
+        args,
+    } = &cli.command
+    {
+        return codex_cli::run_npm_supervisor(
+            *owner_pid,
+            *timeout_millis,
+            *install_lock_fd,
+            program,
+            args,
+        );
+    }
+
     let paths = RuntimePaths::detect()?;
     if let Commands::Diagnose { json } = &cli.command {
         return run_diagnose_command(&paths, *json).await;
@@ -108,6 +125,10 @@ pub async fn run(cli: Cli) -> Result<()> {
             install_dir,
             print_path,
         } => run_recover_standalone_cli(codex_home, install_dir, print_path),
+        Commands::RepairCli => run_repair_cli(&mut state, &paths),
+        Commands::RunNpmSupervisor { .. } => {
+            unreachable!("npm supervisor is handled before runtime writes")
+        }
         Commands::PromptInstallCli {
             cli_path,
             print_path,
@@ -137,7 +158,7 @@ async fn run_diagnose_command(paths: &RuntimePaths, json: bool) -> Result<()> {
 }
 
 fn persist_state(paths: &RuntimePaths, state: &PersistedState) -> Result<()> {
-    state.save(&paths.state_file)
+    state.save_updater(&paths.state_file)
 }
 
 fn persist_if_changed(
@@ -872,6 +893,28 @@ fn run_recover_standalone_cli(
     Ok(())
 }
 
+fn run_repair_cli(state: &mut PersistedState, paths: &RuntimePaths) -> Result<()> {
+    let outcome = codex_cli::repair_cli(state, paths)?;
+    if outcome.quarantine_paths.is_empty() {
+        println!(
+            "Codex CLI repaired at version {}. The stale npm directory was already absent.",
+            outcome.installed_version
+        );
+    } else {
+        println!(
+            "Codex CLI repaired at version {}. Quarantines preserved at {}",
+            outcome.installed_version,
+            outcome
+                .quarantine_paths
+                .iter()
+                .map(|path| path.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum PromptInstallCliOutcome {
     Installed(PathBuf),
@@ -1187,7 +1230,7 @@ async fn run_check_cycle_with_options(
         state.dmg_sha256 = Some(downloaded.sha256.clone());
         state.artifact_paths.dmg_path = Some(downloaded.path.clone());
         state.notified_events.clear();
-        state.save(&paths.state_file)?;
+        state.save_updater(&paths.state_file)?;
 
         maybe_notify(
             state,
@@ -2182,6 +2225,8 @@ mod tests {
         Mock, MockServer, ResponseTemplate,
     };
 
+    mod cli_repair_process_tests;
+
     fn test_paths(root: &std::path::Path) -> RuntimePaths {
         RuntimePaths {
             config_file: root.join("config/config.toml"),
@@ -2966,7 +3011,13 @@ mod tests {
                 root.join("missing-settings.json"),
             )
             .env_remove("CODEX_UPDATE_MANAGER_ASSUME_NO_POLKIT_AGENT")
-            .env("CODEX_UPDATE_MANAGER_ASSUME_POLKIT_AGENT", "1");
+            .env("CODEX_UPDATE_MANAGER_ASSUME_POLKIT_AGENT", "1")
+            .env_remove("CODEX_CLI_PATH")
+            .env_remove("FNM_DIR")
+            .env_remove("FNM_MULTISHELL_PATH")
+            .env_remove("HOMEBREW_PREFIX")
+            .env_remove("NVM_DIR")
+            .env_remove("XDG_DATA_HOME");
         command.process_group(0);
     }
 
@@ -3160,6 +3211,34 @@ mod tests {
                     &config, &mut state, &paths,
                 ))
             }
+            "cli-preflight" => {
+                let cli_path = std::env::var_os("CODEX_UPDATE_MANAGER_TEST_CLI_PATH")
+                    .map(PathBuf::from)
+                    .context("missing process test CLI path")?;
+                runtime.block_on(run(Cli {
+                    command: Commands::CliPreflight {
+                        cli_path: Some(cli_path),
+                        print_path: false,
+                        allow_install_missing: false,
+                    },
+                }))
+            }
+            "cli-preflight-install-missing" => runtime.block_on(run(Cli {
+                command: Commands::CliPreflight {
+                    cli_path: None,
+                    print_path: false,
+                    allow_install_missing: true,
+                },
+            })),
+            "cli-status" => runtime.block_on(run(Cli {
+                command: Commands::Status { json: true },
+            })),
+            "repair-cli" => runtime.block_on(run(Cli {
+                command: Commands::RepairCli,
+            })),
+            "diagnose" => runtime.block_on(run(Cli {
+                command: Commands::Diagnose { json: false },
+            })),
             other => anyhow::bail!("Unknown updater process test role {other}"),
         }
     }
@@ -4560,6 +4639,7 @@ mod tests {
             temp.path()
                 .join("cache/workspaces/2026.04.28.082247+abcdef12"),
         );
+        state.save(&paths.state_file)?;
 
         let original_home = std::env::var_os("HOME");
         let original_path = std::env::var_os("PATH");

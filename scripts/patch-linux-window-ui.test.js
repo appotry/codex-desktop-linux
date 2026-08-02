@@ -14,6 +14,10 @@ const vm = require("node:vm");
 const {
   applyPetOverlayPatch,
 } = require("../linux-features/pet-overlay/patch.js");
+const {
+  electron42BrowserUseRuntimeResolverBundleFixture,
+  settingsSharedBundleFixture,
+} = require("./patches/test-fixtures/current-dmg.js");
 
 // Pin the feature config so a developer's local gitignored features.json
 // cannot change which patch descriptors these core tests exercise.
@@ -71,6 +75,7 @@ const {
 const {
   applyLinuxAppReloadShortcutsPatch,
   applyLinuxApplicationMenuPatch,
+  applyLinuxManagedWindowSystemContextMenuPatch,
   applyLinuxMenuPatch,
   applyLinuxNativeTitlebarPatch,
   applyLinuxOpaqueBackgroundPatch,
@@ -177,7 +182,6 @@ const {
   applyLinuxAppSunsetPatch,
   applyLinuxBrowserUseAvailabilityPatch,
   applyLinuxBrowserUseExternalAvailabilityPatch,
-  applyLinuxBrowserUseHiddenHostOwnershipPatch,
   applyLinuxBrowserUseWebviewHostRecoveryPatch,
   applyLinuxBrowserUseWebviewRemountStorePatch,
   applyLinuxBrowserUseNonLocalNavigationPatch,
@@ -982,6 +986,7 @@ test("default core patch descriptors are grouped and unique", () => {
     "linux-explicit-ipc-quit",
     "linux-window-options",
     "linux-native-titlebar",
+    "linux-managed-window-system-context-menu",
     "linux-menu",
     "linux-multi-instance-bootstrap-lock",
     "linux-bootstrap-failure-exit",
@@ -995,7 +1000,6 @@ test("default core patch descriptors are grouped and unique", () => {
     "linux-browser-use-external-availability",
     "linux-browser-use-webview-attach-recovery-store",
     "linux-browser-use-webview-attach-recovery-host",
-    "linux-browser-use-hidden-host-ownership",
     "linux-chat-search-hydration",
     "linux-file-manager",
     "linux-host-child-process-environment",
@@ -1095,6 +1099,14 @@ test("default core patch descriptors are grouped and unique", () => {
   assert.equal(
     descriptors.find((descriptor) => descriptor.id === "linux-x11-project-picker")?.ciPolicy,
     "optional",
+  );
+  assert.equal(
+    descriptors.find(
+      (descriptor) =>
+        descriptor.id === "linux-managed-window-system-context-menu",
+    )?.ciPolicy,
+    "optional",
+    "GNOME/X11 titlebar mitigation drift should warn without blocking install or updater candidates",
   );
   assert.equal(
     descriptors.find((descriptor) => descriptor.id === "linux-computer-use-native-desktop-apps")?.ciPolicy,
@@ -1244,7 +1256,7 @@ test("optional webview descriptors follow the current monolithic app chunk", () 
   );
   assert.equal(
     automationUpdate.assetMatch(
-      ".map(e=>({type:`function`,...e,...Tc.has(e.name)?{}:{deferLoading:!0}}))",
+      ".map(e=>({type:`function`,...e,...x&&!Htl.has(e.name)?{deferLoading:!0}:{}}))",
     ),
     true,
   );
@@ -1525,75 +1537,12 @@ function currentBundledPluginCopyBundleFixture() {
   );
 }
 
-function chromeNativeHostRuntimeBundleFixture() {
-  return [
-    "let r=require(`node:path`),o=require(`node:fs`);",
-    "function Mc({resourcesPath:e,executableName:t}){if(!e)return null;let n=(0,r.join)(e,t);try{return(0,o.statSync)(n).isFile()?n:null}catch{return null}}",
-    "function Pc(e){return Mc({resourcesPath:e,executableName:process.platform===`win32`?`node_repl.exe`:`node_repl`})}",
-    "function Fc(e){return Mc({resourcesPath:e,executableName:process.platform===`win32`?`node.exe`:`node`})}",
-    "function Ic(e){return Mc({resourcesPath:e,executableName:process.platform===`win32`?`codex.exe`:`codex`})}",
-    "function Qp(e){let t=Ic(e.resourcesPath)??$p(e.devRuntimeRepoRoot,[`extension`,`bin`,process.platform===`win32`?`codex.exe`:`codex`]),n=Fc(e.resourcesPath)??$p(e.devRuntimeRepoRoot,[`electron`,`bin`,process.platform===`win32`?`node.exe`:`node`]),r=Pc(e.resourcesPath)??$p(e.devRuntimeRepoRoot,[`electron`,`bin`,process.platform===`win32`?`node_repl.exe`:`node_repl`]),i=[t==null?`codex`:null,n==null?`node`:null,r==null?`node_repl`:null].filter(e=>e!=null);if(i.length>0)throw Error(`Missing bundled Electron runtime required to sync Chrome native host resources for ${e.nativeHostName}: ${i.join(`, `)} (resourcesPath: ${e.resourcesPath}).`);if(t==null||n==null||r==null)throw Error(`Missing bundled Electron runtime required to sync Chrome native host resources for ${e.nativeHostName}.`);return{codexCliPath:t,nodePath:n,nodeReplPath:r}}",
-    "function $p(e,t){if(e==null)return null;let n=(0,r.join)(e,...t);try{return(0,o.statSync)(n).isFile()?n:null}catch{return null}}",
-  ].join("");
-}
-
-function currentChromeNativeHostRuntimeBundleFixture() {
-  return [
-    "let r=require(`node:path`),o=require(`node:fs`);",
-    "function Mc({resourcesPath:e,executableName:t}){if(!e)return null;let n=(0,r.join)(e,t);try{return(0,o.statSync)(n).isFile()?n:null}catch{return null}}",
-    "function Oj(e){return Mc({resourcesPath:e,executableName:process.platform===`win32`?`node_repl.exe`:`node_repl`})}",
-    "function kj(e){return Mc({resourcesPath:e,executableName:process.platform===`win32`?`node.exe`:`node`})}",
-    "function Nj(e){return Mc({resourcesPath:e,executableName:process.platform===`win32`?`codex.exe`:`codex`})}",
-    "function QL(e){let t=Nj(e.resourcesPath)??$L(e.devRuntimeRepoRoot,[`extension`,`bin`,process.platform===`win32`?`codex.exe`:`codex`]),n=kj(e.resourcesPath),r=Oj(e.resourcesPath),i=[t==null?`codex`:null,n==null?`node`:null,r==null?`node_repl`:null].filter(e=>e!=null);if(i.length>0)throw Error(`Missing bundled Electron runtime required to sync Chrome native host resources for ${e.nativeHostName}: ${i.join(`, `)} (resourcesPath: ${e.resourcesPath}).`);if(t==null||n==null||r==null)throw Error(`Missing bundled Electron runtime required to sync Chrome native host resources for ${e.nativeHostName}.`);return{codexCliPath:t,nodePath:n,nodeModuleDirs:Aj(e.resourcesPath),nodeReplPath:r}}",
-    "function $L(e,t){if(e==null)return null;let n=(0,r.join)(e,...t);try{return(0,o.statSync)(n).isFile()?n:null}catch{return null}}",
-    "function Aj(e){return []}",
-  ].join("");
-}
-
 function currentBrowserUseTrustedHashesRuntimeBuilderFixture() {
   return "\"use strict\";let l=require(`node:fs`),s=require(`node:path`),u=require(`node:crypto`);function build({codexHome:t,nodePath:i,nodeReplPath:a,trustedBrowserClientSha256s:h=[],shouldUseWslPaths:f}){return h}";
 }
 
 const currentBrowserUseTrustedHashesInsertionRegex =
   /trustedBrowserClientSha256s:h=\[\],shouldUseWslPaths:f\}\)\{h=codexLinuxTrustedBrowserClientSha256s\(h\);return h/;
-
-function electron42BrowserUseRuntimeResolverBundleFixture() {
-  return [
-    "let s=require(`node:path`),l=require(`node:fs`);",
-    "function tt({resourcesPath:e}){return e}",
-    "function Kn(e){return e===`linux`?`/primary/node`:null}",
-    "function Hn({env:e=process.env,isPackaged:n=!0,platform:r=process.platform,repoRoot:i=process.cwd(),resolveCodexPath:a=t.Wn,resolveNodePath:o=t.Gn,resolveNodeReplPath:s=t.Kn,resolvePrimaryRuntimeNodePath:c=Kn,resourcesPath:l}){let u=l??tt({env:e,resourcesPath:process.resourcesPath}),d=c(r),f=Gn({platform:r,rawValue:e.CODEX_CLI_PATH,resolveWindowsAppsPath:a})??Wn({devRelativePathSegments:[`extension`,`bin`,`codex`],isPackaged:n,platform:r,repoRoot:i,resolveBundledPath:a,resourcesPath:u}),p=Wn({devRelativePathSegments:null,isPackaged:n,platform:r,repoRoot:i,resolveBundledPath:o,resourcesPath:u}),m=Gn({platform:r,rawValue:e.CODEX_BROWSER_USE_NODE_PATH,resolveWindowsAppsPath:o})??(p.path==null&&d!=null?{path:d,source:`primary-runtime`}:p),h=Gn({platform:r,rawValue:e.CODEX_NODE_REPL_PATH,resolveWindowsAppsPath:s})??Wn({devRelativePathSegments:null,isPackaged:n,platform:r,repoRoot:i,resolveBundledPath:s,resourcesPath:u});return{codexCliPath:f.path,codexCliPathSource:f.source,nodeModuleDirs:t.Vn(u),nodePath:m.path,nodePathSource:m.source,nodeReplPath:h.path,nodeReplPathSource:h.source,platform:r}}",
-    "function Wn(e){return{path:null,source:`missing`}}function Gn({rawValue:e}){return e==null?null:{path:e,source:`env-override`}}",
-  ].join("");
-}
-
-function currentChromePluginAppServerRuntimeBundleFixture() {
-  return [
-    "let r=require(`node:path`),o=require(`node:fs`);",
-    "async function XB(e){let t=ZB(e),n=NM(e.resourcesPath),r=MM(e.resourcesPath),i=[t==null?`codex`:null,n==null?`node`:null,r==null?`node_repl`:null].filter(e=>e!=null);if(i.length>0)throw Error(`Missing bundled Electron runtime required to sync Chrome native host resources for ${e.nativeHostName}: ${i.join(`, `)} (resourcesPath: ${e.resourcesPath}).`);if(t==null||n==null||r==null)throw Error(`Missing bundled Electron runtime required to sync Chrome native host resources for ${e.nativeHostName}.`);return{codexCliPath:await fz({codexCliPath:t,codexHome:e.codexHome,nativeHostName:e.nativeHostName}),nodePath:n,nodeModuleDirs:PM(e.resourcesPath),nodeReplPath:r}}",
-    "function ZB(e){return LM(e.resourcesPath)??QB(e.devRuntimeRepoRoot,[`extension`,`bin`,process.platform===`win32`?`codex.exe`:`codex`])}function NM(e){return null}function MM(e){return null}function PM(e){return []}function QB(e,t){return null}function LM(e){return null}async function fz({codexCliPath:e}){return e}",
-  ].join("");
-}
-
-function currentChromePluginCodexAppServerRuntimeBundleFixture() {
-  return [
-    "let r=require(`node:path`),o=require(`node:fs`);",
-    "async function VH(e){let t=_U(e);if(t==null)throw Error(`Missing bundled Electron Codex runtime required to sync Chrome plugin app server for ${e.nativeHostName} (resourcesPath: ${e.resourcesPath??`<none>`}).`);return AV({codexCliPath:t,codexHome:e.codexHome,nativeHostName:e.nativeHostName})}",
-    "function _U(e){return tM(e.resourcesPath)??vU(e.devRuntimeRepoRoot,[`extension`,`bin`,process.platform===`win32`?`codex.exe`:`codex`])}function vU(e,t){return null}function tM(e){return null}async function AV({codexCliPath:e}){return{codexCliPath:e}}",
-  ].join("");
-}
-
-function currentChromePluginIsolatedAppServerRuntimeBundleFixture() {
-  const runtime = currentChromePluginCodexAppServerRuntimeBundleFixture().replace(
-    "async function AV({codexCliPath:e}){return{codexCliPath:e}}",
-    "async function AV(e){let t=e.nativeHostName===nU,n=e.codexCliPath,r=process.env.ISSUE805_ISOLATED_CLI;o.copyFileSync(n,r);o.chmodSync(r,448);return r}",
-  );
-  return [
-    "async function decoy(e){let t=e.nativeHostName===nU;return `decoy`}",
-    "var tU=`.plugin-appserver`,nU=`com.openai.codexextension`;",
-    runtime,
-  ].join("");
-}
 
 function computerUseFeatureBundleFixture() {
   return "function me(e,{env:t=process.env,platform:n=process.platform}={}){return n!==`win32`||t.CODEX_ELECTRON_ENABLE_WINDOWS_COMPUTER_USE!==`1`?e:{...e,computerUse:!0,computerUseNodeRepl:!0}}";
@@ -1620,24 +1569,25 @@ function currentLaunchActionBundleWithWindowApiDriftFixture() {
 function settingsPersistenceBundleFixture() {
   return [
     "let i=require(`node:path`),o=require(`node:fs`);",
-    "var s=`.codex-global-state.json`;",
-    "const h={\"set-global-state\":async({key:a,value:b,origin:c})=>(this.globalState.set(a,b),Promise.resolve())};",
+    "const h={\"set-global-state\":async({key:a,value:b})=>(this.setGlobalStateValue(a,b),{success:!0})};",
   ].join("");
 }
 
 function currentSettingsPersistenceBundleFixture() {
   return [
     "let i=require(`node:path`),o=require(`node:fs`);",
-    "var s=`.codex-global-state.json`,c=`config.toml`;",
-    "const h={\"set-global-state\":async({key:a,value:b,origin:c})=>(this.setGlobalStateValue(a,b,c),{success:!0})};",
+    "const h={\"set-global-state\":async({key:a,value:b})=>(this.setGlobalStateValue(a,b),{success:!0})};",
   ].join("");
 }
 
-function legacySettingsPersistenceBundleFixture() {
+function exactDmgSettingsPersistenceBundleFixture() {
+  // fb93a239c811: an earlier core patch introduces a function-local fs alias
+  // before upstream's top-level window-all-closed, path, and fs bindings.
   return [
-    "let i=require(`node:path`),o=require(`node:fs`);",
-    "var s=`.codex-global-state.json`;function codexLinuxSettingsPath(){let e=process.env.XDG_CONFIG_HOME||process.env.HOME&&i.join(process.env.HOME,`.config`);return e?i.join(e,`codex-desktop`,`settings.json`):null}function codexLinuxReadSettingsFile(){let e=codexLinuxSettingsPath();if(!e||!o.existsSync(e))return{};try{let t=o.readFileSync(e,`utf8`),n=JSON.parse(t);return n&&typeof n===`object`&&!Array.isArray(n)?n:{}}catch(e){return{}}}function codexLinuxPersistSettingsState(e,t){if(process.platform!==`linux`||![`codex-linux-prompt-window-enabled`,`codex-linux-system-tray-enabled`,`codex-linux-warm-start-enabled`].includes(e))return;try{let n=codexLinuxSettingsPath();if(!n)return;let r=codexLinuxReadSettingsFile();t===void 0?delete r[e]:r[e]=t,o.mkdirSync(i.dirname(n),{recursive:!0,mode:448}),o.writeFileSync(n,JSON.stringify(r,null,2)+`\\n`,`utf8`)}catch(e){}}",
-    "const h={\"set-global-state\":async({key:a,value:b,origin:c})=>(this.globalState.set(a,b),codexLinuxPersistSettingsState(a,b),Promise.resolve())};",
+    "function codexLinuxBrowserUseSocketDir(){let r=require(`node:fs`);return r}",
+    "const r=require(\"./window-all-closed-Coc41Tfs.js\");",
+    "let p=require(\"node:path\"),_=require(\"node:fs\");",
+    "const h={\"set-global-state\":async({key:e,value:t})=>(this.setGlobalStateValue(e,t),{success:!0})};",
   ].join("");
 }
 
@@ -1648,7 +1598,7 @@ function runSettingsPersistence(patchedSource, env, key, value) {
       console,
       JSON,
       Promise,
-      require,
+      require: (moduleName) => moduleName === "./window-all-closed-Coc41Tfs.js" ? {} : require(moduleName),
       process: { env, platform: "linux" },
     },
   );
@@ -1667,13 +1617,6 @@ function keybindsIndexBundleFixture() {
     "switch(e){case`appearance`:case`git-settings`:case`worktrees`:case`local-environments`:case`data-controls`:case`environments`:return l===`electron`;}",
     "switch(e){case`usage`:k=g;break bb0;case`appearance`:case`general-settings`:case`agent`:case`git-settings`:case`account`:case`data-controls`:case`personalization`:k=!1;break bb0;}",
     "export{SettingsRouteWrapper};",
-  ].join("");
-}
-
-function settingsSharedBundleFixture() {
-  return [
-    '"general-settings":{id:`settings.nav.general-settings`,defaultMessage:`General`,description:`Title for general settings section`},appearance:{id:`settings.nav.appearance`,defaultMessage:`Appearance`,description:`Title for appearance settings section`},',
-    "function titleForSection(e){switch(e){case`general-settings`:{let e;return t[2]===Symbol.for(`react.memo_cache_sentinel`)?(e=(0,d.jsx)(n,{id:`settings.section.general-settings`,defaultMessage:`General`,description:`Title for general settings section`}),t[2]=e):e=t[2],e}case`appearance`:return (0,d.jsx)(n,{id:`settings.section.appearance`,defaultMessage:`Appearance`,description:`Title for appearance settings section`})}}",
   ].join("");
 }
 
@@ -1950,6 +1893,10 @@ function currentBootstrapUpdaterBundleFixture() {
     "c({onDownloadProgressChanged:()=>{se.broadcastAppUpdateState()},onInstallProgressChanged:()=>{T&&se.broadcastAppUpdateState()},onUpdateReadyChanged:()=>{se.broadcastAppUpdateState()},onUpdateLifecycleStateChanged:()=>{se.broadcastAppUpdateState()},onRelaunchNoticeChanged:()=>{se.broadcastAppUpdateState()},onInstallUpdatesRequested:e=>{te(e)},isTrustedIpcEvent:M});",
     "}exports.runMainAppStartup=v6;",
   ].join("");
+}
+
+function currentSparkleUpdateMenuContractFixture() {
+  return "if(!u.hasUpdater()){let e=u.getUnavailableReason()??`unknown`;return e}u.checkForUpdates()";
 }
 
 function latestAvatarOverlayBundleFixture() {
@@ -2762,7 +2709,7 @@ test("adds a bounded will-quit drain fallback on Linux", () => {
   assert.doesNotMatch(patched, /codexLinuxQuitFinalized/);
   assert.match(
     patched,
-    /Promise\.resolve\(\)\.then\(\(\)=>U5\(h,N5\)\)\.catch\(e=>\{try\{console\.warn\(`WARN: Linux quit context cleanup failed`,e\)\}catch\{\}\}\)/,
+    /\.then\(\(\)=>Promise\.resolve\(\)\.then\(\(\)=>U5\(h,N5\)\)\.catch\(e=>\{try\{console\.warn\(`WARN: Linux quit context cleanup failed`,e\)\}catch\{\}\}\)\)/,
   );
   assert.match(
     patched,
@@ -2770,14 +2717,14 @@ test("adds a bounded will-quit drain fallback on Linux", () => {
   );
   assert.match(
     patched,
-    /Promise\.race\(\[Promise\.resolve\(\)\.then\(e\)\.then\(codexLinuxLogQuitDrainResults\),new Promise\(\(_,e\)=>setTimeout\(\(\)=>e\(Error\(`Linux quit drain timed out`\)\),typeof codexLinuxExplicitQuitDrainTimeoutMs===`number`\?codexLinuxExplicitQuitDrainTimeoutMs:3e3\)\)\]\)\.catch\(e=>\{try\{console\.warn\(`WARN: Linux quit drain cleanup failed`,e\)\}catch\{\}\}\)\.then\(codexLinuxFinalizeQuit\)/,
+    /Promise\.race\(\[Promise\.resolve\(\)\.then\(e\)[^;]+new Promise\(\(_,e\)=>setTimeout\(\(\)=>e\(Error\(`Linux quit cleanup timed out`\)\),typeof codexLinuxExplicitQuitDrainTimeoutMs===`number`\?codexLinuxExplicitQuitDrainTimeoutMs:3e3\)\)\]\)\.catch\(e=>\{try\{console\.warn\(`WARN: Linux quit cleanup failed`,e\)\}catch\{\}\}\)\.then\(codexLinuxFinalizeQuit\)/,
   );
   assert.match(
     patched,
-    /codexLinuxRunQuitDrain=e=>\{if\(process\.platform===`linux`\)\{/,
+    /codexLinuxRunQuitCleanup=e=>\{if\(process\.platform===`linux`\)\{/,
   );
   assert.equal(
-    (patched.match(/codexLinuxRunQuitDrain\(\(\)=>\{/g) ?? []).length,
+    (patched.match(/codexLinuxRunQuitCleanup\(\(\)=>\{/g) ?? []).length,
     2,
   );
   assert.equal(
@@ -2821,12 +2768,87 @@ test("Linux will-quit reaches app.exit after the drain deadline", async () => {
   assert.deepEqual(state.exitCodes, [0]);
   assert.equal(state.quitCalls, 0);
   assert.deepEqual(state.warnings, [
-    "WARN: Linux quit drain cleanup failed Error: Linux quit drain timed out",
+    "WARN: Linux quit cleanup failed Error: Linux quit cleanup timed out",
   ]);
   resolveGlobalState();
   await new Promise((resolve) => setTimeout(resolve, 10));
   assert.equal(state.exitCalls, 1);
   assert.equal(state.quitCalls, 0);
+});
+
+test("Linux will-quit bounds context disposal inside the quit deadline", async () => {
+  const stalledContextDispose = new Promise(() => {});
+  let contextDisposeCalls = 0;
+  let disposablesCalls = 0;
+  const state = await runPatchedLinuxWillQuit({
+    contextDispose() {
+      contextDisposeCalls += 1;
+      return stalledContextDispose;
+    },
+    disposablesDispose() {
+      disposablesCalls += 1;
+    },
+    timeoutMs: 5,
+  });
+
+  assert.equal(contextDisposeCalls, 1);
+  assert.equal(disposablesCalls, 1);
+  assert.equal(state.exitCalls, 1);
+  assert.deepEqual(state.exitCodes, [0]);
+  assert.equal(state.quitCalls, 0);
+  assert.deepEqual(state.warnings, [
+    "WARN: Linux quit cleanup failed Error: Linux quit cleanup timed out",
+  ]);
+});
+
+test("Linux reduced will-quit branch shares the complete cleanup deadline", async () => {
+  const stalledContextDispose = new Promise(() => {});
+  let contextDisposeCalls = 0;
+  let disposablesCalls = 0;
+  let globalStateFlushCalls = 0;
+  let settingsFlushCalls = 0;
+  let stopCodexMicroCalls = 0;
+  let flushTracingCalls = 0;
+  const state = await runPatchedLinuxWillQuit({
+    contextDispose() {
+      contextDisposeCalls += 1;
+      return stalledContextDispose;
+    },
+    disposablesDispose() {
+      disposablesCalls += 1;
+    },
+    flushTracing() {
+      flushTracingCalls += 1;
+      return Promise.resolve();
+    },
+    globalStateFlush() {
+      globalStateFlushCalls += 1;
+      return Promise.resolve();
+    },
+    settingsFlush() {
+      settingsFlushCalls += 1;
+      return Promise.resolve();
+    },
+    shouldSkipDrain: true,
+    stopCodexMicro() {
+      stopCodexMicroCalls += 1;
+      return Promise.resolve();
+    },
+    timeoutMs: 5,
+  });
+
+  assert.equal(contextDisposeCalls, 1);
+  assert.equal(disposablesCalls, 1);
+  assert.equal(globalStateFlushCalls, 0);
+  assert.equal(settingsFlushCalls, 0);
+  assert.equal(stopCodexMicroCalls, 1);
+  assert.equal(flushTracingCalls, 1);
+  assert.equal(state.exitCalls, 1);
+  assert.deepEqual(state.exitCodes, [0]);
+  assert.equal(state.quitCalls, 0);
+  assert.deepEqual(state.warnings, [
+    "WARN: Linux quit cleanup failed Error: Linux quit cleanup timed out",
+  ]);
 });
 
 test("Linux will-quit logs rejected asynchronous drain work before exit", async () => {
@@ -2984,6 +3006,79 @@ test("missing, renamed, or ambiguous will-quit targets fail the required lifecyc
   }
 });
 
+test("recognizes the bounded Linux quit cleanup as already applied", () => {
+  const source = applyLinuxWillQuitDrainTimeoutPatch(
+    willQuitDrainBundleFixture(),
+  );
+  const descriptor = corePatchDescriptors().find(
+    (candidate) => candidate.id === "linux-explicit-quit-drain-timeout",
+  );
+  const report = createPatchReport();
+  const { value: result, warnings } = captureWarns(() =>
+    applyMainBundlePatchDescriptors(source, [descriptor], {}, report),
+  );
+
+  assert.equal(result.patchedSource, source);
+  assert.deepEqual(warnings, []);
+  assert.equal(report.patches[0]?.status, "already-applied");
+});
+
+test("does not accept a partial Linux quit cleanup call-site patch", () => {
+  const source = applyLinuxWillQuitDrainTimeoutPatch(
+    willQuitDrainBundleFixture(),
+  ).replace(
+    "codexLinuxRunQuitCleanup(()=>{c.dispose(),u.dispose();",
+    "codexLinuxRunQuitDrain(()=>{c.dispose(),u.dispose();",
+  );
+  const descriptor = corePatchDescriptors().find(
+    (candidate) => candidate.id === "linux-explicit-quit-drain-timeout",
+  );
+  const report = createPatchReport();
+  const { value: result, warnings } = captureWarns(() =>
+    applyMainBundlePatchDescriptors(source, [descriptor], {}, report),
+  );
+
+  assert.equal(result.patchedSource, source);
+  assert.deepEqual(warnings, [
+    "WARN: Could not uniquely match current will-quit drain sequence — skipping Linux explicit quit drain timeout patch",
+  ]);
+  assert.equal(report.patches[0]?.status, "failed-required");
+  assert.equal(report.patches[0]?.reason, warnings[0]);
+});
+
+test("does not accept damaged Linux quit cleanup factory bodies", () => {
+  const patched = applyLinuxWillQuitDrainTimeoutPatch(
+    willQuitDrainBundleFixture(),
+  );
+  const sources = [
+    patched.replace(
+      "codexLinuxRunQuitCleanup(()=>{c.dispose(),u.dispose();return Promise.allSettled([p(),m()])})",
+      "codexLinuxRunQuitCleanup(()=>{return Promise.resolve()})",
+    ),
+    patched.replace(
+      "codexLinuxRunQuitCleanup(()=>{c.dispose(),u.dispose();return Promise.allSettled([d.flush(),f.flush(),p(),m()])})",
+      "codexLinuxRunQuitCleanup(()=>{return Promise.resolve()})",
+    ),
+  ];
+  const descriptor = corePatchDescriptors().find(
+    (candidate) => candidate.id === "linux-explicit-quit-drain-timeout",
+  );
+
+  for (const source of sources) {
+    const report = createPatchReport();
+    const { value: result, warnings } = captureWarns(() =>
+      applyMainBundlePatchDescriptors(source, [descriptor], {}, report),
+    );
+
+    assert.equal(result.patchedSource, source);
+    assert.deepEqual(warnings, [
+      "WARN: Could not uniquely match current will-quit drain sequence — skipping Linux explicit quit drain timeout patch",
+    ]);
+    assert.equal(report.patches[0]?.status, "failed-required");
+    assert.equal(report.patches[0]?.reason, warnings[0]);
+  }
+});
+
 test("a non-exiting Linux finalizer is not accepted as already applied", () => {
   const previousBrokenPatch = applyLinuxWillQuitDrainTimeoutPatch(
     willQuitDrainBundleFixture(),
@@ -3070,12 +3165,29 @@ test("patches remaining explicit quit handlers when another copy is already patc
   );
 });
 
+function nativeTitlebarZoomFixture(
+  electronAlias = "a",
+  overlayHelperAlias = "b2",
+  buttonHelperAlias = "y2",
+) {
+  return `setWindowZoom(e,t){let n=${electronAlias}.BrowserWindow.fromWebContents(e),r=n&&this.windowAppearances.get(n.id);n==null||r!==\`primary\`&&r!==\`quickChat\`||(process.platform===\`darwin\`?n.setWindowButtonPosition(${buttonHelperAlias}(t)):(process.platform===\`win32\`||process.platform===\`linux\`)&&(this.windowZooms.set(n.id,t),n.setTitleBarOverlay(${overlayHelperAlias}(t))))}`;
+}
+
+function nativeTitlebarSyncFixture(
+  electronAlias = "a",
+  overlayHelperAlias = "b2",
+) {
+  return `installApplicationMenuTitleBarOverlaySync(e,t){if(process.platform!==\`win32\`&&process.platform!==\`linux\`||t!==\`primary\`&&t!==\`quickChat\`)return;let n=()=>{e.isDestroyed()||e.setTitleBarOverlay(${overlayHelperAlias}(this.windowZooms.get(e.id)))};return ${electronAlias}.nativeTheme.on(\`updated\`,n),n(),()=>{${electronAlias}.nativeTheme.off(\`updated\`,n)}}`;
+}
+
 test("uses the frameless native Codex titlebar for primary Linux windows", () => {
   const source = [
     "function A2(e){return e===`avatarOverlay`}",
     "function I2({platform:e,appearance:t,opaqueWindowsEnabled:n,prefersDarkColors:r}){return n&&!A2(t)&&(e===`darwin`||e===`win32`)?{backgroundColor:r?a2:o2,backgroundMaterial:e===`win32`?`none`:null}:e===`linux`&&!A2(t)?{backgroundColor:r?a2:o2,backgroundMaterial:null}:{backgroundColor:i2,backgroundMaterial:null}}",
     "function b2(e=1){return{color:i2,symbolColor:a.nativeTheme.shouldUseDarkColors?v2:_2,height:Math.round(g2*e)}}",
     "case`quickChat`:case`primary`:return n===`darwin`?{titleBarStyle:`hiddenInset`,trafficLightPosition:y2(r),...e===`quickChat`?{hasShadow:!0,resizable:!0,transparent:!0}:{},...t?{}:{vibrancy:`menu`}}:n===`win32`||n===`linux`?{titleBarStyle:`hidden`,titleBarOverlay:b2(r),...e===`quickChat`?{resizable:!0}:{}}:{titleBarStyle:`default`,...e===`quickChat`?{resizable:!0}:{}};",
+    nativeTitlebarZoomFixture(),
+    nativeTitlebarSyncFixture(),
   ].join("");
   const patched = applyPatchTwice(applyLinuxNativeTitlebarPatch, source);
 
@@ -3097,6 +3209,8 @@ test("uses a module-scoped Linux native titlebar helper when aliases shadow Elec
     "function I3({platform:e,appearance:t,opaqueWindowsEnabled:n,prefersDarkColors:r}){return n&&!A3(t)&&(e===`darwin`||e===`win32`)?{backgroundColor:r?L4:K4,backgroundMaterial:e===`win32`?`none`:null}:e===`linux`&&!A3(t)?{backgroundColor:r?L4:K4,backgroundMaterial:null}:{backgroundColor:W4,backgroundMaterial:null}}",
     "function o3(e=1){return{color:W4,symbolColor:r.nativeTheme.shouldUseDarkColors?i3:r3,height:Math.round(g3*e)}}",
     "function T3({appearance:e,opaqueWindowSurfaceEnabled:t,platform:n,windowZoom:r=1}){switch(e){case`quickChat`:case`primary`:return n===`darwin`?{titleBarStyle:`hiddenInset`,trafficLightPosition:a3(r),...e===`quickChat`?{hasShadow:!0,resizable:!0,transparent:!0}:{},...t?{}:{vibrancy:`menu`}}:n===`win32`||n===`linux`?{titleBarStyle:`hidden`,titleBarOverlay:o3(r),...e===`quickChat`?{resizable:!0}:{}}:{titleBarStyle:`default`,...e===`quickChat`?{resizable:!0}:{}};}}",
+    nativeTitlebarZoomFixture("r", "o3", "a3"),
+    nativeTitlebarSyncFixture("r", "o3"),
   ].join("");
   const { value, warnings } = captureWarns(() =>
     applyPatchTwice(applyLinuxNativeTitlebarPatch, source),
@@ -3120,6 +3234,7 @@ test("updates the Linux native titlebar overlay when nativeTheme changes", () =>
     "function I2({platform:e,appearance:t,opaqueWindowsEnabled:n,prefersDarkColors:r}){return n&&!A2(t)&&(e===`darwin`||e===`win32`)?{backgroundColor:r?a2:o2,backgroundMaterial:e===`win32`?`none`:null}:e===`linux`&&!A2(t)?{backgroundColor:r?a2:o2,backgroundMaterial:null}:{backgroundColor:i2,backgroundMaterial:null}}",
     "function b2(e=1){return{color:i2,symbolColor:a.nativeTheme.shouldUseDarkColors?v2:_2,height:Math.round(g2*e)}}",
     "case`quickChat`:case`primary`:return n===`darwin`?{titleBarStyle:`hiddenInset`,trafficLightPosition:y2(r),...e===`quickChat`?{hasShadow:!0,resizable:!0,transparent:!0}:{},...t?{}:{vibrancy:`menu`}}:n===`win32`||n===`linux`?{titleBarStyle:`hidden`,titleBarOverlay:b2(r),...e===`quickChat`?{resizable:!0}:{}}:{titleBarStyle:`default`,...e===`quickChat`?{resizable:!0}:{}};",
+    nativeTitlebarZoomFixture(),
     "installApplicationMenuTitleBarOverlaySync(e,t){if(process.platform!==`win32`&&process.platform!==`linux`||t!==`primary`&&t!==`quickChat`)return;let n=()=>{e.isDestroyed()||e.setTitleBarOverlay(b2(this.windowZooms.get(e.id)))};return a.nativeTheme.on(`updated`,n),n(),()=>{a.nativeTheme.off(`updated`,n)}}",
   ].join("");
   const patched = applyPatchTwice(applyLinuxNativeTitlebarPatch, source);
@@ -3136,6 +3251,26 @@ test("updates the Linux native titlebar overlay when nativeTheme changes", () =>
   assert.doesNotMatch(patched, /data-codex-window-type/);
 });
 
+test("leaves the native titlebar bundle byte-identical when overlay sync drifts", () => {
+  const source = [
+    "function A2(e){return e===`avatarOverlay`}",
+    "function I2({platform:e,appearance:t,opaqueWindowsEnabled:n,prefersDarkColors:r}){return n&&!A2(t)&&(e===`darwin`||e===`win32`)?{backgroundColor:r?a2:o2,backgroundMaterial:e===`win32`?`none`:null}:e===`linux`&&!A2(t)?{backgroundColor:r?a2:o2,backgroundMaterial:null}:{backgroundColor:i2,backgroundMaterial:null}}",
+    "function b2(e=1){return{color:i2,symbolColor:a.nativeTheme.shouldUseDarkColors?v2:_2,height:Math.round(g2*e)}}",
+    "case`quickChat`:case`primary`:return n===`darwin`?{titleBarStyle:`hiddenInset`,trafficLightPosition:y2(r),...e===`quickChat`?{hasShadow:!0,resizable:!0,transparent:!0}:{},...t?{}:{vibrancy:`menu`}}:n===`win32`||n===`linux`?{titleBarStyle:`hidden`,titleBarOverlay:b2(r),...e===`quickChat`?{resizable:!0}:{}}:{titleBarStyle:`default`,...e===`quickChat`?{resizable:!0}:{}};",
+    nativeTitlebarZoomFixture(),
+    "installApplicationMenuTitleBarOverlaySync(e,t){if(process.platform!==`win32`&&process.platform!==`linux`||t!==`primary`&&t!==`quickChat`)return;let n=()=>{e.isDestroyed()||e.setTitleBarOverlay(b2(this.windowZooms.get(e.id),unexpected))};return a.nativeTheme.on(`updated`,n),n(),()=>{a.nativeTheme.off(`updated`,n)}}",
+  ].join("");
+
+  const { value, warnings } = captureWarns(() =>
+    applyLinuxNativeTitlebarPatch(source),
+  );
+
+  assert.equal(value, source);
+  assert.deepEqual(warnings, [
+    "WARN: Could not patch titleBarOverlay nativeTheme sync for Linux",
+  ]);
+});
+
 test("redirects the renamed Linux-aware titlebar overlay sync away from the transparent win32 helper", () => {
   const source = [
     "function A2(e){return e===`avatarOverlay`}",
@@ -3143,7 +3278,7 @@ test("redirects the renamed Linux-aware titlebar overlay sync away from the tran
     "function b2(e=1){return{color:i2,symbolColor:a.nativeTheme.shouldUseDarkColors?v2:_2,height:Math.round(g2*e)}}",
     "case`quickChat`:case`primary`:return n===`darwin`?{titleBarStyle:`hiddenInset`,trafficLightPosition:y2(r),...e===`quickChat`?{hasShadow:!0,resizable:!0,transparent:!0}:{},...t?{}:{vibrancy:`menu`}}:n===`win32`||n===`linux`?{titleBarStyle:`hidden`,titleBarOverlay:b2(r),...e===`quickChat`?{resizable:!0}:{}}:{titleBarStyle:`default`,...e===`quickChat`?{resizable:!0}:{}};",
     "installApplicationMenuTitleBarOverlaySync(e,t){if(process.platform!==`win32`&&process.platform!==`linux`||t!==`primary`&&t!==`quickChat`)return;let n=()=>{e.isDestroyed()||e.setTitleBarOverlay(b2(this.windowZooms.get(e.id)))};return a.nativeTheme.on(`updated`,n),n(),()=>{a.nativeTheme.off(`updated`,n)}}",
-    "process.platform===`darwin`?n.setWindowButtonPosition(y2(t)):(process.platform===`win32`||process.platform===`linux`)&&(this.windowZooms.set(n.id,t),n.setTitleBarOverlay(b2(t)))",
+    nativeTitlebarZoomFixture(),
   ].join("");
   const { value: patched, warnings } = captureWarns(() =>
     applyPatchTwice(applyLinuxNativeTitlebarPatch, source),
@@ -3167,29 +3302,6 @@ test("redirects the renamed Linux-aware titlebar overlay sync away from the tran
   );
   assert.doesNotMatch(patched, /setTitleBarOverlay\(b2\(/);
   assert.deepEqual(warnings, []);
-});
-
-
-test("updates every Linux zoom titlebar overlay refresh call site", () => {
-  const source = [
-    "function A2(e){return e===`avatarOverlay`}",
-    "function I2({platform:e,appearance:t,opaqueWindowsEnabled:n,prefersDarkColors:r}){return n&&!A2(t)&&(e===`darwin`||e===`win32`)?{backgroundColor:r?a2:o2,backgroundMaterial:e===`win32`?`none`:null}:e===`linux`&&!A2(t)?{backgroundColor:r?a2:o2,backgroundMaterial:null}:{backgroundColor:i2,backgroundMaterial:null}}",
-    "function b2(e=1){return{color:i2,symbolColor:a.nativeTheme.shouldUseDarkColors?v2:_2,height:Math.round(g2*e)}}",
-    "case`quickChat`:case`primary`:return n===`darwin`?{titleBarStyle:`hiddenInset`,trafficLightPosition:y2(r),...e===`quickChat`?{hasShadow:!0,resizable:!0,transparent:!0}:{},...t?{}:{vibrancy:`menu`}}:n===`win32`||n===`linux`?{titleBarStyle:`hidden`,titleBarOverlay:b2(r),...e===`quickChat`?{resizable:!0}:{}}:{titleBarStyle:`default`,...e===`quickChat`?{resizable:!0}:{}};",
-    "installApplicationMenuTitleBarOverlaySync(e,t){if(process.platform!==`win32`&&process.platform!==`linux`||t!==`primary`&&t!==`quickChat`)return;let n=()=>{e.isDestroyed()||e.setTitleBarOverlay(b2(this.windowZooms.get(e.id)))};return a.nativeTheme.on(`updated`,n),n(),()=>{a.nativeTheme.off(`updated`,n)}}",
-    "process.platform===`darwin`?n.setWindowButtonPosition(y2(t)):(process.platform===`win32`||process.platform===`linux`)&&(this.windowZooms.set(n.id,t),n.setTitleBarOverlay(b2(t)))",
-    "process.platform===`darwin`?o.setWindowButtonPosition(y2(i)):(process.platform===`win32`||process.platform===`linux`)&&(this.windowZooms.set(o.id,i),o.setTitleBarOverlay(b2(i)))",
-  ].join("");
-  const patched = applyPatchTwice(applyLinuxNativeTitlebarPatch, source);
-
-  assert.equal(
-    (patched.match(/setTitleBarOverlay\(process\.platform===`linux`\?codexLinuxTitleBarOverlay/g) ?? []).length,
-    3,
-  );
-  assert.doesNotMatch(
-    patched,
-    /\(process\.platform===`win32`\|\|process\.platform===`linux`\)&&\(this\.windowZooms\.set\([^)]+\),[A-Za-z_$][\w$]*\.setTitleBarOverlay\(b2\([^)]+\)\)\)/,
-  );
 });
 
 function windowControlsSafeAreaFixture(firstInset = 0, secondInset = 0) {
@@ -3277,6 +3389,25 @@ test("patches remaining Linux header safe-area padding when the menu inset is al
   assert.doesNotMatch(patched, /"pe-2":n===`start`&&i\|\|n===`end`(?=[,}])/);
 });
 
+test("rejects a non-numeric application menu inset hidden beside a valid owner", () => {
+  const patched = applyLinuxWindowControlsSafeAreaPatch(
+    windowControlsSafeAreaFixture(),
+  );
+  const damaged = patched.replace(
+    "applicationMenu:Object.freeze({left:0,right:138})",
+    "applicationMenu:Object.freeze({left:0,right:dynamicInset})",
+  );
+
+  const { value, warnings } = captureWarns(() =>
+    applyLinuxWindowControlsSafeAreaPatch(damaged),
+  );
+
+  assert.equal(value, damaged);
+  assert.deepEqual(warnings, [
+    "WARN: Found incomplete Linux window-controls safe-area patch marker — skipping",
+  ]);
+});
+
 test("warns when the Linux window-controls safe area cannot follow the current header layout", () => {
   const source = [
     "var l=Object.freeze({applicationMenu:Object.freeze({left:0,right:0})});",
@@ -3287,9 +3418,10 @@ test("warns when the Linux window-controls safe area cannot follow the current h
     applyLinuxWindowControlsSafeAreaPatch(source),
   );
 
-  assert.match(value, /applicationMenu:Object\.freeze\(\{left:0,right:138\}\)/);
+  assert.equal(value, source);
   assert.deepEqual(warnings, [
     "WARN: Could not connect the Linux window controls safe area to the current app header layout",
+    "WARN: Could not complete Linux window-controls safe-area consumers — skipping",
   ]);
 });
 
@@ -3345,20 +3477,525 @@ test("removes native title tooltip from the thread side panel toolbar action", (
   assert.doesNotMatch(patched, /title:i/);
 });
 
+function managedWindowMenuFixture(
+  menuSnippet,
+  {
+    appearanceAlias = "o",
+    className = "WindowManager",
+    parameterAlias = "e",
+    popupSnippet = "",
+    windowAlias = "N",
+  } = {},
+) {
+  return [
+    `class ${className}{registerWindow(){}async createWindow(${parameterAlias}={}){`,
+    `let t=process.platform===\`win32\`&&(${parameterAlias}.appearance??\`primary\`)===\`primary\`?electron.screen.getPrimaryDisplay().workArea:null,`,
+    `{appearance:${appearanceAlias}=\`primary\`}=${parameterAlias},`,
+    `${windowAlias}=new electron.BrowserWindow({});`,
+    menuSnippet,
+    `this.registerWindow(${windowAlias},0,!0,${appearanceAlias},\`register\`);`,
+    popupSnippet,
+    `return ${windowAlias}}}`,
+  ].join("");
+}
+
+function windowsAndLinuxMenuSnippet(windowAlias) {
+  return (
+    `(process.platform===\`win32\`||process.platform===\`linux\`)&&` +
+    `${windowAlias}.removeMenu(),`
+  );
+}
+
+function gnomeX11SystemContextMenuListenerSnippet(
+  windowAlias,
+  eventAlias = "e",
+) {
+  return (
+    "process.platform===`linux`&&" +
+    "(process.env.XDG_SESSION_TYPE??``).trim().toLowerCase()===`x11`&&" +
+    "/(^|:)gnome(:|$)/i.test((process.env.XDG_CURRENT_DESKTOP??``).trim())&&" +
+    `${windowAlias}.on(\`system-context-menu\`,${eventAlias}=>` +
+    `${eventAlias}.preventDefault()),`
+  );
+}
+
+function canonicalLinuxMenuSnippet(windowAlias, eventAlias = "e") {
+  return (
+    gnomeX11SystemContextMenuListenerSnippet(windowAlias, eventAlias) +
+    `process.platform===\`linux\`&&${windowAlias}.removeMenu(),` +
+    `process.platform===\`win32\`&&${windowAlias}.removeMenu(),`
+  );
+}
+
+function scopedManagedLinuxMenuSnippet(windowAlias, eventAlias = "e") {
+  return (
+    gnomeX11SystemContextMenuListenerSnippet(windowAlias, eventAlias) +
+    `(process.platform===\`win32\`||process.platform===\`linux\`)&&` +
+    `${windowAlias}.removeMenu(),`
+  );
+}
+
+function browserCommentPopupMenuSnippet(menuSnippet) {
+  return (
+    "host.on(`did-create-window`,()=>{let e=new electron.BrowserWindow({});" +
+    `${menuSnippet}e.show()});`
+  );
+}
+
+test("patches the managed WindowManager window before the browser-comment popup", () => {
+  const popupStartMarker = "host.on(`did-create-window`";
+  const source = managedWindowMenuFixture(
+    windowsAndLinuxMenuSnippet("N"),
+    {
+      popupSnippet: browserCommentPopupMenuSnippet(
+        "process.platform===`win32`&&e.removeMenu(),",
+      ),
+    },
+  );
+
+  const managedPatched = applyLinuxManagedWindowSystemContextMenuPatch(source);
+  const popupStart = managedPatched.indexOf(popupStartMarker);
+  assert.notEqual(popupStart, -1);
+  assert.equal(
+    (managedPatched.slice(0, popupStart).match(/system-context-menu/g) ?? []).length,
+    1,
+  );
+  assert.equal(
+    (managedPatched.slice(popupStart).match(/system-context-menu/g) ?? []).length,
+    0,
+    "the managed-window patch must not claim success by patching only the popup",
+  );
+  assert.match(
+    managedPatched,
+    new RegExp(escapeRegExp(scopedManagedLinuxMenuSnippet("N"))),
+  );
+
+  const fullyPatched = applyLinuxMenuPatch(managedPatched);
+  assert.equal((fullyPatched.match(/system-context-menu/g) ?? []).length, 2);
+  assert.match(
+    fullyPatched,
+    new RegExp(escapeRegExp(scopedManagedLinuxMenuSnippet("N"))),
+  );
+  assert.match(
+    fullyPatched,
+    new RegExp(escapeRegExp(canonicalLinuxMenuSnippet("e"))),
+  );
+  assert.equal(
+    applyLinuxMenuPatch(
+      applyLinuxManagedWindowSystemContextMenuPatch(fullyPatched),
+    ),
+    fullyPatched,
+  );
+  assert.doesNotThrow(() => new Function(fullyPatched));
+});
+
+test("patches the current WindowManager contract across minified aliases", () => {
+  const source = managedWindowMenuFixture(
+    windowsAndLinuxMenuSnippet("M"),
+    { windowAlias: "M" },
+  );
+  const patched = applyPatchTwice(
+    applyLinuxManagedWindowSystemContextMenuPatch,
+    source,
+  );
+
+  assert.match(
+    patched,
+    new RegExp(escapeRegExp(scopedManagedLinuxMenuSnippet("M"))),
+  );
+});
+
+test("recognizes an equivalent managed-window preventDefault listener", () => {
+  const source = managedWindowMenuFixture(
+    scopedManagedLinuxMenuSnippet("N", "event"),
+  );
+
+  assert.equal(
+    applyLinuxManagedWindowSystemContextMenuPatch(source),
+    source,
+  );
+});
+
+test("rejects malformed or duplicate managed-window system context menu listeners", () => {
+  const malformed = managedWindowMenuFixture(
+    "process.platform===`linux`&&(N.on(`system-context-menu`,event=>handle(event)),N.removeMenu())," +
+      "process.platform===`win32`&&N.removeMenu(),",
+  );
+  assert.throws(
+    () => applyLinuxManagedWindowSystemContextMenuPatch(malformed),
+    /non-canonical or duplicate system-context-menu listener/,
+  );
+
+  const duplicate = managedWindowMenuFixture(
+    scopedManagedLinuxMenuSnippet("N") +
+      "N.on(`system-context-menu`,event=>event.preventDefault()),",
+  );
+  assert.throws(
+    () => applyLinuxManagedWindowSystemContextMenuPatch(duplicate),
+    /non-canonical or duplicate system-context-menu listener/,
+  );
+
+  const duplicateMenuTarget = managedWindowMenuFixture(
+    scopedManagedLinuxMenuSnippet("N") +
+      "process.platform===`win32`&&N.removeMenu(),",
+  );
+  assert.throws(
+    () =>
+      applyLinuxManagedWindowSystemContextMenuPatch(
+        duplicateMenuTarget,
+      ),
+    /multiple menu targets/,
+  );
+
+  const mixedUnpatchedTargets = managedWindowMenuFixture(
+    windowsAndLinuxMenuSnippet("N") +
+      "process.platform===`win32`&&N.removeMenu(),",
+  );
+  assert.throws(
+    () =>
+      applyLinuxManagedWindowSystemContextMenuPatch(
+        mixedUnpatchedTargets,
+      ),
+    /Found 2 removeMenu calls/,
+  );
+
+  for (const existingListener of [
+    'N.on("system-context-menu",event=>event.preventDefault()),',
+    "N.addListener('system-context-menu',event=>event.preventDefault()),",
+  ]) {
+    const alternateApiOrQuote = managedWindowMenuFixture(
+      existingListener + windowsAndLinuxMenuSnippet("N"),
+    );
+    assert.throws(
+      () =>
+        applyLinuxManagedWindowSystemContextMenuPatch(
+          alternateApiOrQuote,
+        ),
+      /non-canonical or duplicate system-context-menu listener/,
+    );
+  }
+});
+
+test("fails loudly when the managed window is missing or ambiguous", () => {
+  const alreadyPatchedPopup = browserCommentPopupMenuSnippet(
+    canonicalLinuxMenuSnippet("e"),
+  );
+  assert.throws(
+    () => applyLinuxManagedWindowSystemContextMenuPatch(alreadyPatchedPopup),
+    /Could not identify the managed BrowserWindow/,
+    "a patched popup must not hide a missing primary WindowManager target",
+  );
+
+  const missingMenuTarget = managedWindowMenuFixture("N.show(),");
+  assert.throws(
+    () => applyLinuxManagedWindowSystemContextMenuPatch(missingMenuTarget),
+    /Could not find the menu-removal target/,
+  );
+
+  const ambiguous =
+    managedWindowMenuFixture(windowsAndLinuxMenuSnippet("N"), {
+      className: "FirstWindowManager",
+    }) +
+    managedWindowMenuFixture(windowsAndLinuxMenuSnippet("M"), {
+      className: "SecondWindowManager",
+      windowAlias: "M",
+    });
+  assert.throws(
+    () => applyLinuxManagedWindowSystemContextMenuPatch(ambiguous),
+    /Found 2 managed BrowserWindow candidates/,
+  );
+});
+
+test("records managed-window menu drift as optional without blocking candidates", () => {
+  const descriptor = corePatchDescriptors().find(
+    (candidate) =>
+      candidate.id === "linux-managed-window-system-context-menu",
+  );
+  assert.ok(descriptor);
+  const source = browserCommentPopupMenuSnippet(
+    canonicalLinuxMenuSnippet("e"),
+  );
+  const report = createPatchReport();
+
+  const result = applyMainBundlePatchDescriptors(
+    source,
+    [descriptor],
+    {},
+    report,
+  );
+
+  assert.equal(result.patchedSource, source);
+  assert.deepEqual(result.requiredCoreWarnings, []);
+  const entry = report.patches.find(
+    (patch) => patch.name === descriptor.id,
+  );
+  assert.equal(entry?.ciPolicy, "optional");
+  assert.equal(entry?.status, "skipped-optional");
+  assert.match(entry?.reason ?? "", /Could not identify the managed BrowserWindow/);
+  assert.deepEqual(entry?.strategies, [
+    { group: "linux-managed-window-menu", strategy: "none" },
+  ]);
+  assert.deepEqual(criticalFailuresFromReport(report), []);
+  assert.deepEqual(
+    optionalDriftFromReport(report).map(({ name, status }) => ({
+      name,
+      status,
+    })),
+    [
+      {
+        name: "linux-managed-window-system-context-menu",
+        status: "skipped-optional",
+      },
+    ],
+  );
+});
+
+test("does not let the generic popup patch mask managed-window drift", () => {
+  const descriptors = corePatchDescriptors().filter(
+    (candidate) =>
+      candidate.id === "linux-managed-window-system-context-menu" ||
+      candidate.id === "linux-menu",
+  );
+  const source = [
+    "class DriftedWindowManager{async createWindowDrift(e={}){",
+    "let{appearance:o=`primary`}=e,N=new electron.BrowserWindow({});",
+    windowsAndLinuxMenuSnippet("N"),
+    browserCommentPopupMenuSnippet(
+      "process.platform===`win32`&&e.removeMenu(),",
+    ),
+    "return N}}",
+  ].join("");
+  const report = createPatchReport();
+
+  const result = applyMainBundlePatchDescriptors(
+    source,
+    descriptors,
+    {},
+    report,
+  );
+
+  assert.deepEqual(result.requiredCoreWarnings, []);
+  assert.match(
+    result.patchedSource,
+    new RegExp(escapeRegExp(windowsAndLinuxMenuSnippet("N"))),
+  );
+  assert.match(
+    result.patchedSource,
+    new RegExp(escapeRegExp(canonicalLinuxMenuSnippet("e"))),
+  );
+  assert.equal(
+    report.patches.find(
+      (patch) =>
+        patch.name === "linux-managed-window-system-context-menu",
+    )?.status,
+    "skipped-optional",
+  );
+  assert.equal(
+    report.patches.find((patch) => patch.name === "linux-menu")?.status,
+    "applied",
+  );
+  assert.deepEqual(criticalFailuresFromReport(report), []);
+});
+
+test("reports managed-window patch strategy and idempotence", () => {
+  const descriptor = corePatchDescriptors().find(
+    (candidate) =>
+      candidate.id === "linux-managed-window-system-context-menu",
+  );
+  assert.ok(descriptor);
+  const source = managedWindowMenuFixture(
+    windowsAndLinuxMenuSnippet("N"),
+  );
+  const firstReport = createPatchReport();
+  const first = applyMainBundlePatchDescriptors(
+    source,
+    [descriptor],
+    {},
+    firstReport,
+  );
+  const firstEntry = firstReport.patches.find(
+    (patch) => patch.name === descriptor.id,
+  );
+  assert.equal(firstEntry?.status, "applied");
+  assert.deepEqual(firstEntry?.strategies, [
+    {
+      group: "linux-managed-window-menu",
+      strategy: "upstream-combined",
+    },
+  ]);
+
+  const secondReport = createPatchReport();
+  const second = applyMainBundlePatchDescriptors(
+    first.patchedSource,
+    [descriptor],
+    {},
+    secondReport,
+  );
+  assert.equal(second.patchedSource, first.patchedSource);
+  const secondEntry = secondReport.patches.find(
+    (patch) => patch.name === descriptor.id,
+  );
+  assert.equal(secondEntry?.status, "already-applied");
+  assert.deepEqual(secondEntry?.strategies, [
+    {
+      group: "linux-managed-window-menu",
+      strategy: "already-applied",
+    },
+  ]);
+});
+
+test("suppresses the managed-window system menu only on GNOME/X11", async () => {
+  const source = applyLinuxManagedWindowSystemContextMenuPatch(
+    managedWindowMenuFixture(windowsAndLinuxMenuSnippet("N")),
+  );
+
+  for (const expected of [
+    {
+      name: "GNOME X11",
+      platform: "linux",
+      env: {
+        XDG_CURRENT_DESKTOP: "GNOME",
+        XDG_SESSION_TYPE: "x11",
+      },
+      listenerCount: 1,
+      removeMenuCalls: 1,
+      preventDefaultCalls: 1,
+    },
+    {
+      name: "Ubuntu GNOME X11 with normalized session casing",
+      platform: "linux",
+      env: {
+        XDG_CURRENT_DESKTOP: "ubuntu:GNOME",
+        XDG_SESSION_TYPE: " X11 ",
+      },
+      listenerCount: 1,
+      removeMenuCalls: 1,
+      preventDefaultCalls: 1,
+    },
+    {
+      name: "GNOME Wayland",
+      platform: "linux",
+      env: {
+        XDG_CURRENT_DESKTOP: "GNOME",
+        XDG_SESSION_TYPE: "wayland",
+      },
+      listenerCount: 0,
+      removeMenuCalls: 1,
+      preventDefaultCalls: 0,
+    },
+    {
+      name: "KDE X11",
+      platform: "linux",
+      env: {
+        XDG_CURRENT_DESKTOP: "KDE",
+        XDG_SESSION_TYPE: "x11",
+      },
+      listenerCount: 0,
+      removeMenuCalls: 1,
+      preventDefaultCalls: 0,
+    },
+    {
+      name: "unknown Linux session",
+      platform: "linux",
+      env: {},
+      listenerCount: 0,
+      removeMenuCalls: 1,
+      preventDefaultCalls: 0,
+    },
+    {
+      name: "Windows with copied Linux environment",
+      platform: "win32",
+      env: {
+        XDG_CURRENT_DESKTOP: "GNOME",
+        XDG_SESSION_TYPE: "x11",
+      },
+      listenerCount: 0,
+      removeMenuCalls: 1,
+      preventDefaultCalls: 0,
+    },
+    {
+      name: "macOS",
+      platform: "darwin",
+      env: {},
+      listenerCount: 0,
+      removeMenuCalls: 0,
+      preventDefaultCalls: 0,
+    },
+  ]) {
+    class BrowserWindow extends EventEmitter {
+      constructor() {
+        super();
+        this.removeMenuCalls = 0;
+      }
+
+      removeMenu() {
+        this.removeMenuCalls += 1;
+      }
+    }
+
+    const context = vm.createContext({
+      electron: {
+        BrowserWindow,
+        screen: {
+          getPrimaryDisplay() {
+            return { workArea: {} };
+          },
+        },
+      },
+      process: {
+        env: expected.env,
+        platform: expected.platform,
+      },
+    });
+    vm.runInContext(
+      `${source};globalThis.ManagedWindowManager=WindowManager;`,
+      context,
+    );
+    const window = await new context.ManagedWindowManager().createWindow();
+    assert.equal(
+      window.listenerCount("system-context-menu"),
+      expected.listenerCount,
+      expected.name,
+    );
+    let preventDefaultCalls = 0;
+    window.emit("system-context-menu", {
+      preventDefault() {
+        preventDefaultCalls += 1;
+      },
+    });
+    assert.equal(
+      window.removeMenuCalls,
+      expected.removeMenuCalls,
+      expected.name,
+    );
+    assert.equal(
+      preventDefaultCalls,
+      expected.preventDefaultCalls,
+      expected.name,
+    );
+  }
+});
+
+test("leaves the managed combined removeMenu shape to its semantic descriptor", () => {
+  const source =
+    "(process.platform===`win32`||process.platform===`linux`)&&k.removeMenu(),";
+  const patched = applyPatchTwice(applyLinuxMenuPatch, source);
+
+  assert.equal(patched, source);
+});
+
 test("removes the Linux menu next to Windows removeMenu calls", () => {
   const source = "process.platform===`win32`&&k.removeMenu(),";
   const patched = applyPatchTwice(applyLinuxMenuPatch, source);
 
-  assert.equal(
-    patched,
-    "process.platform===`linux`&&(k.on(`system-context-menu`,e=>e.preventDefault()),k.removeMenu()),process.platform===`win32`&&k.removeMenu(),",
-  );
+  assert.equal(patched, canonicalLinuxMenuSnippet("k"));
 });
 
 test("patches remaining Windows menu snippets when another copy is already Linux-patched", () => {
   const windowsMenuSnippet = "process.platform===`win32`&&k.removeMenu(),";
   const linuxMenuPatch =
-    "process.platform===`linux`&&(k.on(`system-context-menu`,e=>e.preventDefault()),k.removeMenu()),";
+    gnomeX11SystemContextMenuListenerSnippet("k") +
+    "process.platform===`linux`&&k.removeMenu(),";
   const source = `${linuxMenuPatch}${windowsMenuSnippet}function createSecondWindow(){${windowsMenuSnippet}}`;
 
   const patched = applyPatchTwice(applyLinuxMenuPatch, source);
@@ -3367,44 +4004,35 @@ test("patches remaining Windows menu snippets when another copy is already Linux
   assert.equal((patched.match(/system-context-menu/g) ?? []).length, 2);
   assert.match(
     patched,
-    /function createSecondWindow\(\)\{process\.platform===`linux`&&\(k\.on\(`system-context-menu`,e=>e\.preventDefault\(\)\),k\.removeMenu\(\)\),process\.platform===`win32`&&k\.removeMenu\(\),\}/,
+    new RegExp(
+      escapeRegExp(
+        `function createSecondWindow(){${canonicalLinuxMenuSnippet("k")}}`,
+      ),
+    ),
   );
-});
-
-test("upgrades legacy Linux menu snippets to remove the menu", () => {
-  const source =
-    "process.platform===`linux`&&(k.setMenuBarVisibility(!1),k.removeMenu?.()),process.platform===`win32`&&k.removeMenu(),";
-
-  const patched = applyPatchTwice(applyLinuxMenuPatch, source);
-
-  assert.equal(
-    patched,
-    "process.platform===`linux`&&(k.on(`system-context-menu`,e=>e.preventDefault()),k.removeMenu()),process.platform===`win32`&&k.removeMenu(),",
-  );
-  assert.doesNotMatch(patched, /setMenuBarVisibility/);
-});
-
-test("upgrades old Linux removeMenu snippets to suppress system context menus", () => {
-  const source =
-    "process.platform===`linux`&&k.removeMenu(),process.platform===`win32`&&k.removeMenu(),";
-
-  const patched = applyPatchTwice(applyLinuxMenuPatch, source);
-
-  assert.equal(
-    patched,
-    "process.platform===`linux`&&(k.on(`system-context-menu`,e=>e.preventDefault()),k.removeMenu()),process.platform===`win32`&&k.removeMenu(),",
-  );
-  assert.equal((patched.match(/system-context-menu/g) ?? []).length, 1);
 });
 
 test("recognizes the Linux system context menu suppression snippet as already applied", () => {
-  const source =
-    "process.platform===`linux`&&(k.on(`system-context-menu`,e=>e.preventDefault()),k.removeMenu()),process.platform===`win32`&&k.removeMenu(),";
+  const source = canonicalLinuxMenuSnippet("k");
 
   const patched = applyPatchTwice(applyLinuxMenuPatch, source);
 
   assert.equal(patched, source);
   assert.equal((patched.match(/system-context-menu/g) ?? []).length, 1);
+});
+
+test("leaves unrelated non-Darwin modal menu removal untouched", () => {
+  const unrelated =
+    "process.platform!==`darwin`&&S.removeMenu(),S.show(),";
+  const source =
+    managedWindowMenuFixture(windowsAndLinuxMenuSnippet("N")) +
+    unrelated;
+
+  const patched = applyLinuxMenuPatch(
+    applyLinuxManagedWindowSystemContextMenuPatch(source),
+  );
+  assert.equal((patched.match(/system-context-menu/g) ?? []).length, 1);
+  assert.equal((patched.match(new RegExp(escapeRegExp(unrelated), "g")) ?? []).length, 1);
 });
 
 test("preserves the global application menu on Linux for accelerators", () => {
@@ -3735,30 +4363,29 @@ test("patches current webview opaque window default bundle shapes", () => {
 
 test("patches the current comment preload screenshot anchor shape", () => {
   const source = [
-    "let mt=Te;M?.kind===`comment`?mt=pt?[M.annotation]:Te:pt||P?mt=[]:ft!=null&&(mt=Te.filter(e=>e.id!==ft.id));",
-    "let ht=mt.flatMap(e=>[e]),kt=null,At=`hover-box`,jt,Mt=0,I=[];",
-    "if(P&&M?.annotation.anchor.kind===`element`){Mt=xt[0]??0;let e=bt==null?null:hs(bt),t=e?.rect??Ss(M.annotation.anchor);jt=e?.borderRadius,At=Vs(M.annotation.anchor,t,C.width,C.height),kt=Is(M.annotation.anchor,t,bt),I=bc(F,C,{clipToVisibleArea:!0})}",
+    "let Nt=Mt==null?[]:Pl(Mt),Pt=F==null?Nt:[],Ft=null,It=`hover-box`,Lt,Rt=[];",
+    "if(pt&&N?.annotation.anchor.kind===`element`){let e=Dt==null?null:as(Dt),t=e?.rect??fs(N.annotation.anchor);Lt=e?.borderRadius,It=js(N.annotation.anchor,t,w.width,w.height),Ft=Es(N.annotation.anchor,t,Dt),Rt=uc(Ot,w,{clipToVisibleArea:!0,selectionIndexOffset:1,viewportSize:N.annotation.viewportSize})}",
   ].join("");
 
   const patched = applyPatchTwice(applyBrowserAnnotationScreenshotPatch, source);
 
   assert.match(
     patched,
-    /if\(P&&M\?\.annotation\.anchor\.kind===`element`\)\{Mt=xt\[0\]\?\?0;let t=Ss\(M\.annotation\.anchor\);jt=void 0,At=Vs/,
+    /if\(pt&&N\?\.annotation\.anchor\.kind===`element`\)\{let t=fs\(N\.annotation\.anchor\);Lt=void 0,It=js/,
   );
-  assert.match(patched, /M\?\.kind===`comment`\?mt=pt\?\[M\.annotation\]:Te/);
-  assert.doesNotMatch(patched, /e\?\.rect\?\?Ss/);
+  assert.match(patched, /selectionIndexOffset:1/);
+  assert.doesNotMatch(patched, /e\?\.rect\?\?fs/);
 });
 
 test("keeps the current stored annotation anchor shape unchanged", () => {
   const source =
-    "if(P&&M?.annotation.anchor.kind===`element`){Mt=xt[0]??0;let t=Ss(M.annotation.anchor);jt=void 0,At=Vs(M.annotation.anchor,t,C.width,C.height)}";
+    "if(pt&&N?.annotation.anchor.kind===`element`){let t=fs(N.annotation.anchor);Lt=void 0,It=js(N.annotation.anchor,t,w.width,w.height)}";
 
   assert.equal(applyPatchTwice(applyBrowserAnnotationScreenshotPatch, source), source);
 });
 
 test("reports current comment preload screenshot anchor drift", () => {
-  const source = "if(P&&M?.annotation.anchor.kind===`element`){renderDriftedAnchor()}";
+  const source = "if(pt&&N?.annotation.anchor.kind===`element`){renderDriftedAnchor()}";
   const { value, warnings } = captureWarns(() =>
     applyBrowserAnnotationScreenshotPatch(source),
   );
@@ -4754,7 +5381,7 @@ test("adds Linux build information to the tray menu", () => {
 
 test("adds Linux build information request handlers for renderer settings", () => {
   const source =
-    "let n=require(`electron`),o=require(`node:fs`),i=require(`node:path`),e={bn:{help:`help`}};const h={\"get-global-state\":async({key:a})=>({value:this.globalState.get(a)}),\"set-global-state\":async({key:a,value:b,origin:c})=>(this.setGlobalStateValue(a,b,c),{success:!0})};let $e=[{role:`help`,id:e.bn.help,submenu:[{label:`Codex Documentation`,click:()=>{n.shell.openExternal(`https://developers.openai.com/codex/app`)}}]}],et=n.Menu.buildFromTemplate($e);n.Menu.setApplicationMenu(et);";
+    "let n=require(`electron`),o=require(`node:fs`),i=require(`node:path`),e={help:`help`};const h={\"get-global-state\":async({key:a})=>({value:this.getGlobalStateValue(a)}),\"set-global-state\":async({key:a,value:b})=>(this.setGlobalStateValue(a,b),{success:!0})};let $e=[{label:y.formatMessage({messageId:`windowsMenuBar.help`,defaultMessage:`Help`}),role:`help`,id:e.help,submenu:[{label:y.formatMessage({messageId:`loadingPage.documentationLink`,defaultMessage:`Documentation`}),click:()=>{n.shell.openExternal(`https://developers.openai.com/codex/app`)}}]}],et=n.Menu.buildFromTemplate($e);n.Menu.setApplicationMenu(et);";
   const patched = applyPatchTwice(applyLinuxBuildInfoTrayPatch, source);
 
   assert.match(patched, /function codexLinuxGetBuildInfo\(\)/);
@@ -4771,7 +5398,7 @@ test("adds Linux build information request handlers for renderer settings", () =
 
 test("Linux build information helper locals do not shadow minified module bindings", () => {
   const source =
-    "let a=require(`electron`),l=require(`node:fs`),s=require(`node:path`),e={bn:{help:`help`}};const h={\"get-global-state\":async({key:a})=>({value:this.globalState.get(a)}),\"set-global-state\":async({key:a,value:b,origin:c})=>(this.setGlobalStateValue(a,b,c),{success:!0})};let $e=[{role:`help`,id:e.bn.help,submenu:[{label:`Codex Documentation`,click:()=>{a.shell.openExternal(`https://developers.openai.com/codex/app`)}}]}],et=a.Menu.buildFromTemplate($e);a.Menu.setApplicationMenu(et);";
+    "let a=require(`electron`),l=require(`node:fs`),s=require(`node:path`),e={help:`help`};const h={\"get-global-state\":async({key:a})=>({value:this.getGlobalStateValue(a)}),\"set-global-state\":async({key:a,value:b})=>(this.setGlobalStateValue(a,b),{success:!0})};let $e=[{label:y.formatMessage({messageId:`windowsMenuBar.help`,defaultMessage:`Help`}),role:`help`,id:e.help,submenu:[{label:y.formatMessage({messageId:`loadingPage.documentationLink`,defaultMessage:`Documentation`}),click:()=>{a.shell.openExternal(`https://developers.openai.com/codex/app`)}}]}],et=a.Menu.buildFromTemplate($e);a.Menu.setApplicationMenu(et);";
   const patched = applyPatchTwice(applyLinuxBuildInfoTrayPatch, source);
 
   assert.match(patched, /await a\.dialog\?\.showMessageBox/);
@@ -4783,7 +5410,7 @@ test("Linux build information helper locals do not shadow minified module bindin
 
 test("Linux build information request handlers are inserted into the handler table", () => {
   const source =
-    "let a=require(`electron`),l=require(`node:fs`),s=require(`node:path`),e={bn:{help:`help`}};const h={\"is-copilot-api-available\":async()=>({available:!1}),\"get-global-state\":async({key:e})=>({value:this.globalState.get(e)}),\"set-global-state\":async({key:e,value:t,origin:n})=>(this.setGlobalStateValue(e,t,n),{success:!0})};let $e=[{role:`help`,id:e.bn.help,submenu:[{label:`Codex Documentation`,click:()=>{a.shell.openExternal(`https://developers.openai.com/codex/app`)}}]}],et=a.Menu.buildFromTemplate($e);a.Menu.setApplicationMenu(et);";
+    "let a=require(`electron`),l=require(`node:fs`),s=require(`node:path`),e={help:`help`};const h={\"is-copilot-api-available\":async()=>({available:!1}),\"get-global-state\":async({key:e})=>({value:this.getGlobalStateValue(e)}),\"set-global-state\":async({key:e,value:t})=>(this.setGlobalStateValue(e,t),{success:!0})};let $e=[{label:y.formatMessage({messageId:`windowsMenuBar.help`,defaultMessage:`Help`}),role:`help`,id:e.help,submenu:[{label:y.formatMessage({messageId:`loadingPage.documentationLink`,defaultMessage:`Documentation`}),click:()=>{a.shell.openExternal(`https://developers.openai.com/codex/app`)}}]}],et=a.Menu.buildFromTemplate($e);a.Menu.setApplicationMenu(et);";
   const patched = applyPatchTwice(applyLinuxBuildInfoTrayPatch, source);
 
   assert.match(
@@ -4805,14 +5432,14 @@ test("adds Linux build information to current tray menu shape", () => {
 
 test("adds Linux build information to the app Help menu", () => {
   const source =
-    "let n=require(`electron`),o=require(`node:fs`),i=require(`node:path`),e={bn:{help:`help`}};let $e=[{role:`help`,id:e.bn.help,submenu:[{label:`Codex Documentation`,click:()=>{n.shell.openExternal(`https://developers.openai.com/codex/app`)}}]}],et=n.Menu.buildFromTemplate($e);n.Menu.setApplicationMenu(et);";
+    "let n=require(`electron`),o=require(`node:fs`),i=require(`node:path`),e={help:`help`};let $e=[{label:y.formatMessage({messageId:`windowsMenuBar.help`,defaultMessage:`Help`}),role:`help`,id:e.help,submenu:[{label:y.formatMessage({messageId:`loadingPage.documentationLink`,defaultMessage:`Documentation`}),click:()=>{n.shell.openExternal(`https://developers.openai.com/codex/app`)}}]}],et=n.Menu.buildFromTemplate($e);n.Menu.setApplicationMenu(et);";
   const patched = applyPatchTwice(applyLinuxBuildInfoTrayPatch, source);
 
   assert.match(patched, /function codexLinuxShowBuildInfo\(\)/);
   assert.doesNotThrow(() => new Function(patched));
   assert.match(
     patched,
-    /\{role:`help`,id:e\.bn\.help,submenu:\[\.\.\.process\.platform===`linux`\?\[\{label:`Build Information`,click:\(\)=>\{codexLinuxShowBuildInfo\(\)\}\},\{type:`separator`\}\]:\[\],\{label:`Codex Documentation`/,
+    /role:`help`,id:e\.help,submenu:\[\.\.\.process\.platform===`linux`\?\[\{label:`Build Information`,click:\(\)=>\{codexLinuxShowBuildInfo\(\)\}\},\{type:`separator`\}\]:\[\],\{label:y\.formatMessage/,
   );
 });
 
@@ -5178,9 +5805,8 @@ test("persists Linux settings with current setGlobalStateValue handler shape", (
     const settingsFile = path.join(tempRoot, "config", "codex-desktop", "settings.json");
     const patched = applyPatchTwice(applyLinuxSettingsPersistencePatch, currentSettingsPersistenceBundleFixture());
 
-    assert.match(patched, /var s=`\.codex-global-state\.json`;function codexLinuxSettingsAppId/);
-    assert.match(patched, /var c=`config\.toml`/);
-    assert.match(patched, /this\.setGlobalStateValue\(a,b,c\),codexLinuxPersistSettingsState\(a,b\)/);
+    assert.match(patched, /^function codexLinuxSettingsAppId/);
+    assert.match(patched, /this\.setGlobalStateValue\(a,b\),codexLinuxPersistSettingsState\(a,b\)/);
     runSettingsPersistence(
       patched,
       {
@@ -5208,43 +5834,32 @@ test("persists Linux settings with current setGlobalStateValue handler shape", (
   }
 });
 
-test("migrates already-patched Linux settings persistence away from codex-desktop", () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "codex-settings-migrate-"));
+test("persists Linux settings with exact current DMG module alias ordering across idempotent patch passes", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "codex-settings-exact-dmg-"));
   try {
-    const xdgConfig = path.join(tempRoot, "xdg-config");
-    const patched = applyPatchTwice(applyLinuxSettingsPersistencePatch, legacySettingsPersistenceBundleFixture());
+    const settingsFile = path.join(tempRoot, "config", "codex-desktop", "settings.json");
+    const source = exactDmgSettingsPersistenceBundleFixture();
+    const patchedOnce = applyLinuxSettingsPersistencePatch(source);
+    const patchedTwice = applyLinuxSettingsPersistencePatch(patchedOnce);
 
-    assert.match(patched, /process\.env\.CODEX_LINUX_SETTINGS_FILE/);
-    assert.doesNotMatch(patched, /join\(e,`codex-desktop`,`settings\.json`\)/);
+    assert.equal(patchedTwice, patchedOnce);
     runSettingsPersistence(
-      patched,
-      {
-        CODEX_LINUX_APP_ID: "codex-cua-lab",
-        XDG_CONFIG_HOME: xdgConfig,
-      },
-      "codex-linux-prompt-window-enabled",
-      false,
-    );
-
-    assert.equal(
-      JSON.parse(fs.readFileSync(path.join(xdgConfig, "codex-cua-lab", "settings.json"), "utf8"))["codex-linux-prompt-window-enabled"],
+      patchedTwice,
+      { CODEX_LINUX_SETTINGS_FILE: settingsFile },
+      "codex-linux-system-tray-enabled",
       false,
     );
     runSettingsPersistence(
-      patched,
-      {
-        CODEX_LINUX_APP_ID: "codex-cua-lab",
-        XDG_CONFIG_HOME: xdgConfig,
-      },
-      "codex-linux-read-aloud-enabled",
+      patchedTwice,
+      { CODEX_LINUX_SETTINGS_FILE: settingsFile },
+      "codex-linux-warm-start-enabled",
       true,
     );
 
-    assert.equal(
-      JSON.parse(fs.readFileSync(path.join(xdgConfig, "codex-cua-lab", "settings.json"), "utf8"))["codex-linux-read-aloud-enabled"],
-      true,
-    );
-    assert.equal(fs.existsSync(path.join(xdgConfig, "codex-desktop", "settings.json")), false);
+    assert.deepEqual(JSON.parse(fs.readFileSync(settingsFile, "utf8")), {
+      "codex-linux-system-tray-enabled": false,
+      "codex-linux-warm-start-enabled": true,
+    });
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
   }
@@ -5257,10 +5872,9 @@ test("adds Linux settings persistence after current global-state handler drift",
   );
 
   assert.match(patched, /function codexLinuxSettingsAppId\(\)/);
-  assert.match(patched, /var c=`config\.toml`;/);
   assert.match(
     patched,
-    /"set-global-state":async\(\{key:a,value:b,origin:c\}\)=>\(this\.setGlobalStateValue\(a,b,c\),codexLinuxPersistSettingsState\(a,b\),\{success:!0\}\)/,
+    /"set-global-state":async\(\{key:a,value:b\}\)=>\(this\.setGlobalStateValue\(a,b\),codexLinuxPersistSettingsState\(a,b\),\{success:!0\}\)/,
   );
 });
 
@@ -5268,7 +5882,7 @@ test("adds Linux settings persistence when upstream removed the state-file marke
   const source = [
     "\"use strict\";",
     "let i=require(`node:path`),o=require(`node:fs`);",
-    "const h={\"set-global-state\":async({key:a,value:b,origin:c})=>(this.setGlobalStateValue(a,b,c),{success:!0})};",
+    "const h={\"set-global-state\":async({key:a,value:b})=>(this.setGlobalStateValue(a,b),{success:!0})};",
   ].join("");
 
   const patched = applyPatchTwice(applyLinuxSettingsPersistencePatch, source);
@@ -5276,7 +5890,7 @@ test("adds Linux settings persistence when upstream removed the state-file marke
   assert.match(patched, /^"use strict";function codexLinuxSettingsAppId\(\)/);
   assert.match(
     patched,
-    /"set-global-state":async\(\{key:a,value:b,origin:c\}\)=>\(this\.setGlobalStateValue\(a,b,c\),codexLinuxPersistSettingsState\(a,b\),\{success:!0\}\)/,
+    /"set-global-state":async\(\{key:a,value:b\}\)=>\(this\.setGlobalStateValue\(a,b\),codexLinuxPersistSettingsState\(a,b\),\{success:!0\}\)/,
   );
 });
 
@@ -6806,7 +7420,7 @@ test("recognizes current settings language row i18n gate as already patched", ()
 
 test("keeps automation_update eager in dynamic tools built during thread start", () => {
   const source =
-    "async function pUt(){return[{type:`namespace`,name:cX,description:`Tools provided by the Codex app.`,tools:[...h?[_ee()]:[],...[],...i?.open_in_codex===!0?[TBt]:[],...h&&d?[SBt]:[],lu,...h&&y?[Ra]:[],...[],...g?AHt({availableHandoffHosts:e,availableModels:b,crossHostHandoffEnabled:n,forkThreadEnabled:!0}):[],...h&&_?[PBt,FBt]:[],...m===`conversational_onboarding`?[yoe]:[],...v&&m!==`conversational_onboarding`?[...vee,bu]:[]].map(e=>({type:`function`,...e,..._Ut.has(e.name)?{}:{deferLoading:!0}}))}]}async sendRequest(e,t,n){if(e===`config/read`)return this.sendConfigReadRequest(t,n);let{request:r,promise:i}=this.createRequest(e,t,n);return i}";
+    "var PZn=`automation_update`,LZn={name:PZn},RZn={name:PZn};function nZn(){return zZn?LZn:RZn}async function Rtl(){let x=!0,A=[nZn(),gmn].map(e=>({type:`function`,...e,...x&&!Htl.has(e.name)?{deferLoading:!0}:{}}));return x?[{type:`namespace`,name:R2,description:`Tools provided by the Codex app.`,tools:A}]:A}";
 
   const patched = applyPatchTwice(applyAutomationUpdateEagerToolPatch, source);
 
@@ -7148,6 +7762,108 @@ test("adds Linux package updater to current bootstrap updater wiring", () => {
   assert.match(patched, /e\.stdout\?\.includes\(`Manual install required:`\)\?await codexLinuxShowUpdateMessage/);
   assert.match(patched, /refresh:async\(\)=>\{if\(await c\)\{try\{await codexLinuxRefreshUpdateState\(\)\}/);
   assert.doesNotMatch(patched, /codexLinuxRunUpdateManager\(\[`status`,`--json`\]\)/);
+});
+
+test("implements the current Sparkle AppView, menu, and RPC contract on Linux", () => {
+  const patched = applyLinuxAppUpdaterBridgePatch(currentBootstrapUpdaterBundleFixture());
+
+  assert.match(patched, /getDownloadProgressPercent:\(\)=>null/);
+  assert.match(patched, /getDownloadedUpdateAppBrand:\(\)=>null/);
+  assert.match(patched, /getInstallProgressPercent:\(\)=>r/);
+  assert.match(patched, /getIsUpdateReady:\(\)=>s&&t/);
+  assert.match(patched, /getUpdateLifecycleState:\(\)=>s\?n:`idle`/);
+  assert.match(patched, /getRelaunchNotice:\(\)=>null/);
+  assert.match(patched, /hasUpdater:\(\)=>s/);
+  assert.match(
+    patched,
+    /getUnavailableReason:\(\)=>s\?null:`Linux package update manager unavailable`/,
+  );
+  assert.match(patched, /setSparkleQueryParams:\(\)=>\{\}/);
+});
+
+test("keeps the current Sparkle menu contract callable across Linux updater probe outcomes", async () => {
+  const patched = applyLinuxAppUpdaterBridgePatch(currentBootstrapUpdaterBundleFixture());
+  const bridgeEnd = patched.indexOf(";var g6=");
+  assert.notEqual(bridgeEnd, -1);
+
+  const requiredMenuMethods = [
+    ...new Set(
+      [...currentSparkleUpdateMenuContractFixture().matchAll(/u\.([A-Za-z_$][\w$]*)\(/g)]
+        .map((match) => match[1]),
+    ),
+  ];
+  assert.deepEqual(requiredMenuMethods, [
+    "hasUpdater",
+    "getUnavailableReason",
+    "checkForUpdates",
+  ]);
+
+  const createManager = (probeError = null) => {
+    const calls = [];
+    const context = {
+      process: { env: {} },
+      require(moduleName) {
+        if (moduleName === "electron") {
+          return {};
+        }
+        if (moduleName === "node:path") {
+          return path;
+        }
+        if (moduleName === "node:fs") {
+          return { existsSync: () => false };
+        }
+        if (moduleName === "node:child_process") {
+          return {
+            execFile(command, args, _options, callback) {
+              calls.push([command, ...args]);
+              if (args[0] === "--help" && probeError != null) {
+                callback(probeError, "", "probe failed");
+                return;
+              }
+              callback(null, "", "");
+            },
+          };
+        }
+        throw new Error(`Unexpected module request: ${moduleName}`);
+      },
+      setTimeout,
+    };
+    vm.runInNewContext(
+      `${patched.slice(0, bridgeEnd)};globalThis.createManager=codexLinuxCreatePackageUpdateManager`,
+      context,
+    );
+    return { calls, manager: context.createManager({ send() {} }).manager };
+  };
+
+  const available = createManager();
+  for (const methodName of requiredMenuMethods) {
+    assert.equal(typeof available.manager[methodName], "function");
+  }
+  assert.equal(available.manager.hasUpdater(), false);
+  assert.equal(
+    available.manager.getUnavailableReason(),
+    "Linux package update manager unavailable",
+  );
+
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(available.manager.hasUpdater(), true);
+  assert.equal(available.manager.getUnavailableReason(), null);
+  await available.manager.checkForUpdates();
+  assert.deepEqual(available.calls, [
+    ["codex-update-manager", "--help"],
+    ["codex-update-manager", "check-now"],
+  ]);
+
+  const unavailable = createManager(new Error("probe failed"));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(unavailable.manager.hasUpdater(), false);
+  assert.equal(
+    unavailable.manager.getUnavailableReason(),
+    "Linux package update manager unavailable",
+  );
+  await unavailable.manager.checkForUpdates();
+  assert.deepEqual(unavailable.calls, [["codex-update-manager", "--help"]]);
 });
 
 test("fails soft when the current updater callback bridge drifts", () => {
@@ -7638,105 +8354,16 @@ test("fails closed when bundled plugin reconcile insertion order drifts", () => 
   assert.match(warnings[0], /insertion order drifted/);
 });
 
-test("uses Linux managed runtime paths for Chrome native host sync", () => {
-  const patched = applyPatchTwice(
-    applyLinuxChromeNativeHostRuntimePatch,
-    chromeNativeHostRuntimeBundleFixture(),
-  );
-  const files = new Set([
-    "/opt/codex/resources/node-runtime/bin/node",
-    "/opt/codex/resources/node_repl",
-    "/home/josh/.local/bin/codex",
-  ]);
-
-  const result = vm.runInNewContext(
-    `${patched};Qp({resourcesPath:"/opt/codex/resources",devRuntimeRepoRoot:null,nativeHostName:"com.openai.codexextension"});`,
-    {
-      require(moduleName) {
-        if (moduleName === "node:path") {
-          return path;
-        }
-        if (moduleName === "node:fs") {
-          return {
-            statSync(filePath) {
-              if (!files.has(filePath)) {
-                throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
-              }
-              return { isFile: () => true };
-            },
-          };
-        }
-        return require(moduleName);
-      },
-      process: {
-        platform: "linux",
-        env: {
-          CODEX_CLI_PATH: "/home/josh/.local/bin/codex",
-        },
-      },
-    },
-  );
-
-  assert.deepEqual(JSON.parse(JSON.stringify(result)), {
-    codexCliPath: "/home/josh/.local/bin/codex",
-    nodePath: "/opt/codex/resources/node-runtime/bin/node",
-    nodeReplPath: "/opt/codex/resources/node_repl",
-  });
-});
-
-test("uses Linux managed runtime paths for current Chrome native host sync shape", () => {
-  const patched = applyPatchTwice(
-    applyLinuxChromeNativeHostRuntimePatch,
-    currentChromeNativeHostRuntimeBundleFixture(),
-  );
-  const files = new Set([
-    "/opt/codex/resources/node-runtime/bin/node",
-    "/opt/codex/resources/node_repl",
-    "/home/josh/.local/bin/codex",
-  ]);
-
-  const result = vm.runInNewContext(
-    `${patched};QL({resourcesPath:"/opt/codex/resources",devRuntimeRepoRoot:null,nativeHostName:"com.openai.codexextension"});`,
-    {
-      require(moduleName) {
-        if (moduleName === "node:path") {
-          return path;
-        }
-        if (moduleName === "node:fs") {
-          return {
-            statSync(filePath) {
-              if (!files.has(filePath)) {
-                throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
-              }
-              return { isFile: () => true };
-            },
-          };
-        }
-        return require(moduleName);
-      },
-      process: {
-        platform: "linux",
-        env: {
-          CODEX_CLI_PATH: "/home/josh/.local/bin/codex",
-        },
-      },
-    },
-  );
-
-  assert.deepEqual(JSON.parse(JSON.stringify(result)), {
-    codexCliPath: "/home/josh/.local/bin/codex",
-    nodeModuleDirs: [],
-    nodePath: "/opt/codex/resources/node-runtime/bin/node",
-    nodeReplPath: "/opt/codex/resources/node_repl",
-  });
-});
-
 test("uses Linux managed runtime paths for Electron 42 Browser Use runtime resolver", () => {
-  const patched = applyPatchTwice(
-    applyLinuxChromeNativeHostRuntimePatch,
+  const first = applyLinuxChromeNativeHostRuntimePatch(
     electron42BrowserUseRuntimeResolverBundleFixture(),
   );
+  const { value: patched, warnings } = captureWarns(() =>
+    applyLinuxChromeNativeHostRuntimePatch(first),
+  );
 
+  assert.equal(patched, first);
+  assert.deepEqual(warnings, []);
   assert.match(
     patched,
     /codexLinuxChromeNativeHostRuntimeEntry\(codexLinuxChromeNativeHostRuntimePath\(`codex`\),`linux-path`\)\?\?Wn/,
@@ -7749,29 +8376,14 @@ test("uses Linux managed runtime paths for Electron 42 Browser Use runtime resol
     patched,
     /codexLinuxChromeNativeHostRuntimeFile\(u,\[\[r===`win32`\?`node_repl\.exe`:`node_repl`\]\]\)/,
   );
-});
 
-test("uses Linux managed runtime paths for current Chrome plugin app-server sync", () => {
-  const patched = applyPatchTwice(
-    applyLinuxChromeNativeHostRuntimePatch,
-    currentChromePluginAppServerRuntimeBundleFixture(),
-  );
-
-  assert.match(patched, /ZB\(e\)\?\?codexLinuxChromeNativeHostRuntimeEnv\(`CODEX_CLI_PATH`\)\?\?codexLinuxChromeNativeHostRuntimePath\(`codex`\)/);
-  assert.match(patched, /NM\(e\.resourcesPath\)\?\?codexLinuxChromeNativeHostRuntimeEnv\(`CODEX_BROWSER_USE_NODE_PATH`\)/);
-  assert.match(patched, /codexLinuxChromeNativeHostRuntimeFile\(e\.resourcesPath,\[\[`node-runtime`,`bin`,process\.platform===`win32`\?`node\.exe`:`node`\]\]\)/);
-  assert.match(patched, /MM\(e\.resourcesPath\)\?\?codexLinuxChromeNativeHostRuntimeEnv\(`CODEX_NODE_REPL_PATH`\)/);
-});
-
-test("uses Linux Codex CLI path for Chrome plugin app-server sync", async () => {
-  const patched = applyPatchTwice(
-    applyLinuxChromeNativeHostRuntimePatch,
-    currentChromePluginCodexAppServerRuntimeBundleFixture(),
-  );
-  const files = new Set(["/home/josh/.local/bin/codex"]);
-
-  const result = await vm.runInNewContext(
-    `${patched};VH({resourcesPath:"/opt/codex/resources",devRuntimeRepoRoot:null,nativeHostName:"com.openai.codexextension"});`,
+  const files = new Set([
+    "/opt/codex/resources/node-runtime/bin/node",
+    "/opt/codex/resources/node_repl",
+    "/home/josh/.local/bin/codex",
+  ]);
+  const result = vm.runInNewContext(
+    `${patched};Hn({env:{CODEX_CLI_PATH:"/home/josh/.local/bin/codex",PATH:""},isPackaged:true,platform:"linux",repoRoot:null,resolveCodexPath:()=>null,resolveNodePath:()=>null,resolveNodeReplPath:()=>null,resolvePrimaryRuntimeNodePath:()=>null,resourcesPath:"/opt/codex/resources"});`,
     {
       require(moduleName) {
         if (moduleName === "node:path") {
@@ -7790,147 +8402,25 @@ test("uses Linux Codex CLI path for Chrome plugin app-server sync", async () => 
         return require(moduleName);
       },
       process: {
+        cwd: () => "/tmp",
+        env: {},
         platform: "linux",
-        env: {
-          CODEX_CLI_PATH: "/home/josh/.local/bin/codex",
-          PATH: "",
-        },
+        resourcesPath: "/opt/codex/resources",
       },
+      t: { Vn: () => [] },
     },
   );
 
   assert.deepEqual(JSON.parse(JSON.stringify(result)), {
     codexCliPath: "/home/josh/.local/bin/codex",
+    codexCliPathSource: "env-override",
+    nodeModuleDirs: [],
+    nodePath: "/opt/codex/resources/node-runtime/bin/node",
+    nodePathSource: "linux-node-runtime",
+    nodeReplPath: "/opt/codex/resources/node_repl",
+    nodeReplPathSource: "linux-node-repl-runtime",
+    platform: "linux",
   });
-});
-
-test("keeps the original Linux CLI path when Chrome plugin app-server sync would isolate it", async () => {
-  const patched = applyPatchTwice(
-    applyLinuxChromeNativeHostRuntimePatch,
-    currentChromePluginIsolatedAppServerRuntimeBundleFixture(),
-  );
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "codex-chrome-esm-cli-"));
-  try {
-    const packageDir = path.join(root, "CLI installs");
-    const cliPath = path.join(packageDir, "codex");
-    const isolatedPath = path.join(root, "isolated", "codex");
-    fs.mkdirSync(path.dirname(isolatedPath), { recursive: true });
-    fs.mkdirSync(packageDir, { recursive: true });
-    fs.writeFileSync(path.join(packageDir, "package.json"), '{"type":"module"}\n');
-    fs.writeFileSync(path.join(packageDir, "dependency.js"), 'export const version = "esm-ok";\n');
-    fs.writeFileSync(
-      cliPath,
-      '#!/usr/bin/env node\nimport { version } from "./dependency.js";\nconsole.log(version);\n',
-    );
-    fs.chmodSync(cliPath, 0o700);
-
-    const result = await vm.runInNewContext(
-      `${patched};VH({resourcesPath:"/opt/codex/resources",devRuntimeRepoRoot:null,nativeHostName:"com.openai.codexextension"});`,
-      {
-        require,
-        process: {
-          platform: "linux",
-          env: {
-            CODEX_CLI_PATH: cliPath,
-            ISSUE805_ISOLATED_CLI: isolatedPath,
-            PATH: "",
-          },
-        },
-      },
-    );
-
-    assert.equal(result, cliPath);
-    assert.equal(fs.existsSync(isolatedPath), false);
-    assert.match(patched, /async function decoy\(e\)\{let t=e\.nativeHostName===nU;return `decoy`\}/);
-    const execution = spawnSync(result, [], { encoding: "utf8" });
-    assert.equal(execution.status, 0, execution.stderr);
-    assert.equal(execution.stdout.trim(), "esm-ok");
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("preserves Chrome plugin app-server isolation outside Linux", async () => {
-  const patched = applyPatchTwice(
-    applyLinuxChromeNativeHostRuntimePatch,
-    currentChromePluginIsolatedAppServerRuntimeBundleFixture(),
-  );
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "codex-chrome-non-linux-cli-"));
-  try {
-    const sourcePath = path.join(root, "source-codex");
-    const isolatedPath = path.join(root, "isolated-codex");
-    fs.writeFileSync(sourcePath, "source");
-
-    const result = await vm.runInNewContext(
-      `${patched};AV({codexCliPath:${JSON.stringify(sourcePath)},nativeHostName:"com.openai.codexextension"});`,
-      {
-        require,
-        process: {
-          platform: "darwin",
-          env: { ISSUE805_ISOLATED_CLI: isolatedPath },
-        },
-      },
-    );
-
-    assert.equal(result, isolatedPath);
-    assert.equal(fs.readFileSync(isolatedPath, "utf8"), "source");
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("patches multiple Chrome runtime resolvers in one Electron 42 bundle", () => {
-  const patched = applyPatchTwice(
-    applyLinuxChromeNativeHostRuntimePatch,
-    [
-      electron42BrowserUseRuntimeResolverBundleFixture(),
-      currentChromePluginCodexAppServerRuntimeBundleFixture(),
-      currentChromePluginAppServerRuntimeBundleFixture(),
-    ].join(""),
-  );
-
-  assert.match(
-    patched,
-    /codexLinuxChromeNativeHostRuntimeEntry\(codexLinuxChromeNativeHostRuntimePath\(`codex`\),`linux-path`\)\?\?Wn/,
-  );
-  assert.match(patched, /_U\(e\)\?\?codexLinuxChromeNativeHostRuntimeEnv\(`CODEX_CLI_PATH`\)\?\?codexLinuxChromeNativeHostRuntimePath\(`codex`\)/);
-  assert.match(patched, /ZB\(e\)\?\?codexLinuxChromeNativeHostRuntimeEnv\(`CODEX_CLI_PATH`\)\?\?codexLinuxChromeNativeHostRuntimePath\(`codex`\)/);
-  assert.match(patched, /NM\(e\.resourcesPath\)\?\?codexLinuxChromeNativeHostRuntimeEnv\(`CODEX_BROWSER_USE_NODE_PATH`\)/);
-  assert.equal((patched.match(/function codexLinuxChromeNativeHostRuntimeFile/g) || []).length, 1);
-});
-
-test("reports drifted Chrome native host runtime resolver as optional drift", () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "codex-patch-report-chrome-runtime-drift-"));
-  try {
-    const buildDir = path.join(tempRoot, ".vite", "build");
-    fs.mkdirSync(buildDir, { recursive: true });
-    fs.writeFileSync(
-      path.join(buildDir, "main.js"),
-      [
-        "let r=require(`node:path`),o=require(`node:fs`);",
-        "function Qp(e){throw Error(`Missing bundled Electron runtime required to sync Chrome native host resources for ${e.nativeHostName}.`)}",
-      ].join(""),
-    );
-
-    const report = createPatchReport();
-    captureWarns(() => patchExtractedApp(tempRoot, { report }));
-
-    const runtimePatch = report.patches.find((patch) => patch.name === "linux-chrome-native-host-runtime");
-    assert.equal(runtimePatch.status, "skipped-optional");
-    assert.match(runtimePatch.reason, /Could not identify Chrome native host runtime resolver shape/);
-    assert.ok(
-      !validateReport(report, "upstream-build").some((failure) =>
-        failure.startsWith("linux-chrome-native-host-runtime:"),
-      ),
-      "browser integration drift must not fail the build",
-    );
-    assert.ok(
-      optionalDriftFromReport(report).some((drift) => drift.name === "linux-chrome-native-host-runtime"),
-      "the drift must still be surfaced in the optional-drift summary",
-    );
-  } finally {
-    fs.rmSync(tempRoot, { recursive: true, force: true });
-  }
 });
 
 test("adds Linux availability to an already auto-installed Chrome plugin gate", () => {
@@ -8743,11 +9233,11 @@ test("does not poison shared Browser recovery when a stale host timer fires", ()
 });
 
 const browserUseRecoveryStoreSource =
-  "function Af(e,t){return t??e}function Ef(e,t){return`${e}\\0${t}`}var Pf=class{webviews=new Map;snapshots=new Map;tabPersistenceStates=new Map;browserUseActiveTabKeys=new Set;browserUseViewportSizes=new Map;transferredWebviewKeys=new Set;registrationAttempts=new WeakMap;nextHostGeneration=0;getSnapshot(e,t){return this.snapshots.get(Ef(e,t))??null}setBrowserUseActive(e,...t){let n=typeof t[0]==`boolean`?Af(e,void 0):t[0],r=typeof t[0]==`boolean`?t[0]:t[1],i=Ef(e,n),a=this.browserUseActiveTabKeys.has(i);if(r){let t=`${e}\\0`;for(let e of Array.from(this.browserUseActiveTabKeys)){if(e===i||!e.startsWith(t))continue;this.browserUseActiveTabKeys.delete(e);let n=null}this.browserUseActiveTabKeys.add(i)}else this.browserUseActiveTabKeys.delete(i);return a}releaseBrowserUseTab(e,t){let n=Ef(e,t),r=this.browserUseActiveTabKeys.delete(n);return r}removeTab(e,t){let n=Ef(e,t),r=this.webviews.get(n);this.webviews.delete(n)}registerWebviewHost(e,t){return true}removeConversationTabs(e){let t=`${e}\\0`;for(let e of this.snapshots.keys())e.startsWith(t)&&this.snapshots.delete(e)}reassociateTabState(e,...t){let n=t[0],r=t[1],i=t[2],o=`transfer`,s=Ef(e,n),c=Ef(r,i);if(s===c||this.transferredWebviewKeys.has(o))return;if(this.webviews.has(c))return;let m=this.browserUseViewportSizes.get(s)??null,h=this.browserUseActiveTabKeys.delete(s);h&&this.browserUseActiveTabKeys.add(c);return m}disposeAll(){this.electronPageHandoff.disposeAll(),this.webviews.clear()}disposeWebviewHost(e,t,n,r){this.webviews.delete(n)}emitChange(){for(let e of this.listeners)e()}}";
+  "function Ef(e,t){return`${e}\\0${t}`}var Pf=class{webviews=new Map;snapshots=new Map;tabPersistenceStates=new Map;browserUseActiveTabKeys=new Set;browserUseTabKeys=new Set;browserUseCursorStates=new Map;browserUseCaptureSurfaceSizes=new Map;browserUseViewportSizes=new Map;deviceToolbarTabStates=new Map;transferredWebviewKeys=new Set;registrationAttempts=new WeakMap;nextHostGeneration=0;getSnapshot(e,t){return this.snapshots.get(Ef(e,t))??null}setBrowserUseActive(e,t,n){let r=Ef(e,t),i=this.browserUseActiveTabKeys.has(r),a=this.browserUseTabKeys.has(r),o=this.browserUseCursorStates.get(r)??null;n?(this.browserUseTabKeys.add(r),this.browserUseActiveTabKeys.add(r)):(this.browserUseActiveTabKeys.delete(r),o!=null&&this.browserUseCursorStates.set(r,{visible:!1,x:o.x,y:o.y}));return i!==n||a}releaseBrowserUseTab(e,t){let n=Ef(e,t),r=this.browserUseActiveTabKeys.delete(n),i=this.browserUseTabKeys.delete(n);return r||i}removeTab(e,t){let n=Ef(e,t),r=this.webviews.get(n);this.webviews.delete(n)}registerWebviewHost(e,t){return true}removeConversationTabs(e){let t=`${e}\\0`;for(let e of this.snapshots.keys())e.startsWith(t)&&this.snapshots.delete(e)}reassociateTabState(e,t,n,r,i){let a=`transfer`,o=Ef(e,t),s=Ef(n,r);if(o===s||this.transferredWebviewKeys.has(a))return;let c=this.webviews.get(o)??null,l=this.webviews.get(s)??null,u=this.tabPersistenceStates.get(o)??null,d=this.tabPersistenceStates.get(s)??null,f=this.snapshots.get(o)??null;if(l!=null)return;let p=this.browserUseViewportSizes.get(o)??null,m=this.browserUseTabKeys.has(o),h=this.browserUseActiveTabKeys.delete(o);h&&this.browserUseActiveTabKeys.add(s);return p}disposeAll(){this.electronPageHandoff.disposeAll(),this.webviews.clear()}disposeWebviewHost(e,t,n,r){this.webviews.delete(n)}emitChange(){for(let e of this.listeners)e()}}";
 const browserUseRecoveryHostSource =
   "function K({adoptionLease:e,adoptedWebContentsId:t,bounds:n,browserTabId:r,children:i,conversationId:a,hostKind:o=`right-panel`,initialUrl:s,isVisible:c,scale:l,shouldBootstrapWhenHidden:u,shouldPaint:d,webviewRef:f,windowZoom:p}){let m=(0,q.useRef)(null),h=(0,q.useId)(),g=(0,q.useRef)(!1),_=(0,q.useRef)(!1),v=(0,q.useRef)(P.getMountGeneration(a,r)),y=(0,q.useRef)(ae(a,r)),b=(0,q.useSyncExternalStore)(P.subscribe,()=>P.getCursorOverlayHost(a,r),()=>null);y.current=ae(a,r),(0,q.useLayoutEffect)(()=>(_.current=!0,()=>{_.current=!1}),[]);let x=c&&n!=null;return(0,q.useLayoutEffect)(()=>{let e=ae(a,r);if(ie({hasManagedWebview:m.current!=null,isPresented:x,shouldBootstrapWhenHidden:u})===`skip`){g.current=!1,v.current=P.getMountGeneration(a,r);return}let t=P.claimMountGeneration(a,r,h);return v.current=t,g.current=!0,()=>{g.current=!1,queueMicrotask(()=>{if(_.current&&y.current===e&&g.current)return;let n=P.releaseMountGeneration(a,r,h,t);v.current===t&&(v.current=n)})}},[r,a,x,h,u]),(0,q.useLayoutEffect)(()=>{let e=ae(a,r);return()=>{let t=m.current,n=v.current;queueMicrotask(()=>{let i=y.current;_.current&&i===e||P.hasOtherMountGenerationClaim(a,r,h,n)||t!=null&&(P.detachElectronWebview(t,f,o,n),m.current===t&&(m.current=null))})}},[r,a,o,h,f]),(0,q.useLayoutEffect)(()=>{m.current?.disposed&&(m.current=null);let i=m.current,c=ie({hasManagedWebview:i!=null,isPresented:x,shouldBootstrapWhenHidden:u});if(c===`skip`){if(i!=null){let e=v.current;P.hasOtherMountGenerationClaim(a,r,h,e)||P.detachElectronWebview(i,f,o,e)}m.current===i&&(m.current=null);return}let g=P.getWebview(a,r,s,{adoptionLease:e,adoptedWebContentsId:t,hostKind:o});m.current=g,P.syncElectronWebview(g,{bounds:n,isVisible:x,mountGeneration:v.current,scale:l,shouldBootstrap:c===`bootstrap`,shouldPaint:d,windowZoom:p},f,o)},[r,a,o,s,e,t,n,x,h,l,d,u,f,p]),b==null||i==null?null:(0,oe.createPortal)(i,b)}";
-const browserUseHiddenHostSource =
-  "function f(e){return e}function A(e){let{browserUseTabIdsKey:n,conversationId:r}=e,c=e.isRouteOwner,B=e.visibleTabs;if(!c&&B.size>0)return null;let H=Symbol.for(`react.early_return_sentinel`);bb0:{let e=e=>!B.has(e);let a=n.split(`\\0`).map(f).filter(e);if(a.length===0){H=null;break bb0}return a}if(H!==Symbol.for(`react.early_return_sentinel`))return H}";
+const currentUpstreamHiddenBrowserUseHostSource =
+  "function f(e){return e}function A({browserUseTabIdsKey:n,visibleTabs:I}){let e=e=>!I.has(e),a=n.split(`\\0`).map(f).filter(e);if(a.length===0)return null;return a}";
 
 test("patches the current monolithic Browser webview store and host contracts", () => {
   const patchedStore = applyPatchTwice(
@@ -8771,7 +9261,7 @@ test("patches the current monolithic Browser webview store and host contracts", 
   assert.match(patched, /linuxFailWebviewRecovery\(e,t,n\)/);
   assert.match(
     patched,
-    /r\|\|this\.linuxBrowserUseRecoveryStates\.delete\(Ef\(e,n\)\)/,
+    /n\|\|this\.linuxBrowserUseRecoveryStates\.delete\(r\)/,
   );
   assert.match(
     patched,
@@ -8787,11 +9277,7 @@ test("patches the current monolithic Browser webview store and host contracts", 
   );
   assert.match(
     patched,
-    /browserUseActiveTabKeys\.delete\(e\);this\.linuxBrowserUseRecoveryStates\.delete\(e\);let n=/,
-  );
-  assert.match(
-    patched,
-    /linuxBrowserUseRecoveryStates\.delete\(s\),this\.linuxBrowserUseRecoveryStates\.set\(c,codexLinuxRecoveryState\)/,
+    /linuxBrowserUseRecoveryStates\.delete\(o\),this\.linuxBrowserUseRecoveryStates\.set\(s,codexLinuxRecoveryState\)/,
   );
   assert.match(patched, /disposeAll\(\)\{this\.electronPageHandoff\.disposeAll\(\),this\.linuxBrowserUseRecoveryStates\.clear\(\),/);
   assert.match(patched, /function codexLinuxWatchBrowserWebviewAttachment/);
@@ -8881,14 +9367,6 @@ test("patches the current monolithic Browser webview store and host contracts", 
   store.webviews.set("conversation-2\0tab-2", thirdHost);
   assert.equal(
     store.linuxRemountWebview("conversation-2", "tab-2", thirdHost).started,
-    true,
-  );
-  store.webviews.set("conversation-1\0tab-1", secondHost);
-  store.browserUseActiveTabKeys.add("conversation-1\0tab-1");
-  store.setBrowserUseActive("conversation-1", "tab-2", true);
-  store.webviews.set("conversation-1\0tab-1", secondHost);
-  assert.equal(
-    store.linuxRemountWebview("conversation-1", "tab-1", secondHost).started,
     true,
   );
   store.webviews.set("conversation-1\0tab-1", secondHost);
@@ -8990,13 +9468,9 @@ test("Browser webview recovery descriptors target the current monolithic rendere
   const hostDescriptor = descriptors.find(
     (descriptor) => descriptor.id === "linux-browser-use-webview-attach-recovery-host",
   );
-  const hiddenHostDescriptor = descriptors.find(
-    (descriptor) => descriptor.id === "linux-browser-use-hidden-host-ownership",
-  );
 
   assert.ok(storeDescriptor);
   assert.ok(hostDescriptor);
-  assert.ok(hiddenHostDescriptor);
   assert.match(
     "app-initial-BTphDPeq.js",
     storeDescriptor.pattern,
@@ -9013,14 +9487,6 @@ test("Browser webview recovery descriptors target the current monolithic rendere
     "app-initial~app-main~onboarding-page-legacy.js",
     hostDescriptor.pattern,
   );
-  assert.match(
-    "browser-sidebar-hidden-browser-use-webview-host-Dv56miJM.js",
-    hiddenHostDescriptor.pattern,
-  );
-  assert.doesNotMatch(
-    "app-initial~app-main~onboarding-page-current.js",
-    hiddenHostDescriptor.pattern,
-  );
 });
 
 test("current monolithic Browser webview asset applies all recovery descriptors without report drift", () => {
@@ -9035,11 +9501,6 @@ test("current monolithic Browser webview asset applies all recovery descriptors 
       path.join(assetsDir, "app-initial-BTphDPeq.js"),
       `${browserUseRecoveryStoreSource}${browserUseRecoveryHostSource}`,
     );
-    fs.writeFileSync(
-      path.join(assetsDir, "browser-sidebar-hidden-browser-use-webview-host-DbLBblbO.js"),
-      browserUseHiddenHostSource,
-    );
-
     const report = createPatchReport();
     const corePatchRoot = path.join(
       __dirname,
@@ -9054,7 +9515,6 @@ test("current monolithic Browser webview asset applies all recovery descriptors 
     for (const patchName of [
       "linux-browser-use-webview-attach-recovery-store",
       "linux-browser-use-webview-attach-recovery-host",
-      "linux-browser-use-hidden-host-ownership",
     ]) {
       assert.equal(
         report.patches.find((patch) => patch.name === patchName)?.status,
@@ -9076,10 +9536,6 @@ test("reports drift when current Browser recovery assets lose their primary need
     {
       assetName: "app-initial-BTphDPeq.js",
       patchName: "linux-browser-use-webview-attach-recovery-host",
-    },
-    {
-      assetName: "browser-sidebar-hidden-browser-use-webview-host-DbLBblbO.js",
-      patchName: "linux-browser-use-hidden-host-ownership",
     },
   ];
 
@@ -9138,24 +9594,14 @@ test("Browser webview host recovery rejects current-DMG drift byte-identically",
   assert.ok(warnings.some((message) => message.includes("host lifecycle seams")));
 });
 
-test("mounts inactive Browser Use hosts when another conversation owns the visible panel", () => {
-  const patched = applyPatchTwice(
-    applyLinuxBrowserUseHiddenHostOwnershipPatch,
-    browserUseHiddenHostSource,
-  );
+test("current upstream hidden Browser Use host mounts every tab missing from visible panels", () => {
+  assert.doesNotThrow(() => new vm.Script(currentUpstreamHiddenBrowserUseHostSource));
 
-  assert.match(
-    patched,
-    /if\(!c&&B\.size>0&&n\.split\(`\\0`\)\.map\(f\)\.every\(codexLinuxBrowserUseTabId=>B\.has\(codexLinuxBrowserUseTabId\)\)\)return null/,
-  );
-  assert.doesNotThrow(() => new vm.Script(patched));
-
-  const mount = vm.runInNewContext(`${patched};A`);
+  const mount = vm.runInNewContext(`${currentUpstreamHiddenBrowserUseHostSource};A`);
   assert.deepEqual(
     Array.from(
       mount({
         browserUseTabIdsKey: "target-tab",
-        isRouteOwner: false,
         visibleTabs: new Set(["other-conversation-tab"]),
       }),
     ),
@@ -9164,7 +9610,6 @@ test("mounts inactive Browser Use hosts when another conversation owns the visib
   assert.equal(
     mount({
       browserUseTabIdsKey: "target-tab",
-      isRouteOwner: false,
       visibleTabs: new Set(["target-tab"]),
     }),
     null,
@@ -9173,7 +9618,6 @@ test("mounts inactive Browser Use hosts when another conversation owns the visib
     Array.from(
       mount({
         browserUseTabIdsKey: "visible-tab\0hidden-tab",
-        isRouteOwner: false,
         visibleTabs: new Set(["visible-tab"]),
       }),
     ),
@@ -9814,7 +10258,7 @@ function evaluatePatchedExternalOpen({
     },
   };
   const source =
-    "\"use strict\";let e=require(`electron`);async function openExternal(url,options){return e.shell.openExternal(url,options)}";
+    "\"use strict\";let e=require(`electron`),t=require(`electron`);async function openExternal(url,options){return e.shell.openExternal(url,options)}";
   const patched = applyPatchTwice(applyLinuxExternalOpenEnvPatch, source);
   const openExternal = vm.runInNewContext(`${patched};openExternal`, {
     require(moduleName) {
@@ -9900,7 +10344,7 @@ test("falls back to Electron when sanitized xdg-open spawning fails", async () =
 
 test("keeps already-applied Linux external-open patch quiet", () => {
   const source =
-    "\"use strict\";let e=require(`electron`);async function openExternal(url,options){return e.shell.openExternal(url,options)}";
+    "\"use strict\";let e=require(`electron`),t=require(`electron`);async function openExternal(url,options){return e.shell.openExternal(url,options)}";
   const patched = applyLinuxExternalOpenEnvPatch(source);
   const { value, warnings } = captureWarns(() => applyLinuxExternalOpenEnvPatch(patched));
 
@@ -9915,7 +10359,7 @@ test("warns when Linux external-open helper exists without wrapped Electron requ
 
   assert.equal(value, source);
   assert.deepEqual(warnings, [
-    "WARN: Could not find Electron require initializer — skipping Linux external open environment patch",
+    "WARN: Found incomplete Linux external open environment patch — skipping",
   ]);
 });
 
@@ -10315,7 +10759,7 @@ test("patchMainBundleSource keeps non-icon patches active without an icon asset"
   assert.match(patched, /n\.app\.on\(`before-quit`,codexLinuxBeforeQuitHandler\)/);
   assert.match(
     patched,
-    /process\.platform===`linux`&&\(k\.on\(`system-context-menu`,e=>e\.preventDefault\(\)\),k\.removeMenu\(\)\)/,
+    new RegExp(escapeRegExp(canonicalLinuxMenuSnippet("k"))),
   );
   assert.match(patched, /linux:\{label:`File Manager`/);
   assert.match(
@@ -10751,6 +11195,7 @@ test("patch report summary separates required core, optional core, and optional 
     patches: [
       { name: "main-process-ui", status: "applied", sourceKind: "core", ciPolicy: "required-upstream" },
       { name: "linux-app-updater-bridge", status: "skipped-optional", sourceKind: "core", ciPolicy: "optional" },
+      { name: "linux-integrity-check", status: "failed-integrity", sourceKind: "core", ciPolicy: "optional" },
       {
         name: "feature:remote-mobile-control:linux-remote-mobile-conversation-hydration",
         status: "applied-with-warnings",
@@ -10762,6 +11207,9 @@ test("patch report summary separates required core, optional core, and optional 
   });
 
   assert.deepEqual(summary.enabledFeatures, ["remote-mobile-control"]);
+  assert.deepEqual(summary.groups.integrityFailures.statusCounts, {
+    "failed-integrity": 1,
+  });
   assert.deepEqual(summary.groups.requiredCore.statusCounts, { applied: 1 });
   assert.deepEqual(summary.groups.optionalCore.statusCounts, { "skipped-optional": 1 });
   assert.deepEqual(summary.groups.optionalFeatures.statusCounts, { "applied-with-warnings": 1 });
@@ -11414,12 +11862,14 @@ test("criticalFailuresFromReport agrees with validateReport and skips non-applic
       { name: "req-bad", status: "failed-required", ciPolicy: "required-upstream", reason: "anchor drifted" },
       { name: "req-good", status: "applied", ciPolicy: "required-upstream" },
       { name: "req-not-applicable", status: "skipped-target", ciPolicy: "required-upstream" },
+      { name: "integrity-bad", status: "failed-integrity", ciPolicy: "optional", reason: "rollback failed" },
       { name: "opt-bad", status: "skipped-optional", ciPolicy: "optional", reason: "optional drift" },
     ],
   };
 
   assert.deepEqual(criticalFailuresFromReport(report), [
     { name: "req-bad", status: "failed-required", reason: "anchor drifted" },
+    { name: "integrity-bad", status: "failed-integrity", reason: "rollback failed" },
   ]);
   assert.deepEqual(optionalDriftFromReport(report), [
     { name: "opt-bad", status: "skipped-optional", reason: "optional drift" },
@@ -11427,6 +11877,7 @@ test("criticalFailuresFromReport agrees with validateReport and skips non-applic
 
   const failures = validateReport(report, "upstream-build");
   assert.ok(failures.some((failure) => failure.startsWith("req-bad:")));
+  assert.ok(failures.some((failure) => failure.startsWith("integrity-bad:")));
   assert.ok(!failures.some((failure) => failure.startsWith("req-not-applicable:")));
   assert.ok(!failures.some((failure) => failure.startsWith("opt-bad:")));
 });

@@ -4,7 +4,10 @@ use anyhow::{bail, Context, Result};
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncBufReadExt, BufReader};
-use zbus::{zvariant::OwnedValue, Connection, Proxy};
+use zbus::{
+    zvariant::{OwnedValue, Str},
+    Connection, Proxy,
+};
 
 const NOTIFICATIONS_SERVICE: &str = "org.freedesktop.Notifications";
 const NOTIFICATIONS_PATH: &str = "/org/freedesktop/Notifications";
@@ -106,7 +109,13 @@ async fn run() -> Result<()> {
         .await
         .context("failed to subscribe to notification closure")?;
     let action_pairs = notification_actions(&request.actions);
-    let hints: HashMap<String, OwnedValue> = HashMap::new();
+    let mut hints: HashMap<String, OwnedValue> = HashMap::new();
+    if let Some(desktop_entry) = launched_desktop_entry_id() {
+        hints.insert(
+            "desktop-entry".to_owned(),
+            OwnedValue::from(Str::from(desktop_entry)),
+        );
+    }
     let notification_id: u32 = proxy
         .call(
             "Notify",
@@ -195,6 +204,12 @@ fn validate_request(request: &ShowRequest) -> Result<()> {
         bail!("notification action text must contain between 1 and {MAX_ACTION_TEXT_BYTES} bytes");
     }
     Ok(())
+}
+
+fn launched_desktop_entry_id() -> Option<String> {
+    std::env::var("CODEX_LINUX_LAUNCHED_DESKTOP_ENTRY")
+        .ok()
+        .filter(|desktop_entry| !desktop_entry.is_empty())
 }
 
 fn notification_actions(actions: &[String]) -> Vec<String> {
