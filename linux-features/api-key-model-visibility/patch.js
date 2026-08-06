@@ -8,35 +8,41 @@ function warn(message, patchName) {
 }
 
 function applyApiKeyModelVisibilityPatch(source) {
-  const modelVisibilityPattern = new RegExp(
-    `(function ${JS_IDENT}\\(\\{authMethod:(${JS_IDENT}),availableModels:${JS_IDENT},` +
-      `defaultModel:${JS_IDENT},enabledReasoningEfforts:${JS_IDENT},` +
-      `includeUltraReasoningEffort:${JS_IDENT},models:${JS_IDENT},` +
-      `useHiddenModels:(${JS_IDENT})\\}\\)\\{let[\\s\\S]{0,600}?[,;]${JS_IDENT}=)` +
-      `\\3&&\\2!==\\\`amazonBedrock\\\`(?=[,;])`,
-    "g",
-  );
-  const patchedVisibilityPattern = new RegExp(
-    `function ${JS_IDENT}\\(\\{authMethod:(${JS_IDENT}),availableModels:${JS_IDENT},` +
-      `defaultModel:${JS_IDENT},enabledReasoningEfforts:${JS_IDENT},` +
-      `includeUltraReasoningEffort:${JS_IDENT},models:${JS_IDENT},` +
-      `useHiddenModels:(${JS_IDENT})\\}\\)\\{let[\\s\\S]{0,600}?[,;]${JS_IDENT}=` +
-      `\\2&&\\1!==\\\`amazonBedrock\\\`&&\\1!==\\\`apikey\\\`/\\*${PATCH_MARKER}\\*/(?=[,;])`,
-  );
-
-  const patched = source.replace(
-    modelVisibilityPattern,
-    (_match, prefix, authMethodVar, useHiddenModelsVar) =>
-      `${prefix}${useHiddenModelsVar}&&${authMethodVar}!==\`amazonBedrock\`&&` +
-      `${authMethodVar}!==\`apikey\`/*${PATCH_MARKER}*/`,
-  );
-
-  if (patched !== source) {
-    return patched;
+  if (source.includes(PATCH_MARKER)) {
+    return source;
   }
 
-  if (patchedVisibilityPattern.test(source)) {
-    return source;
+  // Current upstream shape (refactored): the allowlist gate lives in a
+  // per-model visibility helper, e.g.
+  //   function q$r({additionalAvailableModels:e,authMethod:t,availableModels:n,model:r,useHiddenModels:i}){return e?.has(r.model)===!0||(i&&t!==`amazonBedrock`?n.has(r.model):!r.hidden)}
+  // Bypass the allowlist for API-key authenticated hosts the same way it is
+  // already bypassed for non-ChatGPT hosts: add `&&authMethod!==`apikey``.
+  const helperPattern = new RegExp(
+    `(function ${JS_IDENT}\\(\\{additionalAvailableModels:(${JS_IDENT}),` +
+      `authMethod:(${JS_IDENT}),availableModels:(${JS_IDENT}),model:(${JS_IDENT}),` +
+      `useHiddenModels:(${JS_IDENT})\\}\\)\\{return ` +
+      `\\2\\?\\.has\\(\\5\\.model\\)===!0\\|\\|\\()` +
+      `\\6&&\\3!==\\\`amazonBedrock\\\`` +
+      `(\\?\\4\\.has\\(\\5\\.model\\):!\\5\\.hidden\\)\\})`,
+    "g",
+  );
+  const patched = source.replace(
+    helperPattern,
+    (
+      _match,
+      prefix,
+      _additionalAvailableModelsVar,
+      authMethodVar,
+      _availableModelsVar,
+      _modelVar,
+      useHiddenModelsVar,
+      suffix,
+    ) =>
+      `${prefix}${useHiddenModelsVar}&&${authMethodVar}!==\`amazonBedrock\`&&` +
+      `${authMethodVar}!==\`apikey\`/*${PATCH_MARKER}*/${suffix}`,
+  );
+  if (patched !== source) {
+    return patched;
   }
 
   if (
@@ -55,7 +61,7 @@ const descriptors = [
     phase: "webview-asset",
     order: 20550,
     ciPolicy: "optional",
-    pattern: /^app-initial~app-main~.*\.js$/,
+    pattern: /^app-initial-[^.]+\.js$/,
     missingDescription: "app main webview bundle",
     skipDescription: "API key model visibility patch",
     apply: applyApiKeyModelVisibilityPatch,

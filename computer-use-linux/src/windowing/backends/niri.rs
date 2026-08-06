@@ -1,9 +1,11 @@
+use crate::command_runner;
 use crate::terminal::enrich_terminal_windows;
 use crate::windowing::registry::BackendProbe;
 use crate::windowing::types::{WindowBounds, WindowInfo};
 use anyhow::{bail, Context, Result};
 use serde::Deserialize;
-use std::process::Command;
+use std::process::Command as StdCommand;
+use tokio::process::Command;
 
 pub const NIRI_BACKEND: &str = "niri";
 
@@ -47,8 +49,9 @@ pub fn probe() -> BackendProbe {
     }
 }
 
-pub fn list_windows() -> Result<Vec<WindowInfo>> {
-    let output = niri_output(&["msg", "--json", "windows"])
+pub async fn list_windows() -> Result<Vec<WindowInfo>> {
+    let output = niri_output_async(&["msg", "--json", "windows"])
+        .await
         .context("failed to run niri msg --json windows")?;
     if !output.status.success() {
         bail!(
@@ -72,9 +75,10 @@ pub(crate) fn parse_niri_windows(json: &str) -> Result<Vec<WindowInfo>> {
     Ok(windows)
 }
 
-pub fn activate_window(window_id: u64) -> Result<()> {
+pub async fn activate_window(window_id: u64) -> Result<()> {
     let args = niri_focus_args(window_id);
-    let output = niri_output(&args.iter().map(String::as_str).collect::<Vec<_>>())
+    let output = niri_output_async(&args.iter().map(String::as_str).collect::<Vec<_>>())
+        .await
         .with_context(|| format!("failed to focus Niri window {window_id}"))?;
     if output.status.success() {
         Ok(())
@@ -97,7 +101,13 @@ pub(crate) fn niri_focus_args(window_id: u64) -> [String; 5] {
 }
 
 fn niri_output(args: &[&str]) -> std::io::Result<std::process::Output> {
-    Command::new("niri").args(args).output()
+    StdCommand::new("niri").args(args).output()
+}
+
+async fn niri_output_async(args: &[&str]) -> Result<std::process::Output> {
+    let mut command = Command::new("niri");
+    command.args(args);
+    command_runner::output(command, "run niri IPC command").await
 }
 
 fn command_failure_detail(output: &std::process::Output) -> String {

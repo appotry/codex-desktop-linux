@@ -28,8 +28,8 @@ const {
 const currentAppInfoSource = [
   "function F_(e,t){return`icon-chatgpt`}",
   "function I_(e){return{dark:`icon-codex-dark-color.png`,light:`icon-codex-light.png`}}",
-  "function R_(e,t){if(process.platform!==`darwin`||t==null)return null;let n=I_(e),r=_S(`${F_(e,t)}.png`),i=_S(n.dark),a=_S(n.light);return r==null||i==null||a==null?null:{appDefault:r,codexDark:i,codexLight:a}}",
-  "function _S(e){if(e==null)return null;let t=l.app.isPackaged?(0,p.join)(process.resourcesPath,e):null,n=t!=null&&(0,_.existsSync)(t)?t:(0,p.join)(l.app.getAppPath(),`src`,`icons`,e),r=l.nativeImage.createFromPath(n);return r.isEmpty()?null:r.resize({width:128,height:128,quality:`best`}).toDataURL()}",
+  "function R_(e,t){if(process.platform!==`darwin`||t==null)return null;let n=I_(e),r=MS(`${F_(e,t)}.png`),i=MS(n.dark),a=MS(n.light);return r==null||i==null||a==null?null:{appDefault:r,codexDark:i,codexLight:a}}",
+  "function MS(e){if(e==null)return null;let t=l.app.isPackaged?(0,p.join)(process.resourcesPath,e):null,n=t!=null&&(0,_.existsSync)(t)?t:(0,p.join)(l.app.getAppPath(),`src`,`icons`,e),r=l.nativeImage.createFromPath(n);return r.isEmpty()?null:r.resize({width:128,height:128,quality:`best`}).toDataURL()}",
 ].join("");
 
 const currentRuntimeSource = [
@@ -37,11 +37,11 @@ const currentRuntimeSource = [
   "let T=(0,p.join)(g,`electron`,`src`,`icons`),E=e=>{if(!l.app.isPackaged)return null;let t=(0,p.join)(process.resourcesPath,e);return(0,_.existsSync)(t)?t:null},",
   "D=e=>null,O=e=>E(e)??D(e),k=()=>f.get(n.js.DOCK_ICON_PREFERENCE)??`app-default`,",
   "A=()=>O(`${hS(i,e)}.png`),j=process.platform===`linux`?W5(i,e,T):null,M=gS(i),N=()=>l.nativeTheme.shouldUseDarkColorsForSystemIntegratedUI?M.dark:M.light,",
-  "P=t=>{if(t===`app-default`&&i!==a.a.Dev&&(l.app.isPackaged||e===n.Ec.ChatGPT)){let e=l.app.dock;e!=null&&Reflect.apply(e.setIcon.bind(e),e,[null]);return}let r=t===`codex-system`?N():null,o=(r==null?null:O(r))??A(),s=o==null?l.nativeImage.createEmpty():l.nativeImage.createFromPath(o);s.isEmpty()||l.app.dock?.setIcon(s)},",
-  "F=()=>{if(!v)return;let e=k();P(e),Gce({preference:e,resourceName:e===`codex-system`?M.light:null}).then(e=>{e&&P(k())})};",
+  "P=t=>{if(t===`app-default`&&i!==a.a.Dev&&(l.app.isPackaged||e===n.gc.ChatGPT)){let e=l.app.dock;e!=null&&Reflect.apply(e.setIcon.bind(e),e,[null]);return}let r=t===`codex-system`?N():null,o=(r==null?null:O(r))??A(),s=o==null?l.nativeImage.createEmpty():l.nativeImage.createFromPath(o);s.isEmpty()||l.app.dock?.setIcon(s)},",
+  "F=()=>{if(!v)return;let e=k();P(e),Yce({preference:e,resourceName:e===`codex-system`?M.light:null}).then(e=>{e&&P(k())})};",
   "if(v){F();let e=()=>{let e=k();e===`codex-system`&&P(e)};l.nativeTheme.on(`updated`,e),w.add(()=>{l.nativeTheme.off(`updated`,e)})}",
-  "let ee=null,I=new xwe({onWindowRegistered:e=>{ee?.registerWindow(e),C?.(e)}});",
-  "return{updateDockIcon:F,windowManager:I}}",
+  "let I=null,L=new xwe({onWindowRegistered:e=>{I?.registerWindow(e),C?.(e)}});",
+  "return{updateDockIcon:F,windowManager:L}}",
 ].join("");
 
 const currentTraySource =
@@ -166,8 +166,8 @@ test("main patch enables official previews and synchronizes Linux window and tra
   assert.match(patched, /codexLinuxDockIconResourcePath/);
   assert.match(patched, /codexLinuxApplyDockIcon/);
   assert.match(patched, /i!==a\.a\.Dev/);
-  assert.match(patched, /e===n\.Ec\.ChatGPT/);
-  assert.doesNotMatch(patched, /n\.Ml\.ChatGPT/);
+  assert.match(patched, /e===n\.gc\.ChatGPT/);
+  assert.doesNotMatch(patched, /n\.Ec\.ChatGPT/);
   assert.match(patched, /process\.platform!==`darwin`&&process\.platform!==`linux`/);
   assert.match(
     patched,
@@ -190,7 +190,7 @@ test("main patch enables official previews and synchronizes Linux window and tra
   );
   assert.match(
     patched,
-    /onWindowRegistered:e=>\{ee\?\.registerWindow\(e\),C\?\.\(e\),process\.platform===`linux`&&setImmediate\(F\)\}/,
+    /onWindowRegistered:e=>\{I\?\.registerWindow\(e\),C\?\.\(e\),process\.platform===`linux`&&setImmediate\(F\)\}/,
   );
   assert.ok(
     patched.indexOf("setImmediate(F)") > 0,
@@ -200,12 +200,12 @@ test("main patch enables official previews and synchronizes Linux window and tra
 test("main patch rejects drift at every current-DMG insertion point byte-identically", () => {
   const insertionPoints = [
     "if(process.platform!==`darwin`||t==null)return null",
-    "function _S(e){if(e==null)return null",
+    "function MS(e){if(e==null)return null",
     "E=e=>{if(!l.app.isPackaged)return null",
     "P=t=>{if(t===`app-default`",
     "F=()=>{if(!v)return",
     "if(v){F();let e=()=>",
-    "onWindowRegistered:e=>{ee?.registerWindow(e),C?.(e)}",
+    "onWindowRegistered:e=>{I?.registerWindow(e),C?.(e)}",
     "codexLinuxRegisterTray(new l.Tray(t.defaultIcon))",
   ];
 
@@ -224,16 +224,47 @@ test("main patch rejects drift at every current-DMG insertion point byte-identic
   }
 });
 
-test("main patch rejects mixed patched and clean contracts byte-identically", () => {
-  const mixed = applyDockIconMainPatch(currentMainSource).replace(
+test("main patch rejects drift at every patched insertion point byte-identically", () => {
+  const patched = applyDockIconMainPatch(currentMainSource);
+  const insertionPoints = [
+    "if(process.platform!==`darwin`&&process.platform!==`linux`||t==null)return null",
+    "function codexLinuxDockIconResourcePath(e){return process.platform===`linux`",
+    "E=e=>{if(!l.app.isPackaged&&process.platform!==`linux`)return null",
+    "P=function codexLinuxApplyDockIcon(t){",
     "F=()=>{if(!v&&process.platform!==`linux`)return",
-    "F=()=>{if(!v)return",
-  );
-  const { value, warnings } = captureWarns(() => applyDockIconMainPatch(mixed));
+    "if(v||process.platform===`linux`){F();let e=()=>",
+    "onWindowRegistered:e=>{I?.registerWindow(e),C?.(e),process.platform===`linux`&&setImmediate(F)}",
+    "n=codexLinuxRegisterTray(new l.Tray(process.platform===`linux`&&globalThis.codexLinuxDockIconImage&&!globalThis.codexLinuxDockIconImage.isEmpty()?globalThis.codexLinuxDockIconImage:t.defaultIcon));if(!W9)return",
+  ];
 
-  assert.equal(value, mixed);
-  assert.equal(warnings.length, 1);
-  assert.match(warnings[0], /current Dock icon main-process contract/);
+  for (const insertionPoint of insertionPoints) {
+    assert.equal(patched.includes(insertionPoint), true, insertionPoint);
+    const splitAt = Math.floor(insertionPoint.length / 2);
+    const drifted = patched.replace(
+      insertionPoint,
+      `${insertionPoint.slice(0, splitAt)}drift${insertionPoint.slice(splitAt)}`,
+    );
+    const { value, warnings } = captureWarns(() => applyDockIconMainPatch(drifted));
+
+    assert.equal(value, drifted, insertionPoint);
+    assert.equal(warnings.length, 1, insertionPoint);
+    assert.match(warnings[0], /current Dock icon main-process contract/);
+  }
+});
+
+test("main patch rejects duplicate clean, patched, and mixed contracts byte-identically", () => {
+  const patched = applyDockIconMainPatch(currentMainSource);
+  for (const source of [
+    currentMainSource + currentMainSource,
+    patched + patched,
+    currentMainSource + patched,
+  ]) {
+    const { value, warnings } = captureWarns(() => applyDockIconMainPatch(source));
+
+    assert.equal(value, source);
+    assert.equal(warnings.length, 1);
+    assert.match(warnings[0], /current Dock icon main-process contract/);
+  }
 });
 
 test("settings patch exposes the native row on Linux", () => {

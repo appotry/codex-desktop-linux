@@ -15,7 +15,7 @@
 use std::thread::sleep;
 use std::time::Duration;
 
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use evdev::{
     uinput::VirtualDevice, AbsInfo, AbsoluteAxisCode, AttributeSet, EventType, InputEvent, KeyCode,
     PropType, UinputAbsSetup,
@@ -85,11 +85,16 @@ impl AbsPointer {
         sleep(Duration::from_millis(30));
         let code = button.key_code();
         for _ in 0..count.max(1) {
-            self.device
-                .emit(&[InputEvent::new_now(EventType::KEY.0, code, 1)])?;
+            if let Err(error) = self
+                .device
+                .emit(&[InputEvent::new_now(EventType::KEY.0, code, 1)])
+            {
+                return Err(self.release_after_error(code, error.into()));
+            }
             sleep(Duration::from_millis(30));
-            self.device
-                .emit(&[InputEvent::new_now(EventType::KEY.0, code, 0)])?;
+            if let Err(error) = self.release_button(code) {
+                return Err(self.release_after_error(code, error));
+            }
             sleep(Duration::from_millis(40));
         }
         Ok(())
@@ -105,14 +110,36 @@ impl AbsPointer {
         let code = button.key_code();
         self.move_to(start.0, start.1)?;
         sleep(Duration::from_millis(30));
-        self.device
-            .emit(&[InputEvent::new_now(EventType::KEY.0, code, 1)])?;
+        if let Err(error) = self
+            .device
+            .emit(&[InputEvent::new_now(EventType::KEY.0, code, 1)])
+        {
+            return Err(self.release_after_error(code, error.into()));
+        }
         sleep(Duration::from_millis(40));
-        self.move_to(end.0, end.1)?;
+        if let Err(error) = self.move_to(end.0, end.1) {
+            return Err(self.release_after_error(code, error));
+        }
         sleep(Duration::from_millis(40));
-        self.device
-            .emit(&[InputEvent::new_now(EventType::KEY.0, code, 0)])?;
+        if let Err(error) = self.release_button(code) {
+            return Err(self.release_after_error(code, error));
+        }
         Ok(())
+    }
+
+    fn release_button(&mut self, code: u16) -> Result<()> {
+        self.device
+            .emit(&[InputEvent::new_now(EventType::KEY.0, code, 0)])
+            .context("failed to emit absolute pointer button release")
+    }
+
+    fn release_after_error(&mut self, code: u16, error: anyhow::Error) -> anyhow::Error {
+        match self.release_button(code) {
+            Ok(()) => anyhow!("{error:#}; sent a best-effort button release"),
+            Err(release_error) => {
+                anyhow!("{error:#}; best-effort button release also failed: {release_error:#}")
+            }
+        }
     }
 }
 

@@ -14,7 +14,24 @@ printf '%s\n' "remote-mobile-control" > "$feature_marker"
 install -m 0755 "$SCRIPT_DIR/linux-features/remote-mobile-control/cold-start-hook.sh" "$cold_start_hook"
 
 if [ -d "$WORK_DIR/app-extracted/.vite/build" ] &&
-    grep -R -q "codexLinuxRemoteMobileAppServerArgs" "$WORK_DIR/app-extracted/.vite/build" 2>/dev/null; then
+    node - "$WORK_DIR/app-extracted/.vite/build" "$patch_module" <<'NODE'
+const fs = require("node:fs");
+const path = require("node:path");
+
+const [buildDir, patchModulePath] = process.argv.slice(2);
+const { hasLinuxRemoteMobileLocalAppServerRemoteControlPatch } = require(patchModulePath);
+
+if (typeof hasLinuxRemoteMobileLocalAppServerRemoteControlPatch !== "function") {
+  process.exit(1);
+}
+
+const found = fs.readdirSync(buildDir).some((name) => {
+  if (!/\.m?js$/u.test(name)) return false;
+  return hasLinuxRemoteMobileLocalAppServerRemoteControlPatch(fs.readFileSync(path.join(buildDir, name), "utf8"));
+});
+process.exit(found ? 0 : 1);
+NODE
+then
     rm -f "$desktop_remote_control_marker"
     printf '%s\n' "version=1" "owner=desktop" > "$desktop_remote_control_marker"
 else

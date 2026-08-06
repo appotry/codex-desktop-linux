@@ -1,14 +1,14 @@
 "use strict";
 
 const currentGroupSorter =
-  "function h2o({groups:e,items:t,projectOrder:n}){let r=new Map(t.map(e=>[e.task.key,e.recencyAt]));return iZi(e.map((e,t)=>({group:e,index:t,recencyAt:y2o(e,r)})).sort((e,t)=>t.recencyAt-e.recencyAt||e.index-t.index).map(({group:e})=>e),n)}";
+  "function Drs({groups:e,items:t,projectOrder:n}){let r=new Map(t.map(e=>[e.task.key,e.recencyAt]));return voa(e.map((e,t)=>({group:e,index:t,recencyAt:e.threadKeys.reduce((e,t)=>Math.max(e,r.get(t)??0),e.projectUpdatedAt??0)})).sort((e,t)=>t.recencyAt-e.recencyAt||e.index-t.index).map(({group:e})=>e),n)}";
 const patchedGroupSorter =
-  "function h2o({groups:e,items:t,projectOrder:n,sortMode:codexLinuxProjectSortMode}){let r=new Map(t.map(e=>[e.task.key,e.recencyAt]));return((codexLinuxRecencySortedGroups)=>codexLinuxProjectSortMode===`updated_at`?codexLinuxRecencySortedGroups:iZi(codexLinuxRecencySortedGroups,n))(e.map((e,t)=>({group:e,index:t,recencyAt:y2o(e,r)})).sort((e,t)=>t.recencyAt-e.recencyAt||e.index-t.index).map(({group:e})=>e))}";
+  "function Drs({groups:e,items:t,projectOrder:n,sortMode:codexLinuxProjectSortMode}){let r=new Map(t.map(e=>[e.task.key,e.recencyAt]));return((codexLinuxRecencySortedGroups)=>codexLinuxProjectSortMode===`updated_at`?codexLinuxRecencySortedGroups:voa(codexLinuxRecencySortedGroups,n))(e.map((e,t)=>({group:e,index:t,recencyAt:e.threadKeys.reduce((e,t)=>Math.max(e,r.get(t)??0),e.projectUpdatedAt??0)})).sort((e,t)=>t.recencyAt-e.recencyAt||e.index-t.index).map(({group:e})=>e))}";
 
 const currentGroupSorterCall =
-  "T=h2o({groups:m2o({groups:C,items:s}),items:s,projectOrder:ap(t,zl.PROJECT_ORDER)})";
+  "A=Drs({groups:Ers({groups:O,items:f}),items:f,projectOrder:Cp(t,Nl.PROJECT_ORDER)})";
 const patchedGroupSorterCall =
-  "T=h2o({groups:m2o({groups:C,items:s}),items:s,projectOrder:ap(t,zl.PROJECT_ORDER),sortMode:t(Ez).projectSortMode})";
+  "A=Drs({groups:Ers({groups:O,items:f}),items:f,projectOrder:Cp(t,Nl.PROJECT_ORDER),sortMode:t(UR).projectSortMode})";
 
 function countOccurrences(source, needle) {
   return source.split(needle).length - 1;

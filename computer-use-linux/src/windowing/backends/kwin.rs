@@ -49,6 +49,11 @@ pub async fn list_windows() -> Result<Vec<WindowInfo>> {
     Ok(windows)
 }
 
+pub(crate) async fn logical_desktop_rect() -> Result<(i32, i32, i32, i32)> {
+    let json = call_kwin_window_script().await?;
+    parse_kwin_logical_desktop_rect(&json)
+}
+
 pub async fn activate_window(window_id: u64) -> Result<()> {
     let uuid = kwin_uuid_for_window_id(window_id).await?.with_context(|| {
         format!("No KWin window matched window_id {window_id} during activation")
@@ -74,7 +79,7 @@ struct KwinScriptResult {
 
 async fn call_kwin_activate_script(uuid: &str) -> Result<()> {
     let uuid = uuid.to_string();
-    let json = call_kwin_script(|service_name, callback_object_path, plugin_name| {
+    let json = call_kwin_script(move |service_name, callback_object_path, plugin_name| {
         write_kwin_activate_script(service_name, callback_object_path, plugin_name, &uuid)
     })
     .await?;
@@ -111,17 +116,20 @@ where
     let plugin_name = temporary_kwin_plugin_name();
     let callback_object_path = format!("{KWIN_CALLBACK_OBJECT_PATH_PREFIX}/{plugin_name}");
     let (sender, receiver) = mpsc::channel();
+    let mut cleanup = KwinScriptCleanup::new(
+        connection.clone(),
+        plugin_name.clone(),
+        callback_object_path.clone(),
+    );
     connection
         .object_server()
         .at(callback_object_path.as_str(), KwinWindowCallback { sender })
         .await
         .context("failed to register temporary KWin callback object")?;
 
-    let mut script_path = None;
-    let mut loaded_script = false;
     let result = async {
         let path = write_script(&unique_name, &callback_object_path, &plugin_name)?;
-        script_path = Some(path.clone());
+        cleanup.script_path = Some(path.clone());
         let scripting_proxy = Proxy::new(
             &connection,
             KWIN_SCRIPTING_SERVICE,
@@ -140,7 +148,6 @@ where
             )
             .await
             .context("KWin loadScript failed")?;
-        loaded_script = true;
 
         let _: () = scripting_proxy
             .call("start", &())
@@ -162,8 +169,73 @@ where
         .context("KWin temporary script did not return data before timeout")?
     }
     .await;
+    cleanup.run().await;
+    result
+}
 
-    if loaded_script {
+struct KwinScriptCleanup {
+    connection: zbus::Connection,
+    plugin_name: String,
+    callback_object_path: String,
+    script_path: Option<std::path::PathBuf>,
+    armed: bool,
+}
+
+impl KwinScriptCleanup {
+    fn new(
+        connection: zbus::Connection,
+        plugin_name: String,
+        callback_object_path: String,
+    ) -> Self {
+        Self {
+            connection,
+            plugin_name,
+            callback_object_path,
+            script_path: None,
+            armed: true,
+        }
+    }
+
+    async fn run(&mut self) {
+        cleanup_kwin_script(
+            self.connection.clone(),
+            self.plugin_name.clone(),
+            self.callback_object_path.clone(),
+            self.script_path.clone(),
+        )
+        .await;
+        self.script_path = None;
+        self.armed = false;
+    }
+}
+
+impl Drop for KwinScriptCleanup {
+    fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
+        let connection = self.connection.clone();
+        let plugin_name = self.plugin_name.clone();
+        let callback_object_path = self.callback_object_path.clone();
+        let script_path = self.script_path.take();
+        if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+            runtime.spawn(cleanup_kwin_script(
+                connection,
+                plugin_name,
+                callback_object_path,
+                script_path,
+            ));
+        }
+    }
+}
+
+async fn cleanup_kwin_script(
+    connection: zbus::Connection,
+    plugin_name: String,
+    callback_object_path: String,
+    script_path: Option<std::path::PathBuf>,
+) {
+    let _ = timeout(Duration::from_secs(1), async {
         if let Ok(scripting_proxy) = Proxy::new(
             &connection,
             KWIN_SCRIPTING_SERVICE,
@@ -176,7 +248,8 @@ where
                 .call("unloadScript", &(plugin_name.as_str()))
                 .await;
         }
-    }
+    })
+    .await;
     let _: Result<bool, _> = connection
         .object_server()
         .remove::<KwinWindowCallback, _>(callback_object_path.as_str())
@@ -184,8 +257,6 @@ where
     if let Some(script_path) = script_path {
         let _ = fs::remove_file(script_path);
     }
-
-    result
 }
 
 struct KwinWindowCallback {
@@ -291,6 +362,22 @@ pub(crate) fn kwin_window_script_source(
         }};
     }}
 
+    function workspaceGeometry() {{
+        var rect = null;
+        try {{
+            rect = workspace.virtualScreenGeometry;
+        }} catch (error) {{}}
+        if (rect === null || rect === undefined) {{
+            return null;
+        }}
+        return {{
+            x: read(rect, "x"),
+            y: read(rect, "y"),
+            width: read(rect, "width"),
+            height: read(rect, "height")
+        }};
+    }}
+
     function firstDesktop(window) {{
         var desktops = read(window, "desktops");
         if (!Array.isArray(desktops) || desktops.length === 0) {{
@@ -363,6 +450,7 @@ pub(crate) fn kwin_window_script_source(
     callDBus(serviceName, objectPath, iface, "ReceiveWindows", JSON.stringify({{
         backend: "kwin",
         pluginName: pluginName,
+        desktopGeometry: workspaceGeometry(),
         windows: windows
     }}));
 }})();
@@ -601,13 +689,47 @@ pub(crate) fn parse_kwin_windows(json: &str) -> Result<Vec<WindowInfo>> {
     Ok(windows)
 }
 
+pub(crate) fn parse_kwin_logical_desktop_rect(json: &str) -> Result<(i32, i32, i32, i32)> {
+    parse_kwin_snapshot(json)?.logical_desktop_rect()
+}
+
 fn parse_kwin_snapshot(json: &str) -> Result<KwinWindowSnapshot> {
     serde_json::from_str(json).context("failed to parse KWin temporary script output")
 }
 
 #[derive(Debug, Deserialize)]
 struct KwinWindowSnapshot {
+    #[serde(default, rename = "desktopGeometry")]
+    desktop_geometry: Option<KwinRawGeometry>,
     windows: Vec<KwinRawWindow>,
+}
+
+impl KwinWindowSnapshot {
+    fn logical_desktop_rect(&self) -> Result<(i32, i32, i32, i32)> {
+        let geometry = self
+            .desktop_geometry
+            .as_ref()
+            .context("KWin did not expose virtualScreenGeometry")?;
+        let x = json_value_as_i32(geometry.x.as_ref())
+            .context("KWin virtualScreenGeometry x is unavailable")?;
+        let y = json_value_as_i32(geometry.y.as_ref())
+            .context("KWin virtualScreenGeometry y is unavailable")?;
+        let width = json_value_as_i32(geometry.width.as_ref())
+            .filter(|width| *width > 0)
+            .context("KWin virtualScreenGeometry width is unavailable")?;
+        let height = json_value_as_i32(geometry.height.as_ref())
+            .filter(|height| *height > 0)
+            .context("KWin virtualScreenGeometry height is unavailable")?;
+        Ok((x, y, width, height))
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct KwinRawGeometry {
+    x: Option<serde_json::Value>,
+    y: Option<serde_json::Value>,
+    width: Option<serde_json::Value>,
+    height: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]

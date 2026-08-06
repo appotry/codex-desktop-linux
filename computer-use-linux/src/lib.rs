@@ -1,5 +1,6 @@
 pub mod abs_pointer;
 pub mod atspi_tree;
+mod command_runner;
 pub mod cosmic_helper;
 pub mod diagnostics;
 pub mod gnome_extension;

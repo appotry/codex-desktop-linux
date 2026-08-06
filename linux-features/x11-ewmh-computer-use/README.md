@@ -1,6 +1,6 @@
 # X11/EWMH Computer Use Linux Feature
 
-This optional Linux Feature stages the standalone `codex-computer-use-x11` MCP plugin into ChatGPT Desktop for Linux. It stays disabled by default and is enabled only when listed in `linux-features/features.json`.
+This optional Linux Feature stages the standalone `codex-computer-use-x11` MCP plugin into ChatGPT Desktop for Linux. Core Computer Use now supports generic X11/EWMH directly; this feature remains an alternative, separately namespaced tool surface. It stays disabled by default and is enabled only when listed in `linux-features/features.json`.
 
 ## Enable
 
@@ -65,9 +65,7 @@ CODEX_X11_COMPUTER_USE_BINARY=/path/to/codex-computer-use-x11
 
 ## Upstream alignment
 
-This feature wires the separate `codex-computer-use-x11` plugin as an opt-in Linux Feature. It does not move X11/EWMH behavior into the core Computer Use backend and does not replace the bundled `computer-use` plugin.
-
-`agent-sh/computer-use-linux` selectable backend/flavor integration is a separate future investigation. If that route proves a better fit, handle it in a separate change or pull request; no backend/flavor experiment may require enabling this feature by default or modifying core Computer Use behavior in this feature.
+This feature wires the separate `codex-computer-use-x11` plugin as an opt-in Linux Feature. It does not replace the bundled `computer-use` plugin or its built-in generic X11/EWMH backend; enable it only when the alternative `x11_*` tools are specifically desired.
 
 ## Non-goals
 

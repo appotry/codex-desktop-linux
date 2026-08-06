@@ -8,19 +8,20 @@ It supports:
 
 - app listing and accessibility trees through AT-SPI
 - screenshots through GNOME Shell DBus, the Codex GNOME Shell extension, or XDG Desktop Portal
-- window listing and focusing on GNOME, KWin/Plasma, Hyprland, Niri, COSMIC,
-  and i3
+- window listing and focusing on GNOME, KWin/Plasma 5 and 6, Hyprland, Niri,
+  COSMIC, i3, and generic X11/EWMH window managers; GNOME extension and X11
+  windows can also be moved and resized
 - keyboard, text, click, scroll, and drag input through `/dev/uinput`, XDG
-  RemoteDesktop portal, or `ydotool`
+  RemoteDesktop portal, `xdotool` on X11, or `ydotool`
 - pointer-direction feedback for the built-in V2 pet after successful click,
   scroll, and drag actions
 
 ## Runtime Dependencies
 
-Install `ydotool` 1.0.2 or newer when you need the fallback input path. Earlier
-releases lack wheel movement or functional stdin typing required by the
-backend. The Computer Use readiness report detects and rejects incompatible
-CLIs instead of sending unsafe input commands.
+Install `ydotool` 1.0.3 or newer when you need the fallback input path. The
+backend probes the exact absolute move, wheel move, click, delayed key, and
+stdin typing command shapes it emits. Earlier or incompatible CLIs are rejected
+even if `ydotoold` and its socket are present.
 
 ```bash
 # Debian / Ubuntu
@@ -49,6 +50,17 @@ sudo usermod -a -G input "$USER"
 
 Then log out and back in.
 
+On X11, install `xdotool` for layout-correct XTEST keyboard/text input and
+coordinate clicks, and `wmctrl` plus `xprop` for generic EWMH window listing,
+focus, move, and resize. `xdotool` is preferred only with a nonempty `DISPLAY`;
+ydotool is used when it cannot be launched. Once xdotool starts, a failure or
+timeout is returned and input is never replayed through ydotool. Override
+keyboard selection with `COMPUTER_USE_LINUX_FORCE_YDOTOOL_KEYBOARD=1` or
+`CODEX_COMPUTER_USE_FORCE_YDOTOOL_KEYBOARD=1`; the corresponding
+`*_FORCE_XDOTOOL_KEYBOARD=1` names force XTEST when available. Set
+`COMPUTER_USE_LINUX_FORCE_YDOTOOL_POINTER=1` or
+`CODEX_COMPUTER_USE_FORCE_YDOTOOL_POINTER=1` to skip native-X11 xdotool clicks.
+
 Some distros name the unit `ydotool.service` instead of `ydotoold.service`, and
 some install `/usr/bin/ydotoold` without a service unit. If the system unit path
 is awkward, a user-session service that binds `%t/.ydotool_socket` is also
@@ -66,6 +78,10 @@ Niri window listing and exact focus use the `niri` command and the active
 session's `NIRI_SOCKET`. The Computer Use backend hydrates `NIRI_SOCKET` for GUI
 starts, but the socket must still belong to the active Niri session and be
 reachable by the desktop user.
+
+The optional `x11-ewmh-computer-use` Linux feature remains available as a
+separate, alternative namespaced tool surface. It is not required for the core
+backend's generic X11/EWMH support.
 
 ## Verify Readiness
 

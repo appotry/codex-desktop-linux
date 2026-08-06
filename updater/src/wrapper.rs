@@ -62,6 +62,9 @@ pub struct WrapperUpdate {
 pub enum WrapperDetectionState {
     /// Installed commit matches the tracked head.
     Aligned,
+    /// The tracked head is newer, but only repository documentation or
+    /// metadata changed and rebuilding the installed app would be redundant.
+    NoRebuildNeeded,
     /// A genuinely newer tracked commit is available.
     UpdateAvailable,
     /// Installed build appears to be local/ahead; applying would downgrade it.
@@ -336,6 +339,36 @@ fn commit_is_ancestor(repo: &Path, ancestor: &str, descendant: &str) -> Option<b
     }
 }
 
+/// Returns whether the candidate changes any input that can affect a rebuilt
+/// app or package. Unknown diff results fail open so update detection never
+/// hides a potentially relevant wrapper change.
+fn has_rebuild_relevant_changes(repo: &Path, installed: &str, candidate: &str) -> bool {
+    let range = format!("{installed}..{candidate}");
+    let status = git_status(
+        repo,
+        &[
+            "diff",
+            "--quiet",
+            "--exit-code",
+            &range,
+            "--",
+            ".",
+            ":(exclude).github/**",
+            ":(exclude)docs/**",
+            ":(exclude)AGENTS.md",
+            ":(exclude)CHANGELOG.md",
+            ":(exclude)CONTRIBUTING.md",
+            ":(exclude)README.md",
+        ],
+    );
+
+    match status.and_then(|status| status.code()) {
+        Some(0) => false,
+        Some(1) | None => true,
+        Some(_) => true,
+    }
+}
+
 /// Reads `CHANGELOG.md` at a specific commit from the object store (the
 /// candidate's changelog, which reflects the new version's entries).
 fn changelog_at_commit(repo: &Path, commit: &str) -> Option<String> {
@@ -439,6 +472,10 @@ pub fn detect_wrapper_update_state_for_installed(
     match commit_is_ancestor(repo, &installed.commit, &candidate_commit) {
         Some(true) => {}
         Some(false) | None => return Ok((DevMode, None)),
+    }
+
+    if !has_rebuild_relevant_changes(repo, &installed.commit, &candidate_commit) {
+        return Ok((NoRebuildNeeded, None));
     }
 
     let installed_version = installed
@@ -679,6 +716,56 @@ exit 0
             "changelog was: {}",
             update.changelog
         );
+    }
+
+    #[test]
+    fn documentation_only_changes_do_not_trigger_wrapper_update() {
+        let _g = env_lock();
+        let origin = tempdir().unwrap();
+        init_repo(origin.path());
+
+        let clone = tempdir().unwrap();
+        let clone_path = clone.path().join("checkout");
+        git_clone(origin.path(), &clone_path);
+
+        std::fs::create_dir_all(origin.path().join("docs")).unwrap();
+        std::fs::write(
+            origin.path().join("docs/updater.md"),
+            "Documentation only\n",
+        )
+        .unwrap();
+        git(origin.path(), &["add", "-A"]);
+        git(
+            origin.path(),
+            &["commit", "-q", "-m", "docs: update updater guide"],
+        );
+
+        assert_eq!(
+            detect_wrapper_update(&clone_path, "origin", "main").unwrap(),
+            None
+        );
+        let installed = installed_wrapper(&clone_path).expect("installed");
+        let (state, update) =
+            detect_wrapper_update_state_for_installed(&clone_path, &installed, "origin", "main")
+                .unwrap();
+        assert_eq!(state, WrapperDetectionState::NoRebuildNeeded);
+        assert_eq!(update, None);
+
+        std::fs::write(
+            origin.path().join("updater/Cargo.toml"),
+            "[package]\nname = \"codex-update-manager\"\nversion = \"0.8.2\"\n",
+        )
+        .unwrap();
+        git(origin.path(), &["add", "-A"]);
+        git(
+            origin.path(),
+            &["commit", "-q", "-m", "fix: update wrapper"],
+        );
+
+        let update = detect_wrapper_update(&clone_path, "origin", "main")
+            .unwrap()
+            .expect("code change after documentation commits should trigger an update");
+        assert_eq!(update.candidate_version.as_deref(), Some("0.8.2"));
     }
 
     #[test]

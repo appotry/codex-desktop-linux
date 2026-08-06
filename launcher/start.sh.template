@@ -1247,6 +1247,11 @@ sync_chrome_bundled_plugin_cache() {
     local cache_install_manifest
     local cache_parent
     local tmp_plugin
+    local managed_cache_root
+    local managed_cache_plugin
+    local managed_cache_client
+    local managed_tmp_plugin
+    local managed_backup_plugin
     local marketplace_root
     local marketplace_plugins_dir
     local marketplace_plugin_link
@@ -1379,6 +1384,50 @@ sync_chrome_bundled_plugin_cache() {
         return 0
     fi
     replace_symlink "$version" "$cache_root/latest"
+
+    # app-server keys its managed plugin cache by the upstream version. Linux
+    # compatibility patches do not change that version, so an already-installed
+    # Chrome plugin can otherwise keep stale JavaScript after an RPM upgrade.
+    # Refresh an existing same-version install from the bundled source while
+    # leaving this app-server-owned tree writable and outside the trusted native
+    # host/runtime cache above.
+    managed_cache_root="$codex_home/plugins/cache/openai-bundled/chrome"
+    managed_cache_plugin="$managed_cache_root/$version"
+    managed_cache_client="$managed_cache_plugin/scripts/browser-client.mjs"
+    if [ -d "$managed_cache_root" ] && [ ! -L "$managed_cache_root" ] && \
+        [ -d "$managed_cache_plugin" ] && [ ! -L "$managed_cache_plugin" ] && \
+        { [ ! -f "$managed_cache_client" ] || ! cmp -s "$source_client" "$managed_cache_client"; }; then
+        managed_tmp_plugin="$managed_cache_root/.chrome-$version.linux-refresh.$$"
+        managed_backup_plugin="$managed_cache_root/.chrome-$version.linux-backup.$$"
+        if ! remove_tree_if_exists "$managed_tmp_plugin" || \
+           ! remove_tree_if_exists "$managed_backup_plugin"; then
+            echo "Chrome app-server cache refresh preparation failed; continuing with the existing install."
+        elif cp -R "$source_plugin" "$managed_tmp_plugin"; then
+            make_tree_owner_writable "$managed_tmp_plugin"
+            chmod --reference="$managed_cache_plugin" "$managed_tmp_plugin" 2>/dev/null || true
+            if ! find "$managed_tmp_plugin" -type f -name '*:com.apple.*' -delete; then
+                remove_tree_if_exists "$managed_tmp_plugin" || true
+                echo "Chrome app-server cache refresh cleanup failed; continuing with the existing install."
+            elif ! mv -T -- "$managed_cache_plugin" "$managed_backup_plugin"; then
+                remove_tree_if_exists "$managed_tmp_plugin" || true
+                echo "Chrome app-server cache refresh failed; existing cache was preserved."
+            elif mv -T -- "$managed_tmp_plugin" "$managed_cache_plugin"; then
+                remove_tree_if_exists "$managed_backup_plugin" || \
+                    echo "Chrome app-server cache backup cleanup failed: $managed_backup_plugin"
+                echo "Chrome app-server cache refreshed from bundled resources: $managed_cache_plugin"
+            else
+                remove_tree_if_exists "$managed_tmp_plugin" || true
+                if mv -T -- "$managed_backup_plugin" "$managed_cache_plugin"; then
+                    echo "Chrome app-server cache refresh failed; previous cache was restored."
+                else
+                    echo "Chrome app-server cache refresh failed and the previous cache could not be restored: $managed_backup_plugin"
+                fi
+            fi
+        else
+            remove_tree_if_exists "$managed_tmp_plugin" || true
+            echo "Chrome app-server cache refresh failed; continuing with the existing install."
+        fi
+    fi
 
     marketplace_root="$codex_home/.tmp/bundled-marketplaces/openai-bundled"
     marketplace_plugins_dir="$marketplace_root/.agents/plugins"

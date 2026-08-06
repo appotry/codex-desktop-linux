@@ -689,7 +689,7 @@ fn detect_and_record_wrapper_update(
             persist_if_changed(paths, state, &original_state)?;
             Ok(false)
         }
-        (Aligned, _) => {
+        (Aligned | NoRebuildNeeded, _) => {
             state.clear_wrapper_update_candidate();
             state.wrapper_dev_mode = Some(false);
             persist_if_changed(paths, state, &original_state)?;

@@ -1,4 +1,4 @@
-use crate::windowing::backends::{cosmic, gnome, hyprland, i3, kwin, niri};
+use crate::windowing::backends::{cosmic, gnome, hyprland, i3, kwin, niri, x11};
 use crate::windowing::types::WindowInfo;
 use anyhow::{anyhow, Result};
 
@@ -8,6 +8,7 @@ pub use hyprland::HYPRLAND_BACKEND;
 pub use i3::I3_BACKEND;
 pub use kwin::KWIN_BACKEND;
 pub use niri::NIRI_BACKEND;
+pub use x11::X11_BACKEND;
 
 pub const WINDOW_PERMISSION_HINT: &str = "Computer Use could not access a supported window list backend. Targeted window input requires session-bus access plus GNOME Shell Introspect, the Codex GNOME Shell extension, the COSMIC Wayland helper, KWin/Plasma DBus scripting, Hyprland hyprctl, Niri IPC, or i3-msg. On GNOME, run setup_window_targeting to install the extension backend.";
 
@@ -39,6 +40,7 @@ enum BackendKind {
     Hyprland,
     Niri,
     I3,
+    X11,
 }
 
 const BACKEND_ORDER: &[BackendKind] = &[
@@ -49,6 +51,8 @@ const BACKEND_ORDER: &[BackendKind] = &[
     BackendKind::Hyprland,
     BackendKind::Niri,
     BackendKind::I3,
+    // Generic X11/EWMH: last, so a session-native backend always wins first.
+    BackendKind::X11,
 ];
 
 const DESCRIPTORS: &[BackendDescriptor] = &[
@@ -101,6 +105,13 @@ const DESCRIPTORS: &[BackendDescriptor] = &[
         missing_hint: "On i3, ensure i3-msg can reach the active i3 IPC socket.",
         can_exact_focus: true,
     },
+    BackendDescriptor {
+        id: X11_BACKEND,
+        failure_label: "X11/EWMH",
+        list_note: "Window list came from X11/EWMH (wmctrl). Terminal windows may include best-effort PTY and active-process context when the process tree is readable.",
+        missing_hint: "On other X11 window managers (Cinnamon, MATE, Xfce, Openbox, etc.), ensure wmctrl and xprop are installed.",
+        can_exact_focus: true,
+    },
 ];
 
 pub fn descriptors() -> &'static [BackendDescriptor] {
@@ -122,7 +133,11 @@ pub fn list_note(id: &str) -> &'static str {
 }
 
 pub fn backend_can_exact_focus(id: &str) -> bool {
-    descriptor(id).is_some_and(|descriptor| descriptor.can_exact_focus)
+    if id == X11_BACKEND {
+        x11::can_exact_focus()
+    } else {
+        descriptor(id).is_some_and(|descriptor| descriptor.can_exact_focus)
+    }
 }
 
 pub async fn list_windows() -> Result<Vec<WindowInfo>> {
@@ -131,10 +146,28 @@ pub async fn list_windows() -> Result<Vec<WindowInfo>> {
         if let Some(windows) =
             usable_backend_windows(*backend, list_windows_for(*backend).await, &mut errors)
         {
+            if matches!(backend, BackendKind::GnomeIntrospect) {
+                let x11_result = if x11::can_exact_focus() {
+                    Some(x11::list_windows_for_exact_focus().await)
+                } else {
+                    None
+                };
+                return Ok(prefer_exact_x11_windows(windows, x11_result, &mut errors));
+            }
             return Ok(windows);
         }
     }
     Err(anyhow!(errors.join("; ")))
+}
+
+fn prefer_exact_x11_windows(
+    introspect_windows: Vec<WindowInfo>,
+    x11_result: Option<Result<Vec<WindowInfo>>>,
+    errors: &mut Vec<String>,
+) -> Vec<WindowInfo> {
+    x11_result
+        .and_then(|result| usable_backend_windows(BackendKind::X11, result, errors))
+        .unwrap_or(introspect_windows)
 }
 
 fn usable_backend_windows(
@@ -159,11 +192,12 @@ async fn list_windows_for(backend: BackendKind) -> Result<Vec<WindowInfo>> {
     match backend {
         BackendKind::GnomeExtension => gnome::list_extension_windows().await,
         BackendKind::GnomeIntrospect => gnome::list_introspect_windows().await,
-        BackendKind::Cosmic => cosmic::list_windows(),
+        BackendKind::Cosmic => cosmic::list_windows().await,
         BackendKind::Kwin => kwin::list_windows().await,
-        BackendKind::Hyprland => hyprland::list_windows(),
-        BackendKind::Niri => niri::list_windows(),
-        BackendKind::I3 => i3::list_windows(),
+        BackendKind::Hyprland => hyprland::list_windows().await,
+        BackendKind::Niri => niri::list_windows().await,
+        BackendKind::I3 => i3::list_windows().await,
+        BackendKind::X11 => x11::list_windows().await,
     }
 }
 
@@ -183,19 +217,63 @@ pub async fn activate_window(window: &WindowInfo) -> Result<()> {
                 })?;
             gnome::focus_app(app_id).await
         }
-        COSMIC_WAYLAND_BACKEND => cosmic::activate_window(window.window_id),
+        COSMIC_WAYLAND_BACKEND => cosmic::activate_window(window.window_id).await,
         KWIN_BACKEND => kwin::activate_window(window.window_id).await,
-        HYPRLAND_BACKEND => hyprland::activate_window(window.window_id),
-        NIRI_BACKEND => niri::activate_window(window.window_id),
-        I3_BACKEND => i3::activate_window(window.window_id),
+        HYPRLAND_BACKEND => hyprland::activate_window(window.window_id).await,
+        NIRI_BACKEND => niri::activate_window(window.window_id).await,
+        I3_BACKEND => i3::activate_window(window.window_id).await,
+        X11_BACKEND => x11::activate_window(window.window_id).await,
         backend => Err(anyhow!(
             "Unsupported window backend for activation: {backend}"
         )),
     }
 }
 
-pub fn focused_window_override() -> Option<WindowInfo> {
-    cosmic::focused_window().ok().flatten()
+pub async fn focused_window_for_backend(backend: &str) -> Result<Option<WindowInfo>> {
+    let windows = match backend {
+        GNOME_SHELL_EXTENSION_BACKEND => gnome::list_extension_windows().await?,
+        GNOME_SHELL_INTROSPECT_BACKEND => gnome::list_introspect_windows().await?,
+        COSMIC_WAYLAND_BACKEND => return cosmic::focused_window().await,
+        KWIN_BACKEND => kwin::list_windows().await?,
+        HYPRLAND_BACKEND => hyprland::list_windows().await?,
+        NIRI_BACKEND => niri::list_windows().await?,
+        I3_BACKEND => i3::list_windows().await?,
+        X11_BACKEND => x11::list_windows_for_exact_focus().await?,
+        backend => {
+            return Err(anyhow!(
+                "Unsupported window backend for focus query: {backend}"
+            ))
+        }
+    };
+    Ok(windows.into_iter().find(|window| window.focused))
+}
+
+pub async fn move_window(window: &WindowInfo, x: i32, y: i32) -> Result<String> {
+    match window.backend.as_str() {
+        GNOME_SHELL_EXTENSION_BACKEND => {
+            gnome::move_extension_window(window.window_id, x, y).await
+        }
+        X11_BACKEND => x11::move_window(window.window_id, x, y).await,
+        backend => Err(anyhow!(
+            "Window backend {backend} cannot move windows; move_window needs the Codex GNOME Shell extension or a generic X11/EWMH session."
+        )),
+    }
+}
+
+pub async fn resize_window(window: &WindowInfo, width: i32, height: i32) -> Result<String> {
+    match window.backend.as_str() {
+        GNOME_SHELL_EXTENSION_BACKEND => {
+            gnome::resize_extension_window(window.window_id, width, height).await
+        }
+        X11_BACKEND => x11::resize_window(window.window_id, width, height).await,
+        backend => Err(anyhow!(
+            "Window backend {backend} cannot resize windows; resize_window needs the Codex GNOME Shell extension or a generic X11/EWMH session."
+        )),
+    }
+}
+
+pub async fn focused_window_override() -> Option<WindowInfo> {
+    cosmic::focused_window().await.ok().flatten()
 }
 
 pub fn probe_backends() -> Vec<BackendProbe> {
@@ -207,6 +285,7 @@ pub fn probe_backends() -> Vec<BackendProbe> {
         hyprland::probe(),
         niri::probe(),
         i3::probe(),
+        x11::probe(),
     ]
 }
 
@@ -220,6 +299,7 @@ impl BackendKind {
             BackendKind::Hyprland => HYPRLAND_BACKEND,
             BackendKind::Niri => NIRI_BACKEND,
             BackendKind::I3 => I3_BACKEND,
+            BackendKind::X11 => X11_BACKEND,
         }
     }
 
@@ -275,6 +355,31 @@ mod tests {
 
         assert_eq!(windows[0].backend, KWIN_BACKEND);
         assert_eq!(errors, vec!["GNOME Shell Introspect returned no windows"]);
+    }
+
+    #[test]
+    fn exact_x11_result_wins_over_gnome_list_only_result() {
+        let mut errors = Vec::new();
+        let selected = prefer_exact_x11_windows(
+            vec![window(GNOME_SHELL_INTROSPECT_BACKEND)],
+            Some(Ok(vec![window(X11_BACKEND)])),
+            &mut errors,
+        );
+        assert_eq!(selected[0].backend, X11_BACKEND);
+        assert!(errors.is_empty());
+    }
+
+    #[test]
+    fn gnome_list_only_result_survives_failed_x11_listing() {
+        let mut errors = Vec::new();
+        let selected = prefer_exact_x11_windows(
+            vec![window(GNOME_SHELL_INTROSPECT_BACKEND)],
+            Some(Err(anyhow!("wmctrl failed"))),
+            &mut errors,
+        );
+
+        assert_eq!(selected[0].backend, GNOME_SHELL_INTROSPECT_BACKEND);
+        assert_eq!(errors, ["X11/EWMH failed: wmctrl failed"]);
     }
 
     #[test]

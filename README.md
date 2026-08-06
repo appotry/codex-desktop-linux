@@ -6,6 +6,10 @@
   <a href="https://discord.gg/skCB3DXqgw"><img src="https://img.shields.io/badge/Discord-Join%20the%20community-5865F2?logo=discord&logoColor=white" alt="Join the Discord community"></a>
 </p>
 
+<p align="center">
+  English | <a href="README.zh-CN.md">简体中文</a>
+</p>
+
 Unofficial Linux build wrapper for [OpenAI ChatGPT Desktop](https://chatgpt.com/features/desktop/).
 The official ChatGPT app is available for macOS and Windows; this repository
 covers Linux by converting the upstream macOS `Codex.dmg` into a runnable Linux
@@ -47,6 +51,7 @@ cd codex-desktop-linux
 | Platform | Recommended path | Notes |
 |---|---|---|
 | Debian, Ubuntu, Pop!_OS, Mint, Elementary | `make bootstrap-native` | Builds and installs a `.deb` |
+| Raspberry Pi 5 (64-bit) | `make bootstrap-native` | Validated on a 16 GB Pi 5; see [Raspberry Pi 5](docs/raspberry-pi-5.md) |
 | Fedora | `make bootstrap-native` | Builds and installs an `.rpm` |
 | openSUSE | `make bootstrap-native` | Builds and installs an `.rpm` |
 | Arch, Manjaro, EndeavourOS | `make bootstrap-native` | Builds and installs a pacman package |
@@ -198,7 +203,7 @@ workarounds.
 | Browser annotations | Always | Built into the patched webview | [Architecture](docs/architecture.md) |
 | Tray and warm-start handoff | Always | Normal app launch | [Architecture](docs/architecture.md) |
 | Multiple app instances | Opt-in | `./codex-app/start.sh --new-instance` | [Build and packaging](docs/build-and-packaging.md#running-the-generated-app) |
-| Linux Computer Use backend | Bundled | MCP backend registers by default | [Linux Computer Use](docs/linux-computer-use.md) |
+| Linux Computer Use backend | Bundled | MCP backend registers by default, including compositor-native and generic X11/EWMH window control | [Linux Computer Use](docs/linux-computer-use.md) |
 | Linux Computer Use UI | Opt-in | `CODEX_LINUX_ENABLE_COMPUTER_USE_UI=1` or settings flag | [Linux Computer Use](docs/linux-computer-use.md#enable-the-in-app-ui) |
 | Linux Features framework | Opt-in | Edit `linux-features/features.json` | [Linux Features](linux-features/README.md) |
 
@@ -235,7 +240,7 @@ workarounds.
 | SSH command wrapper | Opt-in | `ssh-command-wrapper` | [Docs](linux-features/ssh-command-wrapper/README.md) |
 | Thorium Chrome Plugin Support | Opt-in | `thorium-chrome-plugin` | [Docs](linux-features/thorium-chrome-plugin/README.md) |
 | UI tweaks | Opt-in | `ui-tweaks` | [Docs](linux-features/ui-tweaks/README.md) |
-| X11/EWMH Computer Use adapter | Opt-in | `x11-ewmh-computer-use` | [Docs](linux-features/x11-ewmh-computer-use/README.md) |
+| Alternative namespaced X11/EWMH Computer Use tools | Opt-in | `x11-ewmh-computer-use` | [Docs](linux-features/x11-ewmh-computer-use/README.md) |
 
 ChatGPT-account model rollouts remain controlled by OpenAI per account.
 Rebuilding this wrapper does not unlock them. API-key-authenticated custom
@@ -360,6 +365,7 @@ Full list: [Troubleshooting](docs/troubleshooting.md).
 ## Project Docs
 
 - [Native setup](docs/native-setup.md)
+- [Raspberry Pi 5](docs/raspberry-pi-5.md)
 - [Nix](docs/nix.md)
 - [Linux Computer Use](docs/linux-computer-use.md)
 - [Record and Replay on Linux](docs/record-and-replay-linux.md)

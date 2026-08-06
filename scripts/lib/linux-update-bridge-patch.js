@@ -1,11 +1,6 @@
 const fs = require("fs");
 const path = require("path");
 
-function requireName(source, moduleName) {
-  const escaped = moduleName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return source.match(new RegExp(`([A-Za-z_$][\\w$]*)=require\\([\\\`'"]${escaped}[\\\`'"]\\)`))?.[1] ?? null;
-}
-
 function buildUpdateManagerEnvSource() {
   return "function codexLinuxUpdateManagerEnv(){let e={...process.env},t=process.env.CODEX_LINUX_ORIGINAL_LD_LIBRARY_PATH_STATE,n=t==null?void 0:process.env.CODEX_LINUX_HOST_LD_LIBRARY_PATH_STATE??t,r=process.env.CODEX_LINUX_HOST_LD_LIBRARY_PATH_STATE==null?process.env.CODEX_LINUX_ORIGINAL_LD_LIBRARY_PATH_VALUE:process.env.CODEX_LINUX_HOST_LD_LIBRARY_PATH_VALUE;n===`unset`?delete e.LD_LIBRARY_PATH:n===`empty`?e.LD_LIBRARY_PATH=``:n===`value`&&typeof r==`string`&&(e.LD_LIBRARY_PATH=r);for(let t of[`CODEX_LINUX_ORIGINAL_LD_LIBRARY_PATH_STATE`,`CODEX_LINUX_ORIGINAL_LD_LIBRARY_PATH_VALUE`,`CODEX_LINUX_HOST_LD_LIBRARY_PATH_STATE`,`CODEX_LINUX_HOST_LD_LIBRARY_PATH_VALUE`])delete e[t];return e}";
 }
@@ -44,13 +39,9 @@ function applyCurrentBootstrapUpdaterBridgePatch(currentSource) {
     return currentSource;
   }
 
-  const childProcessVar = requireName(currentSource, "node:child_process");
-  const fsVar = requireName(currentSource, "node:fs");
-  const pathVar = requireName(currentSource, "node:path");
-  if (childProcessVar == null || fsVar == null || pathVar == null) {
-    console.warn("WARN: Could not find updater bridge module bindings - skipping Linux updater bridge patch");
-    return currentSource;
-  }
+  const childProcessVar = "require(`node:child_process`)";
+  const fsVar = "require(`node:fs`)";
+  const pathVar = "require(`node:path`)";
 
   let patchedSource = currentSource;
   if (!patchedSource.includes("function codexLinuxCreatePackageUpdateManager(")) {
@@ -69,7 +60,7 @@ function applyCurrentBootstrapUpdaterBridgePatch(currentSource) {
   }
 
   const destructureRegex =
-    /let\{startedAtMs:([A-Za-z_$][\w$]*),buildFlavor:([A-Za-z_$][\w$]*),desktopSentry:([A-Za-z_$][\w$]*),sparkleManager:([A-Za-z_$][\w$]*),productionAppcastStateStore:[A-Za-z_$][\w$]*,setSparkleBridgeHandlers:([A-Za-z_$][\w$]*),setSecondInstanceArgsHandler:([A-Za-z_$][\w$]*)\}=([A-Za-z_$][\w$]*)\.([A-Za-z_$][\w$]*)\(\),/;
+    /let\{startedAtMs:([A-Za-z_$][\w$]*),buildFlavor:([A-Za-z_$][\w$]*),desktopSentry:([A-Za-z_$][\w$]*),sparkleManager:([A-Za-z_$][\w$]*),startupPhases:[A-Za-z_$][\w$]*,productionAppcastStateStore:[A-Za-z_$][\w$]*,setSparkleBridgeHandlers:([A-Za-z_$][\w$]*),setSecondInstanceArgsHandler:([A-Za-z_$][\w$]*)\}=([A-Za-z_$][\w$]*)\.([A-Za-z_$][\w$]*)\(\),/;
   const destructureMatch = patchedSource.match(destructureRegex);
   const sparkleVar = destructureMatch?.[4] ?? null;
   const setSparkleBridgeHandlersVar = destructureMatch?.[5] ?? null;
@@ -96,7 +87,7 @@ function applyCurrentBootstrapUpdaterBridgePatch(currentSource) {
 
   if (!patchedSource.includes("codexLinuxPackageUpdateBridge=process.platform===`linux`")) {
     const currentBridgeRegex =
-      /let ([A-Za-z_$][\w$]*)=new [A-Za-z_$][\w$]*,(?:[A-Za-z_$][\w$]*=null,){2}([A-Za-z_$][\w$]*)=[A-Za-z_$][\w$]*=>\{[^]*?\},(?=[A-Za-z_$][\w$]*=)/;
+      /let ([A-Za-z_$][\w$]*)=new [A-Za-z_$][\w$]*,[A-Za-z_$][\w$]*=null,([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)=>\{if\(\3\?\.quitImmediately===!1\)\{\1\.allowQuitTemporarilyForUpdateInstall\(\);return\}\1\.allowQuitTemporarilyForUpdateInstall\(\),[A-Za-z_$][\w$]*\.app\.quit\(\)\},(?=[A-Za-z_$][\w$]*=)/;
     const currentBridgeMatch = patchedSource.match(currentBridgeRegex);
     if (currentBridgeMatch == null) {
       console.warn("WARN: Could not find current updater callback bridge - skipping Linux updater bridge patch");

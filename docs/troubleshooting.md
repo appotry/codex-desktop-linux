@@ -29,8 +29,10 @@
 | `Atomic directory exchange is unsupported` | Keep the candidate and final app as sibling directories on a local Linux filesystem that supports `renameat2(RENAME_EXCHANGE)`; promotion deliberately does not use a non-atomic fallback |
 | Interrupted install left a promotion journal | Run the installer again. It recovers the previous app into the recorded backup before reusing the candidate path; the canonical app remains available throughout |
 | Computer Use plugin invisible in UI | Enable the Computer Use UI opt-in; upstream server/account rollout can still hide some controls |
-| Computer Use `doctor` reports no input backend | Grant `/dev/uinput`, enable XDG RemoteDesktop portal, or start `ydotoold` / `ydotool.service` |
+| Computer Use `doctor` reports no input backend | On X11, install `xdotool` and confirm `DISPLAY` is nonempty. Otherwise grant `/dev/uinput`, enable the XDG RemoteDesktop portal, or install ydotool 1.0.3+ and start `ydotoold` / `ydotool.service` with a connectable socket |
 | Computer Use `doctor` reports `ydotool_socket: Permission denied` | Adjust the daemon socket so users in the `input` group can use it |
+| Computer Use reports an unsupported ydotool CLI even though `ydotoold` is running | Upgrade to ydotool 1.0.3+ with absolute/wheel mousemove, click, `key -d 100`, and `type --file -` semantics; socket presence alone is intentionally insufficient |
+| Computer Use cannot list or focus windows on a generic X11 desktop | Install `wmctrl` and `xprop`, confirm `XDG_SESSION_TYPE=x11` (or no Wayland display) and a nonempty `DISPLAY`, then rerun `codex-computer-use-linux doctor` |
 | `ConnectTimeoutError` for Electron headers | Re-run `make build-app`; the installer uses `https://artifacts.electronjs.org/headers/dist` by default |
 | Computer Use AT-SPI tree empty | Run `codex-computer-use-linux setup`, then restart the target app |
 | `ERR_NO_SUPPORTED_PROXIES` with an authenticated proxy | Do not pass credentials inside Chromium's `--proxy-server` URL; enable the optional `authenticated-proxy` Linux feature |

@@ -32,6 +32,7 @@ const {
   applyLinuxRemoteControlEnablementBridgePatch,
   applyLinuxRemoteMobileActiveStatusPatch,
   applyLinuxRemoteMobileAppServerRemoteControlPatch,
+  hasLinuxRemoteMobileLocalAppServerRemoteControlPatch,
   applyLinuxRemoteMobileChromeBridgePatch,
   applyLinuxRemoteMobileCompletedItemRecoveryPatch,
   applyLinuxRemoteMobileConversationHydrationPatch,
@@ -256,17 +257,6 @@ function syntheticMobileSetupDialogCopyBundle() {
   ].join("");
 }
 
-function syntheticSettingsBundle() {
-  return [
-    "const o=`linux`,Q={jsx(){},jsxs(){}};",
-    "tabs:[{key:`control-this-mac`,name:o===`windows`?(0,Q.jsx)(z,{id:`settings.remoteConnections.tabs.controlThisMac.windows`,defaultMessage:`Control this PC`,description:`Tab label for settings that let other devices control this Windows device`}):(0,Q.jsx)(z,{id:`settings.remoteConnections.tabs.controlThisMac`,defaultMessage:`Control this Mac`,description:`Tab label for settings that let other devices control this computer`})},{key:`access-other-devices`,name:(0,Q.jsx)(z,{id:`settings.remoteConnections.tabs.accessOtherDevices`,defaultMessage:`Control other devices`,description:`Tab label for settings that let this computer control other devices`})},{key:`ssh`,name:(0,Q.jsx)(z,{id:`settings.remoteConnections.tabs.ssh`,defaultMessage:`SSH`,description:`Tab label for SSH remote connections`})}],selectedKey:je,variant:`underline`,onSelect:se}",
-    "tabs:[{key:`access-other-devices`,name:(0,Q.jsx)(z,{id:`settings.remoteConnections.tabs.accessOtherDevices`,defaultMessage:`Control other devices`,description:`Tab label for settings that let this computer control other devices`})},{key:`ssh`,name:(0,Q.jsx)(z,{id:`settings.remoteConnections.tabs.ssh`,defaultMessage:`SSH`,description:`Tab label for SSH remote connections`})}],selectedKey:je,variant:`underline`,onSelect:se}",
-    "const a=`Control this Mac from your phone or other device`,b=`Add device to control this Mac remotely`,c=`Devices that can control this Mac`,d=`Keep Mac awake`,e=`Allow this Mac to be discovered and controlled`,f=`Control other devices from this Mac`,g=`Authorize this Mac to control other devices signed in to your ChatGPT account`,h=`Devices you can control from this Mac`;",
-    "function nr(e,t){return e.displayName.localeCompare(t.displayName)}",
-    "function rr({selectedConnectionsTab:e,showControlThisMacTab:t,showRemoteControlConnectionsSection:n,showTabbedSshPage:r}){return n?e===`control-this-mac`&&!t||e===`ssh`&&!r?`access-other-devices`:e:`ssh`}",
-  ].join("");
-}
-
 function syntheticSshInstallSettingsBundle() {
   return [
     "function pn({action:e,disabled:t,hostId:n,installCodexPending:r,onAuthenticate:i,onInstallCodex:a,onReconnect:o,onRestart:s}){if(e==null)return null;switch(e.kind){case`install-codex`:return{disabled:t,label:e.label,loading:r,loadingLabel:e.loadingLabel,renderInElectronOnly:!0,tooltipText:e.tooltipText,onClick:()=>a(n)};case`login`:return{label:e.label,onClick:()=>i(n)};case`restart`:return{label:e.label,onClick:s};case`reconnect`:return{label:e.label,onClick:o};case`settings`:return null}}",
@@ -285,18 +275,14 @@ function syntheticSettingsRefreshBundle() {
   ].join("");
 }
 
-function syntheticAppServerLaunchBundle() {
+function syntheticLegacyWslAppServerLaunchBundle() {
   return "var Uz=`Codex Desktop`,Wz=[`-c`,`features.code_mode_host=true`,`app-server`,`--analytics-default-enabled`],Gz={appServerVersion:`current`};";
 }
 
-function syntheticCurrentSettingsBundle() {
+function syntheticCurrentLocalAppServerLaunchBundle() {
   return [
-    "const i=`linux`,Q={jsx(){},jsxs(){}};",
-    "tabs:[{key:`control-this-mac`,name:i===`windows`?(0,Q.jsx)(N,{id:`settings.remoteConnections.tabs.controlThisMac.windows`,defaultMessage:`Control this PC`,description:`Tab label for settings that let other devices control this Windows device`}):(0,Q.jsx)(N,{id:`settings.remoteConnections.tabs.controlThisMac`,defaultMessage:`Control this Mac`,description:`Tab label for settings that let other devices control this computer`})},{key:`access-other-devices`,name:(0,Q.jsx)(N,{id:`settings.remoteConnections.tabs.accessOtherDevices`,defaultMessage:`Control other devices`,description:`Tab label for settings that let this computer control other devices`})},{key:`ssh`,name:(0,Q.jsx)(N,{id:`settings.remoteConnections.tabs.ssh`,defaultMessage:`SSH`,description:`Tab label for SSH remote connections`})}],selectedKey:Pe,variant:`underline`,onSelect:le}",
-    "tabs:[{key:`access-other-devices`,name:(0,Q.jsx)(N,{id:`settings.remoteConnections.tabs.accessOtherDevices`,defaultMessage:`Control other devices`,description:`Tab label for settings that let this computer control other devices`})},{key:`ssh`,name:(0,Q.jsx)(N,{id:`settings.remoteConnections.tabs.ssh`,defaultMessage:`SSH`,description:`Tab label for SSH remote connections`})}],selectedKey:Pe,variant:`underline`,onSelect:le}",
-    "const a=`Control this Mac from your phone or other device`,b=`Add device to control this Mac remotely`,c=`Devices that can control this Mac`,d=`Keep Mac awake`,e=`Allow this Mac to be discovered and controlled`,f=`Control other devices from this Mac`,g=`Authorize this Mac to control other devices signed in to your ChatGPT account`,h=`Devices you can control from this Mac`;",
-    "function $n(e,t){return e.displayName.localeCompare(t.displayName)}",
-    "function er({selectedConnectionsTab:e,showControlThisMacTab:t,showRemoteControlConnectionsSection:n,showTabbedSshPage:r}){return n?e===`control-this-mac`&&!t||e===`ssh`&&!r?`access-other-devices`:e:`ssh`}",
+    "var Fz=`Codex Desktop`,Iz=[`-c`,`features.code_mode_host=true`],Lz=[{configKey:`chatgpt_base_url`,envVar:`CODEX_APP_SERVER_CHATGPT_BASE_URL`},{configKey:`openai_base_url`,envVar:`CODEX_APP_SERVER_OPENAI_BASE_URL`}];",
+    "function uB(){return[...Iz,...Lz.flatMap(({configKey:e,envVar:t})=>{let n=process.env[t]?.trim();return n==null||n===``?[]:[`-c`,`${e}=${JSON.stringify(n)}`]}),`app-server`,`--analytics-default-enabled`]}",
   ].join("");
 }
 
@@ -556,7 +542,10 @@ test("remote mobile stage hook is idempotent and stages its markers and executab
     };
 
     fs.mkdirSync(buildDir, { recursive: true });
-    fs.writeFileSync(path.join(buildDir, "main.js"), "globalThis.codexLinuxRemoteMobileAppServerArgs=true;");
+    fs.writeFileSync(
+      path.join(buildDir, "main.js"),
+      applyLinuxRemoteMobileAppServerRemoteControlPatch(syntheticCurrentLocalAppServerLaunchBundle()),
+    );
 
     const first = runStageHook(env);
     const second = runStageHook(env);
@@ -575,7 +564,7 @@ test("remote mobile stage hook is idempotent and stages its markers and executab
   }
 });
 
-test("remote mobile stage hook removes a stale ownership marker when the patch marker is missing", () => {
+test("remote mobile stage hook removes a stale ownership marker when only the legacy WSL patch marker exists", () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "codex-remote-mobile-stage-"));
   try {
     const installDir = path.join(tempRoot, "package", "opt", "codex-desktop");
@@ -585,8 +574,35 @@ test("remote mobile stage hook removes a stale ownership marker when the patch m
 
     fs.mkdirSync(buildDir, { recursive: true });
     fs.mkdirSync(path.dirname(marker), { recursive: true });
-    fs.writeFileSync(path.join(buildDir, "main.js"), "globalThis.someOtherPatch=true;");
+    fs.writeFileSync(path.join(buildDir, "main.js"), "globalThis.codexLinuxRemoteMobileAppServerArgs=true;");
     fs.writeFileSync(marker, "stale\n");
+
+    const result = runStageHook({
+      ARCH: "x64",
+      CODEX_UPSTREAM_APP_DIR: path.join(tempRoot, "upstream-app"),
+      INSTALL_DIR: installDir,
+      SCRIPT_DIR: REPO_ROOT,
+      WORK_DIR: workDir,
+    });
+
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.equal(fs.existsSync(marker), false);
+    assert.match(result.stderr, /Desktop app-server remote-control marker not found/);
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("remote mobile stage hook rejects an incomplete local Desktop patch marker", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "codex-remote-mobile-stage-"));
+  try {
+    const installDir = path.join(tempRoot, "package", "opt", "codex-desktop");
+    const workDir = path.join(tempRoot, "work");
+    const buildDir = path.join(workDir, "app-extracted", ".vite", "build");
+    const marker = path.join(installDir, ".codex-linux", "desktop-app-server-remote-control-enabled");
+
+    fs.mkdirSync(buildDir, { recursive: true });
+    fs.writeFileSync(path.join(buildDir, "src.js"), "globalThis.codexLinuxRemoteMobileLocalAppServerArgs=true;");
 
     const result = runStageHook({
       ARCH: "x64",
@@ -615,7 +631,10 @@ test("remote mobile stage hook replaces an ownership marker symlink without foll
 
     fs.mkdirSync(buildDir, { recursive: true });
     fs.mkdirSync(path.dirname(marker), { recursive: true });
-    fs.writeFileSync(path.join(buildDir, "main.js"), "globalThis.codexLinuxRemoteMobileAppServerArgs=true;");
+    fs.writeFileSync(
+      path.join(buildDir, "main.js"),
+      applyLinuxRemoteMobileAppServerRemoteControlPatch(syntheticCurrentLocalAppServerLaunchBundle()),
+    );
     fs.writeFileSync(target, "preserved\n");
     fs.symlinkSync(target, marker);
 
@@ -1224,29 +1243,88 @@ test("Linux remote-control client recovery handles bare missing key material err
 });
 
 test("Linux remote mobile app-server launch enables remote control on the Desktop app-server", () => {
-  const source = syntheticAppServerLaunchBundle();
+  const source = syntheticCurrentLocalAppServerLaunchBundle();
   const patched = applyLinuxRemoteMobileAppServerRemoteControlPatch(source);
 
   assert.notEqual(patched, source);
-  assert.match(patched, /codexLinuxRemoteMobileAppServerArgs/);
+  assert.match(patched, /codexLinuxRemoteMobileLocalAppServerArgs/);
   assert.match(
     patched,
-    /process\.platform===`linux`\?\[`-c`,`features\.code_mode_host=true`,`app-server`,`--remote-control`,`--analytics-default-enabled`\]:\[`-c`,`features\.code_mode_host=true`,`app-server`,`--analytics-default-enabled`\]/,
+    /process\.platform===`linux`\?\[`--remote-control`\]:\[\]/,
   );
-  assert.doesNotMatch(
+  assert.match(
     patched,
-    /Wz=\[`-c`,`features\.code_mode_host=true`,`app-server`,`--analytics-default-enabled`\]/,
+    /return\[\.\.\.Iz,\.\.\.Lz\.flatMap\(.+`app-server`,\.\.\.codexLinuxRemoteMobileLocalAppServerArgs\(\),`--analytics-default-enabled`\]\}/,
   );
-  assert.match(patched, /Wz=codexLinuxRemoteMobileAppServerArgs\(\)/);
   assert.equal(applyLinuxRemoteMobileAppServerRemoteControlPatch(patched), patched);
+  assert.equal(hasLinuxRemoteMobileLocalAppServerRemoteControlPatch(patched), true);
+});
+
+test("Linux remote mobile app-server launch rejects an incomplete local patch marker", () => {
+  const source = "globalThis.codexLinuxRemoteMobileLocalAppServerArgs=true;";
+
+  assert.equal(applyLinuxRemoteMobileAppServerRemoteControlPatch(source), source);
+  assert.equal(hasLinuxRemoteMobileLocalAppServerRemoteControlPatch(source), false);
+});
+
+test("Linux remote mobile app-server launch does not treat the legacy WSL path as the Desktop transport", () => {
+  const source = syntheticLegacyWslAppServerLaunchBundle();
+
+  assert.equal(applyLinuxRemoteMobileAppServerRemoteControlPatch(source), source);
+});
+
+test("Linux remote mobile extracted-app patch modifies only the local Desktop transport", () => {
+  const tempApp = fs.mkdtempSync(path.join(os.tmpdir(), "codex-remote-mobile-local-transport-"));
+  try {
+    const buildDir = path.join(tempApp, ".vite", "build");
+    const wslFile = path.join(buildDir, "main-test.js");
+    const localFile = path.join(buildDir, "src-test.js");
+    fs.mkdirSync(buildDir, { recursive: true });
+    fs.writeFileSync(wslFile, syntheticLegacyWslAppServerLaunchBundle());
+    fs.writeFileSync(localFile, syntheticCurrentLocalAppServerLaunchBundle());
+
+    const descriptor = remoteMobilePatchDescriptors.find(
+      ({ id }) => id === "linux-remote-mobile-app-server-remote-control",
+    );
+    const result = descriptor.apply(tempApp);
+
+    assert.deepEqual(result, { matched: 1, changed: 1 });
+    assert.equal(fs.readFileSync(wslFile, "utf8"), syntheticLegacyWslAppServerLaunchBundle());
+    assert.match(fs.readFileSync(localFile, "utf8"), /codexLinuxRemoteMobileLocalAppServerArgs/);
+  } finally {
+    fs.rmSync(tempApp, { recursive: true, force: true });
+  }
+});
+
+test("Linux remote mobile extracted-app patch rejects WSL-only and partial local matches", () => {
+  const tempApp = fs.mkdtempSync(path.join(os.tmpdir(), "codex-remote-mobile-partial-transport-"));
+  try {
+    const buildDir = path.join(tempApp, ".vite", "build");
+    fs.mkdirSync(buildDir, { recursive: true });
+    fs.writeFileSync(path.join(buildDir, "main-test.js"), syntheticLegacyWslAppServerLaunchBundle());
+    fs.writeFileSync(path.join(buildDir, "src-test.js"), "globalThis.codexLinuxRemoteMobileLocalAppServerArgs=true;");
+
+    const descriptor = remoteMobilePatchDescriptors.find(
+      ({ id }) => id === "linux-remote-mobile-app-server-remote-control",
+    );
+    const result = descriptor.apply(tempApp);
+
+    assert.deepEqual(result, {
+      matched: 0,
+      changed: 0,
+      reason: "no local Desktop app-server base args found",
+    });
+  } finally {
+    fs.rmSync(tempApp, { recursive: true, force: true });
+  }
 });
 
 test("Linux remote mobile app-server launch keeps a leading use strict directive first", () => {
-  const source = `"use strict";${syntheticAppServerLaunchBundle()}`;
+  const source = `"use strict";${syntheticCurrentLocalAppServerLaunchBundle()}`;
   const patched = applyLinuxRemoteMobileAppServerRemoteControlPatch(source);
 
   assert.notEqual(patched, source);
-  assert.match(patched, /^"use strict";function codexLinuxRemoteMobileAppServerArgs/);
+  assert.match(patched, /^"use strict";function codexLinuxRemoteMobileLocalAppServerArgs/);
   assert.equal(applyLinuxRemoteMobileAppServerRemoteControlPatch(patched), patched);
 });
 
@@ -1554,22 +1632,16 @@ test("Linux mobile setup dialog copy does not refer to Mac-only setup", () => {
   assert.equal(applyLinuxRemoteControlCopyPatch(patched), patched);
 });
 
-test("Linux remote-control settings UX patch keeps outbound tab visible and removes Mac copy", () => {
-  const source = syntheticSettingsBundle() + syntheticSshInstallSettingsBundle();
+test("Linux remote-control settings UX patch applies settings copy and SSH install actions", () => {
+  const source = syntheticRemoteConnectionsSettingsCopyBundle() + syntheticSshInstallSettingsBundle();
   const patched = applyLinuxRemoteControlSettingsUxPatch(source);
 
   assert.notEqual(patched, source);
-  assert.match(patched, /codexLinuxRemoteControlSettingsTabs/);
   assert.match(patched, /codexLinuxRemoteControlSshInstallActions/);
-  assert.match(patched, /function codexLinuxRemoteControlSettingsTabs\(e\)\{return e\}/);
-  assert.doesNotMatch(patched, /e\.filter\(e=>e\.key!==`access-other-devices`\)/);
-  assert.match(patched, /key:`access-other-devices`/);
   assert.match(patched, /Control this Linux desktop/);
-  assert.match(patched, /Control this Linux desktop from your phone or other device/);
-  assert.match(patched, /Add device to control this Linux desktop remotely/);
   assert.match(patched, /Devices that can control this Linux desktop/);
-  assert.match(patched, /Keep Linux desktop awake/);
-  assert.match(patched, /Allow this Linux desktop to be discovered and controlled/);
+  assert.match(patched, /Keep this Linux desktop awake/);
+  assert.match(patched, /SSH connections from this Linux desktop/);
   assert.doesNotMatch(patched, /Control this Mac/);
   assert.doesNotMatch(patched, /this Mac/);
   assert.equal(applyLinuxRemoteControlSettingsUxPatch(patched), patched);
@@ -1676,18 +1748,37 @@ test("Linux remote-control SSH install prefers update-required minRequiredVersio
   assert.deepEqual(JSON.parse(JSON.stringify(context.__mutations)), [{ hostId: "remote-ssh:dev", release: "0.137.0" }]);
 });
 
-test("Linux remote-control settings UX patch handles current minified helper names", () => {
-  const source = syntheticCurrentSettingsBundle();
+test("Linux remote-control settings UX patch bypasses outbound tab hide gate on Linux", () => {
+  const source = [
+    "function $n(e,t){return e.displayName.localeCompare(t.displayName)}",
+    "function Uo(){let l=Pe(`782640499`),u=Pe(on),z=Ge(),B=!l,Se=f==null,Ce=p==null,Ke=z&&!0,qe=B&&(z||!1),Je=z&&!0;return qe}",
+  ].join("");
   const patched = applyLinuxRemoteControlSettingsUxPatch(source);
 
   assert.notEqual(patched, source);
-  assert.match(patched, /codexLinuxRemoteControlSettingsTabs/);
-  assert.match(patched, /function codexLinuxRemoteControlSettingsTabs\(e\)\{return e\}/);
-  assert.match(patched, /tabs:codexLinuxRemoteControlSettingsTabs/);
-  assert.match(patched, /key:`access-other-devices`/);
-  assert.match(patched, /Control this Linux desktop/);
-  assert.doesNotMatch(patched, /Control this Mac/);
+  assert.match(patched, /codexLinuxRemoteControlOutboundTabGate/);
+  assert.match(patched, /B=\/\*codexLinuxRemoteControlOutboundTabGate\*\/\(typeof navigator!=`undefined`&&navigator\.userAgent\.includes\(`Linux`\)\|\|!l\)/);
+  assert.doesNotMatch(patched, /B=!l/);
   assert.equal(applyLinuxRemoteControlSettingsUxPatch(patched), patched);
+
+  const context = {
+    Ge: () => true,
+    Pe: () => true,
+    f: [],
+    navigator: { userAgent: "Linux" },
+    on: "gate",
+    p: [],
+  };
+  vm.runInNewContext(`${patched};globalThis.__visible=Uo();`, context);
+  assert.equal(context.__visible, true);
+});
+
+test("Linux remote-control settings UX patch warns when outbound tab gate consumer drifts", () => {
+  const source = "function Uo(){let l=Pe(`782640499`),u=Pe(on),z=Ge(),B=l,Se=f==null;return B&&z}";
+  const { result, warnings } = captureWarnings(() => applyLinuxRemoteControlSettingsUxPatch(source));
+
+  assert.equal(result, source);
+  assert.ok(warnings.some((warning) => warning.includes("outbound tab gate consumer")));
 });
 
 test("Linux remote-connections refresh patch shortens polling and refreshes on resume signals", () => {
@@ -2546,14 +2637,14 @@ test("Linux remote-control status wait ignores matching atom initializer decoys"
 });
 
 test("Linux remote-control settings UX patch warns when SSH release handling drifts after partial patching", () => {
-  const source = (syntheticSettingsBundle() + syntheticSshInstallSettingsBundle()).replace(
+  const source = (syntheticRemoteConnectionsSettingsCopyBundle() + syntheticSshInstallSettingsBundle()).replace(
     "installedCodexVersion:h",
     "installedVersion:h",
   );
   const { result, warnings } = captureWarnings(() => applyLinuxRemoteControlSettingsUxPatch(source));
 
   assert.notEqual(result, source);
-  assert.match(result, /codexLinuxRemoteControlSettingsTabs/);
+  assert.match(result, /Control this Linux desktop/);
   assert.ok(warnings.some((warning) => warning.includes("SSH install release needles")));
 });
 
@@ -2566,7 +2657,7 @@ test("remote mobile feature patch report records feature metadata and partial wa
       fs.mkdirSync(buildDir, { recursive: true });
       fs.mkdirSync(assetsDir, { recursive: true });
       fs.writeFileSync(path.join(buildDir, "main.js"), syntheticCurrentMainBundle());
-      fs.writeFileSync(path.join(buildDir, "src-test.js"), syntheticAppServerLaunchBundle());
+      fs.writeFileSync(path.join(buildDir, "src-test.js"), syntheticCurrentLocalAppServerLaunchBundle());
       fs.writeFileSync(path.join(tempApp, "package.json"), JSON.stringify({ name: "codex" }));
       fs.writeFileSync(path.join(assetsDir, "app-test.png"), "");
       fs.writeFileSync(
@@ -2598,7 +2689,7 @@ test("remote mobile feature patch report records feature metadata and partial wa
       );
       fs.writeFileSync(
         path.join(assetsDir, "remote-connections-settings-test.js"),
-        (syntheticSettingsBundle() + syntheticSshInstallSettingsBundle()).replace(
+        (syntheticRemoteConnectionsSettingsCopyBundle() + syntheticSshInstallSettingsBundle()).replace(
           "installedCodexVersion:h",
           "installedVersion:h",
         ),
@@ -3545,7 +3636,10 @@ test("remote mobile control feature participates in ASAR patching and reports", 
         fs.mkdirSync(buildDir, { recursive: true });
         fs.mkdirSync(assetsDir, { recursive: true });
         fs.writeFileSync(path.join(buildDir, "main.js"), source);
-        fs.writeFileSync(path.join(buildDir, "workspace-root-drop-handler-test.js"), syntheticAppServerLaunchBundle());
+        fs.writeFileSync(
+          path.join(buildDir, "workspace-root-drop-handler-test.js"),
+          syntheticCurrentLocalAppServerLaunchBundle(),
+        );
         fs.writeFileSync(
           path.join(assetsDir, CURRENT_REMOTE_RUNTIME_ASSET),
           syntheticRemoteConnectionVisibilityBundle() +
@@ -3560,8 +3654,8 @@ test("remote mobile control feature participates in ASAR patching and reports", 
         );
         fs.writeFileSync(
           path.join(assetsDir, "remote-connections-settings-test.js"),
-          syntheticSettingsBundle() +
-            syntheticRemoteConnectionsSettingsCopyBundle() +
+          syntheticRemoteConnectionsSettingsCopyBundle() +
+            "function Uo(){let l=Pe(`782640499`),u=Pe(on),z=Ge(),B=!l,Se=f==null;return B&&z}" +
             syntheticSettingsRefreshBundle() +
             syntheticCurrentRevokeSetupResetBundle(),
         );
@@ -3639,12 +3733,12 @@ test("remote mobile control feature participates in ASAR patching and reports", 
         );
         assert.match(patchedFile, /codexLinuxRemoteControlDeviceKeyClient/);
         assert.match(patchedFile, /n\.kind===`local`&&process\.platform!==`linux`/);
-        assert.match(patchedAppServerLaunchFile, /codexLinuxRemoteMobileAppServerArgs/);
+        assert.match(patchedAppServerLaunchFile, /codexLinuxRemoteMobileLocalAppServerArgs/);
         assert.match(patchedAppServerLaunchFile, /`--remote-control`/);
         assert.match(patchedRemoteConnectionVisibilityFile, /codexLinuxRemoteControlLoadGateEnabled/);
         assert.match(patchedAppMainFile, /\{\.\.\.e,remote_control:!0\}/);
         assert.match(patchedVisibilityFile, /navigator\.userAgent\.includes\(`Linux`\)/);
-        assert.match(patchedRemoteConnectionsSettingsFile, /codexLinuxRemoteControlSettingsTabs/);
+        assert.match(patchedRemoteConnectionsSettingsFile, /codexLinuxRemoteControlOutboundTabGate/);
         assert.match(patchedRemoteConnectionsSettingsFile, /codexLinuxRemoteControlResetMobileSetupAfterRevoke/);
         assert.match(patchedRemoteConnectionsSettingsFile, /codexLinuxRemoteConnectionsRefreshNow/);
         assert.match(patchedRemoteConnectionsSettingsFile, /Qn=5e3/);

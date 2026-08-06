@@ -18,9 +18,7 @@ const DEVICE_KEY_REQUIRE_NEEDLE =
   /(?:var|let|const)\s+[A-Za-z_$][\w$]*=\(0,[A-Za-z_$][\w$]*\.createRequire\)\(__filename\),[A-Za-z_$][\w$]*=`remote-control-device-key\.node`/u;
 const REMOTE_CONTROL_SETTINGS_VISIBILITY_NEEDLE =
   /function ([A-Za-z_$][\w$]*)\(\{remoteControlConnectionsState:([A-Za-z_$][\w$]*),slingshotEnabled:([A-Za-z_$][\w$]*)\}\)\{return \3&&\(\2\?\.available\?\?!0\)(?:&&\2\?\.accessRequired!==!0)?\}/u;
-const REMOTE_CONTROL_SETTINGS_UX_MARKER = "codexLinuxRemoteControlSettingsTabs";
-const REMOTE_CONTROL_SETTINGS_TABS_HELPER =
-  "function codexLinuxRemoteControlSettingsTabs(e){return e}";
+const REMOTE_CONTROL_OUTBOUND_TAB_GATE_MARKER = "codexLinuxRemoteControlOutboundTabGate";
 const REMOTE_CONTROL_SSH_INSTALL_ACTION_MARKER = "codexLinuxRemoteControlSshInstallActions";
 const REMOTE_CONTROL_SSH_INSTALL_RELEASE_MARKER = "codexLinuxRemoteControlSshInstallRelease";
 const REMOTE_CONNECTIONS_REFRESH_MARKER = "codexLinuxRemoteConnectionsRefreshNow";
@@ -46,9 +44,13 @@ const REMOTE_CONTROL_STATUS_WAIT_MARKER = "codexLinuxRemoteControlStatusWaitMs";
 const REMOTE_CONTROL_REVOKE_SETUP_RESET_MARKER = "codexLinuxRemoteControlResetMobileSetupAfterRevoke";
 const REMOTE_CONTROL_VISIBILITY_MARKER = "codexLinuxRemoteControlVisibilityEnabled";
 const REMOTE_CONTROL_COPY_MARKER = "codexLinuxRemoteControlCopy";
-const REMOTE_MOBILE_APP_SERVER_REMOTE_CONTROL_MARKER = "codexLinuxRemoteMobileAppServerArgs";
-const REMOTE_MOBILE_APP_SERVER_ARGS_NEEDLE =
-  "[`-c`,`features.code_mode_host=true`,`app-server`,`--analytics-default-enabled`]";
+const REMOTE_MOBILE_APP_SERVER_REMOTE_CONTROL_MARKER = "codexLinuxRemoteMobileLocalAppServerArgs";
+const REMOTE_MOBILE_APP_SERVER_BASE_ARGS_NEEDLE = "[`-c`,`features.code_mode_host=true`]";
+const REMOTE_MOBILE_APP_SERVER_LAUNCH_TAIL = "`app-server`,`--analytics-default-enabled`]}";
+const REMOTE_MOBILE_APP_SERVER_REMOTE_CONTROL_HELPER =
+  "function codexLinuxRemoteMobileLocalAppServerArgs(){return process.platform===`linux`?[`--remote-control`]:[]}";
+const REMOTE_MOBILE_APP_SERVER_PATCHED_LAUNCH_TAIL =
+  "`app-server`,...codexLinuxRemoteMobileLocalAppServerArgs(),`--analytics-default-enabled`]}";
 const REMOTE_CONTROL_APP_INITIAL_ASSET_PATTERN = /^app-initial-[^.]+\.js$/u;
 const REMOTE_CONTROL_LINUX_COPY_REPLACEMENTS = [
   ["defaultMessage:`Mac`", "defaultMessage:`Linux`"],
@@ -211,17 +213,45 @@ function applyLinuxRemoteControlClientRevocationRecoveryPatch(source) {
 
 function applyLinuxRemoteMobileAppServerRemoteControlPatch(source) {
   if (source.includes(REMOTE_MOBILE_APP_SERVER_REMOTE_CONTROL_MARKER)) {
+    if (!hasLinuxRemoteMobileLocalAppServerRemoteControlPatch(source)) {
+      console.warn(
+        "WARN: Found an incomplete local Desktop app-server remote-control patch - refusing to accept partial state",
+      );
+    }
     return source;
   }
-  if (!source.includes(REMOTE_MOBILE_APP_SERVER_ARGS_NEEDLE)) {
+  const baseArgsMatches = [
+    ...source.matchAll(
+      new RegExp(`([A-Za-z_$][\\w$]*)=${escapeRegExp(REMOTE_MOBILE_APP_SERVER_BASE_ARGS_NEEDLE)}`, "gu"),
+    ),
+  ];
+  if (baseArgsMatches.length !== 1) {
     return source;
   }
 
-  const helper =
-    "function codexLinuxRemoteMobileAppServerArgs(){return process.platform===`linux`?[`-c`,`features.code_mode_host=true`,`app-server`,`--remote-control`,`--analytics-default-enabled`]:[`-c`,`features.code_mode_host=true`,`app-server`,`--analytics-default-enabled`]}";
-  const replaced = source
-    .split(REMOTE_MOBILE_APP_SERVER_ARGS_NEEDLE)
-    .join("codexLinuxRemoteMobileAppServerArgs()");
+  const baseArgsVariable = baseArgsMatches[0][1];
+  const launchFunctionMatches = [
+    ...source.matchAll(
+      new RegExp(
+        `function ([A-Za-z_$][\\w$]*)\\(\\)\\{return\\[\\.\\.\\.${escapeRegExp(baseArgsVariable)},`,
+        "gu",
+      ),
+    ),
+  ];
+  if (launchFunctionMatches.length !== 1) {
+    return source;
+  }
+
+  const launchFunctionIndex = launchFunctionMatches[0].index;
+  const nextFunctionIndex = source.indexOf("}function", launchFunctionIndex);
+  const launchTailIndex = source.indexOf(REMOTE_MOBILE_APP_SERVER_LAUNCH_TAIL, launchFunctionIndex);
+  if (launchTailIndex < 0 || (nextFunctionIndex >= 0 && launchTailIndex >= nextFunctionIndex)) {
+    return source;
+  }
+
+  const replaced = `${source.slice(0, launchTailIndex)}${REMOTE_MOBILE_APP_SERVER_PATCHED_LAUNCH_TAIL}${source.slice(
+    launchTailIndex + REMOTE_MOBILE_APP_SERVER_LAUNCH_TAIL.length,
+  )}`;
   // Insert after a leading "use strict" so prepending the helper does not
   // demote the directive to a plain expression and de-strict the bundle.
   const insertAt = replaced.startsWith('"use strict";')
@@ -229,7 +259,14 @@ function applyLinuxRemoteMobileAppServerRemoteControlPatch(source) {
     : replaced.startsWith("'use strict';")
       ? "'use strict';".length
       : 0;
-  return `${replaced.slice(0, insertAt)}${helper}${replaced.slice(insertAt)}`;
+  return `${replaced.slice(0, insertAt)}${REMOTE_MOBILE_APP_SERVER_REMOTE_CONTROL_HELPER}${replaced.slice(insertAt)}`;
+}
+
+function hasLinuxRemoteMobileLocalAppServerRemoteControlPatch(source) {
+  return (
+    source.includes(REMOTE_MOBILE_APP_SERVER_REMOTE_CONTROL_HELPER) &&
+    source.includes(REMOTE_MOBILE_APP_SERVER_PATCHED_LAUNCH_TAIL)
+  );
 }
 
 function applyLinuxRemoteMobileAppServerRemoteControlExtractedAppPatch(extractedDir) {
@@ -251,22 +288,26 @@ function applyLinuxRemoteMobileAppServerRemoteControlExtractedAppPatch(extracted
     const filePath = path.join(buildDir, candidate);
     const source = fs.readFileSync(filePath, "utf8");
     if (
-      !source.includes(REMOTE_MOBILE_APP_SERVER_ARGS_NEEDLE) &&
+      !source.includes(REMOTE_MOBILE_APP_SERVER_BASE_ARGS_NEEDLE) &&
       !source.includes(REMOTE_MOBILE_APP_SERVER_REMOTE_CONTROL_MARKER)
     ) {
       continue;
     }
-    matched += 1;
     const patched = applyLinuxRemoteMobileAppServerRemoteControlPatch(source);
     if (patched !== source) {
+      matched += 1;
       fs.writeFileSync(filePath, patched, "utf8");
       changed += 1;
+    } else if (hasLinuxRemoteMobileLocalAppServerRemoteControlPatch(source)) {
+      matched += 1;
     }
   }
 
   if (matched === 0) {
-    const reason = "no default app-server launch args found";
-    console.warn("WARN: Could not find default app-server launch args - skipping remote mobile app-server remote-control patch");
+    const reason = "no local Desktop app-server base args found";
+    console.warn(
+      "WARN: Could not find local Desktop app-server base args - skipping remote mobile app-server remote-control patch",
+    );
     return { matched, changed, reason };
   }
   return { matched, changed };
@@ -432,18 +473,6 @@ function applyLinuxRemoteControlVisibilityPatch(source) {
   return source.replace(
     REMOTE_CONTROL_SETTINGS_VISIBILITY_NEEDLE,
     `function ${functionName}({remoteControlConnectionsState:${stateVar},slingshotEnabled:${slingshotVar}}){let n=typeof navigator!=\`undefined\`&&navigator.userAgent.includes(\`Linux\`);/*${REMOTE_CONTROL_VISIBILITY_MARKER}*/return(n||${slingshotVar})&&(n||(${stateVar}?.available??!0))&&${stateVar}?.accessRequired!==!0}`,
-  );
-}
-
-function wrapRemoteControlTabs(source, firstKey) {
-  const key = firstKey.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const pattern = new RegExp(
-    `tabs:(\\[\\{key:\`${key}\`[\\s\\S]*?\\}\\]),selectedKey:([A-Za-z_$][\\w$]*),variant:\`underline\`,onSelect:([A-Za-z_$][\\w$]*)\\}`,
-    "g",
-  );
-  return source.replace(
-    pattern,
-    "tabs:codexLinuxRemoteControlSettingsTabs($1),selectedKey:$2,variant:`underline`,onSelect:$3}",
   );
 }
 
@@ -648,19 +677,33 @@ function applyLinuxRemoteControlSettingsUxPatch(source) {
   let patched = applyLinuxRemoteControlSshInstallReleasePatch(replaceLinuxRemoteControlCopy(source).patched);
   patched = applyLinuxRemoteControlSshInstallActionPatch(patched);
 
-  if (!patched.includes(REMOTE_CONTROL_SETTINGS_UX_MARKER)) {
-    const helperNeedle = /function ([A-Za-z_$][\w$]*)\(e,t\)\{return e\.displayName\.localeCompare\(t\.displayName\)\}/u;
-    const helperMatch = patched.match(helperNeedle);
-    if (helperMatch == null) {
-      console.warn("WARN: Could not find remote-control settings helper needle - skipping Linux remote-control settings UX patch");
-      return patched;
-    }
-    patched = patched.replace(helperNeedle, `${REMOTE_CONTROL_SETTINGS_TABS_HELPER}${helperMatch[0]}`);
+  patched = applyLinuxRemoteControlOutboundTabGatePatch(patched);
+
+  return patched;
+}
+
+function applyLinuxRemoteControlOutboundTabGatePatch(source) {
+  if (source.includes(REMOTE_CONTROL_OUTBOUND_TAB_GATE_MARKER)) {
+    return source;
   }
 
-  patched = wrapRemoteControlTabs(patched, "control-this-mac");
-  patched = wrapRemoteControlTabs(patched, "access-other-devices");
+  const gateMatch = source.match(/([A-Za-z_$][\w$]*)=([A-Za-z_$][\w$]*)\(`782640499`\)/u);
+  if (gateMatch == null) {
+    return source;
+  }
 
+  const [, hiddenGateVar] = gateMatch;
+  const negatedGate = new RegExp(
+    `([A-Za-z_$][\\w$]*)=!${hiddenGateVar}(?=,[A-Za-z_$][\\w$]*=[A-Za-z_$][\\w$]*==null)`,
+    "u",
+  );
+  const patched = source.replace(
+    negatedGate,
+    `$1=/*${REMOTE_CONTROL_OUTBOUND_TAB_GATE_MARKER}*/(typeof navigator!=\`undefined\`&&navigator.userAgent.includes(\`Linux\`)||!${hiddenGateVar})`,
+  );
+  if (patched === source) {
+    console.warn("WARN: Could not find remote-control outbound tab gate consumer - skipping Linux outbound tab gate patch");
+  }
   return patched;
 }
 
@@ -1463,6 +1506,8 @@ module.exports = [
 module.exports.applyLinuxRemoteControlDeviceKeyPatch = applyLinuxRemoteControlDeviceKeyPatch;
 module.exports.applyLinuxRemoteMobileAppServerRemoteControlPatch =
   applyLinuxRemoteMobileAppServerRemoteControlPatch;
+module.exports.hasLinuxRemoteMobileLocalAppServerRemoteControlPatch =
+  hasLinuxRemoteMobileLocalAppServerRemoteControlPatch;
 module.exports.applyLinuxRemoteMobileChromeBridgePatch = applyLinuxRemoteMobileChromeBridgePatch;
 module.exports.applyLinuxRemoteMobileCompletedItemRecoveryPatch =
   applyLinuxRemoteMobileCompletedItemRecoveryPatch;
