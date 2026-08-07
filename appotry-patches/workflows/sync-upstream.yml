@@ -94,7 +94,7 @@ jobs:
       - name: Commit and push
         if: env.MERGED == '1'
         env:
-          # TOKEN: 用户配置的 PAT（有 workflows 权限），用于推送
+          # TOKEN: 用户配置的 PAT（含 workflow scope），用于推送
           # 含上游 workflow 文件变更的合并结果
           PUSH_TOKEN: ${{ secrets.TOKEN }}
         run: |
@@ -103,5 +103,8 @@ jobs:
           git add -A
           git diff --cached --quiet || \
             git commit -m "chore: merge upstream ${SHA} and re-apply patches"
+          # 先拉远程最新 releases，rebase 后推送，避免并发下的 fetch-first 拒绝
+          git fetch origin releases
+          git rebase origin/releases || true
           git push "https://x-access-token:${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" releases
           echo "Pushed merged upstream ${SHA} to releases."
