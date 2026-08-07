@@ -57,6 +57,22 @@ jobs:
           git merge upstream/main --no-edit --allow-unrelated-histories
           echo "MERGED=1" >> "$GITHUB_ENV"
 
+      - name: Verify push token
+        if: env.MERGED == '1'
+        env:
+          PUSH_TOKEN: ${{ secrets.TOKEN }}
+        run: |
+          # 诊断：确认 TOKEN 是 PAT 且有 workflows 权限。
+          # PAT 身份：GET /user 返回 login；GITHUB_TOKEN 身份会失败。
+          echo "--- whoami ---"
+          curl -s -H "Authorization: Bearer ${PUSH_TOKEN}" \
+            "https://api.github.com/user" | python3 -c \
+            "import json,sys; d=json.load(sys.stdin); print('login:', d.get('login', 'NOT-A-PAT'))"
+          echo "--- workflow permission check ---"
+          curl -s -H "Authorization: Bearer ${PUSH_TOKEN}" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/contents/.github/workflows/upstream-build-app.yml?ref=main" \
+            -o /dev/null -w "http_code=%{http_code}\n" || true
+
       - name: Apply appotry patches
         if: env.MERGED == '1'
         run: |
