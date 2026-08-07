@@ -269,6 +269,28 @@ function appBundleVersion(appDir) {
   return version.length > 0 ? version : null;
 }
 
+function recordAppVersionMetadata(metadataPath, appDir) {
+  const appVersion = appBundleVersion(appDir);
+  if (appVersion == null) {
+    return null;
+  }
+  const metadata = fs.existsSync(metadataPath)
+    ? JSON.parse(fs.readFileSync(metadataPath, "utf8"))
+    : {};
+  metadata.appVersion = appVersion;
+  const metadataDir = path.dirname(metadataPath);
+  fs.mkdirSync(metadataDir, { recursive: true });
+  const stagingDir = fs.mkdtempSync(path.join(metadataDir, ".upstream-dmg-metadata-"));
+  const stagingPath = path.join(stagingDir, path.basename(metadataPath));
+  try {
+    fs.writeFileSync(stagingPath, `${JSON.stringify(metadata, null, 2)}\n`, "utf8");
+    fs.renameSync(stagingPath, metadataPath);
+  } finally {
+    fs.rmSync(stagingDir, { recursive: true, force: true });
+  }
+  return appVersion;
+}
+
 function linuxTargetInfo(target) {
   return {
     summary: linuxTargetSummary(target),
@@ -356,6 +378,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+  appBundleVersion,
   buildInfo,
   githubCommitUrl,
   isoTimestamp,
@@ -363,5 +386,6 @@ module.exports = {
   sanitizeGitRemoteUrl,
   sourceInfo,
   sourceInfoFromGit,
+  recordAppVersionMetadata,
   writeBuildInfo,
 };
