@@ -57,6 +57,15 @@ jobs:
           git merge upstream/main --no-edit --allow-unrelated-histories
           echo "MERGED=1" >> "$GITHUB_ENV"
 
+      - name: Discard upstream workflow changes
+        if: env.MERGED == '1'
+        run: |
+          set -euo pipefail
+          # 上游 workflow 文件变更不合并：推送它们需要 workflows 权限，
+          # GITHUB_TOKEN 默认没有。我们的 workflow 由 appotry-patches 提供。
+          git reset -q -- .github/workflows/
+          git checkout -- .github/workflows/ 2>/dev/null || true
+
       - name: Apply appotry patches
         if: env.MERGED == '1'
         run: |
