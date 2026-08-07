@@ -20,6 +20,7 @@ REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 # Map: patch source -> destination (relative to repo root)
 PATCHES=(
   "appotry-patches/workflows/auto-build.yml:.github/workflows/auto-build.yml"
+  "appotry-patches/workflows/sync-upstream.yml:.github/workflows/sync-upstream.yml"
   "appotry-patches/docs/LOCAL-BUILD.zh.md:docs/LOCAL-BUILD.zh.md"
 )
 
