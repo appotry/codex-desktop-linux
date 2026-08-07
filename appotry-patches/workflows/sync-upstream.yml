@@ -62,25 +62,6 @@ jobs:
         run: |
           bash appotry-patches/apply.sh
 
-      - name: Diagnose push auth
-        if: env.MERGED == '1'
-        env:
-          PUSH_TOKEN: ${{ secrets.TOKEN }}
-        run: |
-          set -euo pipefail
-          echo "--- git version ---"
-          git --version
-          echo "--- credential helpers ---"
-          git config --list | grep -i credential || echo "(none)"
-          echo "--- test ls-remote with URL token ---"
-          git -c credential.helper= ls-remote \
-            "https://oauth2:${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD \
-            && echo "AUTH OK (URL token works)" || echo "AUTH FAILED"
-          echo "--- test ls-remote with plain token ---"
-          git -c credential.helper= ls-remote \
-            "https://${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD \
-            && echo "AUTH2 OK" || echo "AUTH2 FAILED"
-
       - name: Commit and push
         if: env.MERGED == '1'
         env:
@@ -96,8 +77,9 @@ jobs:
           # 先拉远程最新 releases，rebase 后推送，避免并发下的 fetch-first 拒绝
           git fetch origin releases
           git rebase origin/releases || true
-          # 禁用凭据 helper，防止 fallback 到 checkout 配置的 GITHUB_TOKEN；
-          # 用 oauth2: 前缀 + PAT 保证 workflow 写权限
-          git -c credential.helper= push \
+          # actions/checkout 配置了 http.extraheader（GITHUB_TOKEN），
+          # 它会覆盖 URL 中的 PAT 导致 workflow 权限失效。
+          # 用 -c 覆盖为空 + oauth2: 前缀强制使用 PAT。
+          git -c credential.helper= -c "http.https://github.com/.extraheader=" push \
             "https://oauth2:${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" releases
           echo "Pushed merged upstream ${SHA} to releases."
