@@ -63,8 +63,8 @@ jobs:
           set -euo pipefail
           # 上游 workflow 文件变更不合并：推送它们需要 workflows 权限，
           # GITHUB_TOKEN 默认没有。我们的 workflow 由 appotry-patches 提供。
-          # reset 恢复已跟踪文件到 HEAD，clean 删除 merge 新增的 untracked 文件。
-          git reset -q --hard HEAD -- .github/workflows/
+          # checkout 恢复已跟踪文件到 HEAD，clean 删除 merge 新增的 untracked 文件。
+          git checkout -- .github/workflows/
           git clean -fd -- .github/workflows/
 
       - name: Apply appotry patches
