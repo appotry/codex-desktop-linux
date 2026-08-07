@@ -20,11 +20,8 @@ on:
     - cron: '0 */6 * * *'
   workflow_dispatch:
 
-# workflows:write 是必须的：合并上游会带入 workflow 文件修改，
-# 推送这些文件需要该权限（否则 GitHub 拒绝 push）
 permissions:
   contents: write
-  workflows: write
 
 concurrency:
   group: sync-upstream
@@ -73,5 +70,9 @@ jobs:
           git add -A
           git diff --cached --quiet || \
             git commit -m "chore: merge upstream ${SHA} and re-apply patches"
-          git push origin releases
+          # 推送合并结果（含上游 workflow 文件变更）需要写 workflows 权限。
+          # 优先使用 SYNC_PAT；若未配置，回退 GITHUB_TOKEN（需 repo 设置
+          # Actions → General → Workflow permissions 为 Read and write）。
+          PUSH_TOKEN="${SYNC_PAT:-$GITHUB_TOKEN}"
+          git push "https://x-access-token:${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" releases
           echo "Pushed merged upstream ${SHA} to releases."
