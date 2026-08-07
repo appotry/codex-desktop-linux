@@ -64,15 +64,15 @@ jobs:
 
       - name: Commit and push
         if: env.MERGED == '1'
+        env:
+          # SYNC_PAT: 可选，用于推送含 workflow 变更的合并结果
+          # 未配置时回退 GITHUB_TOKEN（需 repo 设置允许写 workflows）
+          PUSH_TOKEN: ${{ secrets.SYNC_PAT || github.token }}
         run: |
           set -euo pipefail
           SHA="$(git rev-parse --short upstream/main)"
           git add -A
           git diff --cached --quiet || \
             git commit -m "chore: merge upstream ${SHA} and re-apply patches"
-          # 推送合并结果（含上游 workflow 文件变更）需要写 workflows 权限。
-          # 优先使用 SYNC_PAT；若未配置，回退 GITHUB_TOKEN（需 repo 设置
-          # Actions → General → Workflow permissions 为 Read and write）。
-          PUSH_TOKEN="${SYNC_PAT:-$GITHUB_TOKEN}"
           git push "https://x-access-token:${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" releases
           echo "Pushed merged upstream ${SHA} to releases."
