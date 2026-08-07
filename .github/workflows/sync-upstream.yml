@@ -42,28 +42,23 @@ jobs:
           git config user.name "appotry-sync-bot"
           git config user.email "appotry@users.noreply.github.com"
 
-      - name: Merge upstream main
+      - name: Reset to upstream and re-apply patches
         run: |
           set -euo pipefail
           git remote add upstream https://github.com/ilysenko/codex-desktop-linux.git
           git fetch upstream main
 
-          if git merge-base --is-ancestor upstream/main HEAD; then
-            echo "Upstream already merged, nothing to do."
-            exit 0
-          fi
-
-          # 我们的补丁文件上游不存在，merge 应无冲突；若有冲突则失败并提示人工处理
-          git merge upstream/main --no-edit --allow-unrelated-histories
-          echo "MERGED=1" >> "$GITHUB_ENV"
+          # 策略：releases 永远等于 上游 main + 补丁。
+          # reset 到上游最新（丢弃旧的补丁提交），再重新应用补丁，
+          # 避免 merge 历史累积导致分支与上游无限分叉。
+          git reset --hard upstream/main
+          echo "RESET=1" >> "$GITHUB_ENV"
 
       - name: Apply appotry patches
-        if: env.MERGED == '1'
         run: |
           bash appotry-patches/apply.sh
 
       - name: Commit and push
-        if: env.MERGED == '1'
         env:
           # TOKEN: 用户配置的 PAT（含 workflow scope），用于推送
           # 含上游 workflow 文件变更的合并结果
@@ -72,14 +67,17 @@ jobs:
           set -euo pipefail
           SHA="$(git rev-parse --short upstream/main)"
           git add -A
-          git diff --cached --quiet || \
-            git commit -m "chore: merge upstream ${SHA} and re-apply patches"
-          # 先拉远程最新 releases，rebase 后推送，避免并发下的 fetch-first 拒绝
-          git fetch origin releases
-          git rebase origin/releases || true
+          git diff --cached --quiet && {
+            echo "Patches already applied on latest upstream, nothing to commit."
+            exit 0
+          }
+          git commit -m "chore: apply appotry patches on upstream ${SHA}"
+          # reset-based 策略：我们是 releases 的权威重建方，
+          # 用 --force-with-lease 推送（防止并发覆盖别人的新提交）。
           # actions/checkout 配置了 http.extraheader（GITHUB_TOKEN），
           # 它会覆盖 URL 中的 PAT 导致 workflow 权限失效。
           # 用 -c 覆盖为空 + oauth2: 前缀强制使用 PAT。
           git -c credential.helper= -c "http.https://github.com/.extraheader=" push \
+            --force-with-lease \
             "https://oauth2:${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" releases
           echo "Pushed merged upstream ${SHA} to releases."
