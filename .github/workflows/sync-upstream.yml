@@ -20,10 +20,10 @@ on:
     - cron: '0 */6 * * *'
   workflow_dispatch:
 
+# workflows:write 是必须的：合并上游会带入 workflow 文件修改，
+# 推送这些文件需要该权限（否则 GitHub 拒绝 push）
 permissions:
   contents: write
-  # 合并上游时会带入 workflow 文件修改（如 upstream-build-app.yml），
-  # 推送这些文件需要 workflows 权限
   workflows: write
 
 concurrency:
