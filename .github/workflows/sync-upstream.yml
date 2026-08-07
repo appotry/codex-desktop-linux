@@ -1,0 +1,85 @@
+# ============================================================================
+# Sync upstream and rebuild releases branch.
+#
+# 设计（方案 B：上游为基线 + 补丁目录）：
+#   - 本 workflow 定时拉取上游 main，合并到 releases 分支
+#   - 合并后重新应用 appotry-patches/ 中的补丁
+#   - 推送 releases 触发 auto-build.yml 自动构建并发布 Release
+#
+# 触发：
+#   - schedule: 每 6 小时检查一次上游更新
+#   - workflow_dispatch: 手动触发
+#
+# 注意：不要在 GitHub 网页上使用 "Sync fork" 按钮，它会把上游合并到
+# 默认分支（releases），与补丁冲突。本 workflow 才是同步的正确方式。
+# ============================================================================
+name: Sync Upstream
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: releases
+          fetch-depth: 0
+
+      - name: Configure git
+        run: |
+          git config user.name "appotry-sync-bot"
+          git config user.email "appotry@users.noreply.github.com"
+
+      - name: Merge upstream main
+        run: |
+          set -euo pipefail
+          git remote add upstream https://github.com/ilysenko/codex-desktop-linux.git
+          git fetch upstream main
+
+          if git merge-base --is-ancestor upstream/main HEAD; then
+            echo "Upstream already merged, nothing to do."
+            exit 0
+          fi
+
+          # 我们的补丁文件上游不存在，merge 应无冲突；若有冲突则失败并提示人工处理
+          git merge upstream/main --no-edit --allow-unrelated-histories
+          echo "MERGED=1" >> "$GITHUB_ENV"
+
+      - name: Apply appotry patches
+        if: env.MERGED == '1'
+        run: |
+          bash appotry-patches/apply.sh
+
+      - name: Commit and push
+        if: env.MERGED == '1'
+        env:
+          # TOKEN: 用户配置的 PAT（含 workflow scope），用于推送
+          # 含上游 workflow 文件变更的合并结果
+          PUSH_TOKEN: ${{ secrets.TOKEN }}
+        run: |
+          set -euo pipefail
+          SHA="$(git rev-parse --short upstream/main)"
+          git add -A
+          git diff --cached --quiet || \
+            git commit -m "chore: merge upstream ${SHA} and re-apply patches"
+          # 先拉远程最新 releases，rebase 后推送，避免并发下的 fetch-first 拒绝
+          git fetch origin releases
+          git rebase origin/releases || true
+          # actions/checkout 配置了 http.extraheader（GITHUB_TOKEN），
+          # 它会覆盖 URL 中的 PAT 导致 workflow 权限失效。
+          # 用 -c 覆盖为空 + oauth2: 前缀强制使用 PAT。
+          git -c credential.helper= -c "http.https://github.com/.extraheader=" push \
+            "https://oauth2:${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" releases
+          echo "Pushed merged upstream ${SHA} to releases."
