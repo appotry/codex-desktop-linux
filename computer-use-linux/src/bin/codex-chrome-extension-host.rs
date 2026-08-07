@@ -14,7 +14,11 @@ use std::{
     },
     path::{Path, PathBuf},
     process,
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        mpsc::{sync_channel, Receiver, SyncSender, TrySendError},
+        Arc, Mutex, Weak,
+    },
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -38,18 +42,73 @@ const MAX_ACCEPTED_FRAME_BYTES: usize = 64 * 1024 * 1024;
 const PENDING_REQUEST_TTL: Duration = Duration::from_secs(10 * 60);
 /// Bounds unanswered correlations independently in each bridge direction.
 const MAX_PENDING_REQUESTS_PER_DIRECTION: usize = 1024;
+/// Prevents one stalled browser client from exhausting the shared request pool.
+const MAX_PENDING_REQUESTS_PER_CLIENT_PER_DIRECTION: usize = 256;
 /// Bounds retained string IDs to about 4 MiB per direction at the entry cap.
 const MAX_PENDING_REQUEST_ID_STRING_BYTES: usize = 4 * 1024;
+/// Bounds simultaneously connected Codex browser clients and their I/O threads.
+const MAX_CONNECTED_CLIENTS: usize = 64;
+/// Retains a small secondary item bound for streams of tiny messages.
+const CLIENT_WRITE_QUEUE_MAX_MESSAGES: usize = 64;
+/// Bounds each client's queued and in-flight serialized frame bytes.
+const CLIENT_WRITE_QUEUE_MAX_BYTES: usize = MAX_ACCEPTED_FRAME_BYTES + std::mem::size_of::<u32>();
+/// Bounds retained browser-session routing state.
+const MAX_TRACKED_SESSIONS: usize = 1024;
+const MAX_SESSION_ID_BYTES: usize = 1024;
 const PENDING_REQUEST_LIMIT_ERROR_CODE: i64 = -32001;
 const INVALID_REQUEST_ERROR_CODE: i64 = -32600;
 
 type SharedState = Arc<Mutex<HostState>>;
 type SharedChromeWriter = Arc<Mutex<Box<dyn Write + Send>>>;
-type SharedClientWriter = Arc<Mutex<UnixStream>>;
+type SharedClientFrame = Arc<[u8]>;
 
-#[derive(Clone)]
 struct Client {
-    writer: SharedClientWriter,
+    sender: SyncSender<QueuedClientFrame>,
+    queued_bytes: Arc<AtomicUsize>,
+    max_queued_bytes: usize,
+    shutdown: UnixStream,
+}
+
+impl Client {
+    fn new(
+        sender: SyncSender<QueuedClientFrame>,
+        queued_bytes: Arc<AtomicUsize>,
+        shutdown: UnixStream,
+    ) -> Self {
+        Self {
+            sender,
+            queued_bytes,
+            max_queued_bytes: CLIENT_WRITE_QUEUE_MAX_BYTES,
+            shutdown,
+        }
+    }
+
+    #[cfg(test)]
+    fn with_max_queued_bytes(
+        sender: SyncSender<QueuedClientFrame>,
+        queued_bytes: Arc<AtomicUsize>,
+        max_queued_bytes: usize,
+        shutdown: UnixStream,
+    ) -> Self {
+        Self {
+            sender,
+            queued_bytes,
+            max_queued_bytes,
+            shutdown,
+        }
+    }
+}
+
+struct QueuedClientFrame {
+    bytes: SharedClientFrame,
+    queued_bytes: Arc<AtomicUsize>,
+}
+
+impl Drop for QueuedClientFrame {
+    fn drop(&mut self) {
+        self.queued_bytes
+            .fetch_sub(self.bytes.len(), Ordering::AcqRel);
+    }
 }
 
 struct PendingChromeRequest {
@@ -63,6 +122,7 @@ struct PendingChromeRequest {
 struct PendingClientRequest {
     client_id: usize,
     chrome_request_id: Value,
+    fanout_group: Option<u64>,
     created_at: Instant,
 }
 
@@ -77,7 +137,7 @@ impl ChromeClientRouteError {
         match self {
             Self::NoClients => "No Codex browser client is connected",
             Self::MultipleClients => {
-                "Multiple Codex browser clients are connected; Chrome requests require exactly one"
+                "Multiple Codex browser clients are connected; Chrome request is not scoped to a known browser session"
             }
         }
     }
@@ -88,6 +148,7 @@ struct HostState {
     rollout_tracker: RolloutTracker,
     extension_id: Option<String>,
     clients: HashMap<usize, Client>,
+    session_owners: HashMap<String, usize>,
     pending_chrome_requests: HashMap<String, PendingChromeRequest>,
     pending_client_requests: HashMap<String, PendingClientRequest>,
     next_client_id: usize,
@@ -108,6 +169,7 @@ impl HostState {
             rollout_tracker,
             extension_id,
             clients: HashMap::new(),
+            session_owners: HashMap::new(),
             pending_chrome_requests: HashMap::new(),
             pending_client_requests: HashMap::new(),
             next_client_id: 1,
@@ -117,26 +179,56 @@ impl HostState {
         }
     }
 
-    fn replace_with_client(&mut self, writer: SharedClientWriter) -> (usize, Vec<(usize, Client)>) {
-        let evicted_clients = self.clients.drain().collect::<Vec<_>>();
-        if !evicted_clients.is_empty() {
-            self.pending_chrome_requests.clear();
-            self.pending_client_requests.clear();
+    fn add_client(&mut self, client: Client) -> Option<usize> {
+        if self.clients.len() >= MAX_CONNECTED_CLIENTS {
+            return None;
         }
 
-        let id = self.next_client_id;
-        self.next_client_id += 1;
-        self.clients.insert(id, Client { writer });
-        (id, evicted_clients)
+        let mut id = self.next_client_id.max(1);
+        while self.clients.contains_key(&id) {
+            id = id.checked_add(1).unwrap_or(1);
+        }
+        self.next_client_id = id.checked_add(1).unwrap_or(1);
+        self.clients.insert(id, client);
+        Some(id)
     }
 
-    fn remove_client(&mut self, client_id: usize) {
-        self.clients.remove(&client_id);
+    fn remove_client(&mut self, client_id: usize) -> bool {
+        let Some(client) = self.clients.remove(&client_id) else {
+            return false;
+        };
+        let _ = client.shutdown.shutdown(Shutdown::Both);
+        self.session_owners
+            .retain(|_, owner_client_id| *owner_client_id != client_id);
         remove_pending_requests_for_client(
             &mut self.pending_chrome_requests,
             &mut self.pending_client_requests,
             client_id,
         );
+        true
+    }
+
+    fn track_session_owner(&mut self, client_id: usize, message: &Value) {
+        let Some(session_id) = session_id_from_message(message) else {
+            return;
+        };
+        if !self.clients.contains_key(&client_id) {
+            return;
+        }
+        if !self.session_owners.contains_key(session_id)
+            && self.session_owners.len() >= MAX_TRACKED_SESSIONS
+        {
+            return;
+        }
+
+        self.session_owners
+            .insert(session_id.to_string(), client_id);
+    }
+
+    fn session_owner(&self, message: &Value) -> Option<usize> {
+        let session_id = session_id_from_message(message)?;
+        let client_id = *self.session_owners.get(session_id)?;
+        self.clients.contains_key(&client_id).then_some(client_id)
     }
 
     fn prune_expired_pending_requests(&mut self, now: Instant) {
@@ -148,6 +240,20 @@ impl HostState {
         });
     }
 
+    fn pending_chrome_request_count(&self, client_id: usize) -> usize {
+        self.pending_chrome_requests
+            .values()
+            .filter(|pending| pending.client_id == client_id)
+            .count()
+    }
+
+    fn pending_client_request_count(&self, client_id: usize) -> usize {
+        self.pending_client_requests
+            .values()
+            .filter(|pending| pending.client_id == client_id)
+            .count()
+    }
+
     fn send_chrome(&self, message: &Value) {
         let mut stdout = self.stdout.lock().expect("stdout mutex poisoned");
         if let Err(error) = write_frame(&mut *stdout, message) {
@@ -156,22 +262,94 @@ impl HostState {
         }
     }
 
-    fn send_client(&self, client_id: usize, message: &Value) {
+    fn send_client(&mut self, client_id: usize, message: &Value) -> bool {
+        if !self.clients.contains_key(&client_id) {
+            return false;
+        }
+
+        let frame = match serialize_frame(message) {
+            Ok(frame) => frame,
+            Err(error) => {
+                log(&format!("client frame serialization error: {error}"));
+                self.remove_client(client_id);
+                return false;
+            }
+        };
+        self.send_client_frame(client_id, frame)
+    }
+
+    fn send_client_frame(&mut self, client_id: usize, frame: SharedClientFrame) -> bool {
         let Some(client) = self.clients.get(&client_id) else {
-            return;
+            return false;
+        };
+        let sender = client.sender.clone();
+        let queued_bytes = Arc::clone(&client.queued_bytes);
+        let max_queued_bytes = client.max_queued_bytes;
+
+        if !try_reserve_queue_bytes(&queued_bytes, frame.len(), max_queued_bytes) {
+            log(&format!(
+                "disconnecting browser client {client_id}: outbound byte limit exceeded"
+            ));
+            self.remove_client(client_id);
+            return false;
+        }
+
+        let queued = QueuedClientFrame {
+            bytes: frame,
+            queued_bytes,
         };
 
-        let mut writer = client.writer.lock().expect("client writer mutex poisoned");
-        if let Err(error) = write_frame(&mut *writer, message) {
-            log(&format!("client socket write error: {error}"));
+        match sender.try_send(queued) {
+            Ok(()) => true,
+            Err(TrySendError::Full(queued)) => {
+                drop(queued);
+                log(&format!(
+                    "disconnecting browser client {client_id}: outbound queue is full"
+                ));
+                self.remove_client(client_id);
+                false
+            }
+            Err(TrySendError::Disconnected(queued)) => {
+                drop(queued);
+                log(&format!(
+                    "disconnecting browser client {client_id}: writer is unavailable"
+                ));
+                self.remove_client(client_id);
+                false
+            }
         }
     }
 
-    fn broadcast_clients(&self, message: &Value) {
+    fn broadcast_clients(&mut self, message: &Value) {
+        let frame = match serialize_frame(message) {
+            Ok(frame) => frame,
+            Err(error) => {
+                log(&format!("client frame serialization error: {error}"));
+                return;
+            }
+        };
         for client_id in self.clients.keys().copied().collect::<Vec<_>>() {
-            self.send_client(client_id, message);
+            self.send_client_frame(client_id, Arc::clone(&frame));
         }
     }
+
+    fn send_chrome_notification(&mut self, message: &Value) {
+        if let Some(client_id) = self.session_owner(message) {
+            self.send_client(client_id, message);
+        } else {
+            self.broadcast_clients(message);
+        }
+    }
+}
+
+fn try_reserve_queue_bytes(counter: &AtomicUsize, bytes: usize, max_bytes: usize) -> bool {
+    counter
+        .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
+            current
+                .checked_add(bytes)
+                .filter(|total| *total <= max_bytes)
+        })
+        .is_ok()
 }
 
 #[derive(Clone)]
@@ -483,35 +661,39 @@ fn accept_clients(listener: UnixListener, state: SharedState) {
         }
 
         let writer = match stream.try_clone() {
-            Ok(stream) => Arc::new(Mutex::new(stream)),
+            Ok(stream) => stream,
             Err(error) => {
                 log(&format!("client socket clone error: {error}"));
                 continue;
             }
         };
-
-        let (client_id, evicted_clients) = {
-            let mut state = state.lock().expect("host state mutex poisoned");
-            state.replace_with_client(writer)
+        let shutdown = match stream.try_clone() {
+            Ok(stream) => stream,
+            Err(error) => {
+                log(&format!("client socket clone error: {error}"));
+                continue;
+            }
         };
-        for (evicted_id, evicted_client) in evicted_clients {
+        let (sender, receiver) = sync_channel::<QueuedClientFrame>(CLIENT_WRITE_QUEUE_MAX_MESSAGES);
+        let queued_bytes = Arc::new(AtomicUsize::new(0));
+
+        let client_id = {
+            let mut state = state.lock().expect("host state mutex poisoned");
+            state.add_client(Client::new(sender, queued_bytes, shutdown))
+        };
+        let Some(client_id) = client_id else {
             log(&format!(
-                "evicting stale browser client {evicted_id} after a newer client connected"
+                "rejecting browser client because the {MAX_CONNECTED_CLIENTS}-client limit was reached"
             ));
-            close_client_socket(&evicted_client);
-        }
+            let _ = stream.shutdown(Shutdown::Both);
+            continue;
+        };
 
-        let state = Arc::clone(&state);
-        thread::spawn(move || read_client_messages(state, client_id, stream));
-    }
-}
+        let writer_state = Arc::downgrade(&state);
+        thread::spawn(move || write_client_messages(writer_state, client_id, writer, receiver));
 
-fn close_client_socket(client: &Client) {
-    match client.writer.lock() {
-        Ok(writer) => {
-            let _ = writer.shutdown(Shutdown::Both);
-        }
-        Err(error) => log(&format!("client socket close lock error: {error}")),
+        let reader_state = Arc::clone(&state);
+        thread::spawn(move || read_client_messages(reader_state, client_id, stream));
     }
 }
 
@@ -578,6 +760,28 @@ fn read_client_messages(state: SharedState, client_id: usize, stream: UnixStream
         }
     }
 
+    disconnect_client(&state, client_id);
+}
+
+fn write_client_messages(
+    state: Weak<Mutex<HostState>>,
+    client_id: usize,
+    mut stream: UnixStream,
+    receiver: Receiver<QueuedClientFrame>,
+) {
+    while let Ok(frame) = receiver.recv() {
+        if let Err(error) = write_serialized_frame(&mut stream, &frame.bytes) {
+            log(&format!("client socket write error: {error}"));
+            break;
+        }
+    }
+
+    if let Some(state) = state.upgrade() {
+        disconnect_client(&state, client_id);
+    }
+}
+
+fn disconnect_client(state: &SharedState, client_id: usize) {
     let mut state = state.lock().expect("host state mutex poisoned");
     state.remove_client(client_id);
 }
@@ -604,6 +808,28 @@ fn handle_client_message(state: &SharedState, client_id: usize, message: Value) 
             return;
         }
         state.pending_client_requests.remove(id);
+        if let Some(group) = pending.fanout_group {
+            if is_successful_heartbeat_response(&message) {
+                state
+                    .pending_client_requests
+                    .retain(|_, sibling| sibling.fanout_group != Some(group));
+                state.send_chrome(&with_id(message, pending.chrome_request_id));
+            } else if !state
+                .pending_client_requests
+                .values()
+                .any(|sibling| sibling.fanout_group == Some(group))
+            {
+                state.send_chrome(&json!({
+                    "jsonrpc": "2.0",
+                    "id": pending.chrome_request_id,
+                    "error": {
+                        "code": -32000,
+                        "message": "No browser client returned a valid heartbeat response"
+                    }
+                }));
+            }
+            return;
+        }
 
         state.send_chrome(&with_id(message, pending.chrome_request_id));
         return;
@@ -629,7 +855,7 @@ fn handle_client_message(state: &SharedState, client_id: usize, message: Value) 
         let Some(id) = message.get("id").cloned() else {
             return;
         };
-        let state = state.lock().expect("host state mutex poisoned");
+        let mut state = state.lock().expect("host state mutex poisoned");
         state.send_client(
             client_id,
             &json!({ "jsonrpc": "2.0", "id": id, "result": "pong" }),
@@ -640,7 +866,7 @@ fn handle_client_message(state: &SharedState, client_id: usize, message: Value) 
     let client_request_id = match bounded_pending_request_id(&message) {
         Ok(id) => id,
         Err(error) => {
-            let state = state.lock().expect("host state mutex poisoned");
+            let mut state = state.lock().expect("host state mutex poisoned");
             if state.clients.contains_key(&client_id) {
                 state.send_client(client_id, &invalid_request_id_error(error));
             }
@@ -651,6 +877,19 @@ fn handle_client_message(state: &SharedState, client_id: usize, message: Value) 
 
     let mut state = state.lock().expect("host state mutex poisoned");
     if !state.clients.contains_key(&client_id) {
+        return;
+    }
+    state.track_session_owner(client_id, &message);
+    if state.pending_chrome_request_count(client_id)
+        >= MAX_PENDING_REQUESTS_PER_CLIENT_PER_DIRECTION
+    {
+        state.send_client(
+            client_id,
+            &pending_request_limit_error(
+                client_request_id,
+                "Too many pending requests from this browser client to Chrome",
+            ),
+        );
         return;
     }
     if state.pending_chrome_requests.len() >= MAX_PENDING_REQUESTS_PER_DIRECTION {
@@ -712,10 +951,9 @@ fn handle_chrome_message(state: &SharedState, message: Value) {
         // failure.
         if pending.fallback_extension_info && is_missing_chrome_runtime_get_version_error(&message)
         {
-            state.send_client(
-                pending.client_id,
-                &extension_info_response(pending.client_request_id, state.extension_id.as_deref()),
-            );
+            let response =
+                extension_info_response(pending.client_request_id, state.extension_id.as_deref());
+            state.send_client(pending.client_id, &response);
             return;
         }
 
@@ -727,8 +965,8 @@ fn handle_chrome_message(state: &SharedState, message: Value) {
     }
 
     if !is_request(&message) {
-        let state = state.lock().expect("host state mutex poisoned");
-        state.broadcast_clients(&message);
+        let mut state = state.lock().expect("host state mutex poisoned");
+        state.send_chrome_notification(&message);
         return;
     }
 
@@ -741,7 +979,14 @@ fn handle_chrome_message(state: &SharedState, message: Value) {
         }
     };
     let mut state = state.lock().expect("host state mutex poisoned");
-    let client_id = match select_single_client_id(&state.clients) {
+    if message.get("method").and_then(Value::as_str) == Some("ping")
+        && state.session_owner(&message).is_none()
+    {
+        forward_chrome_heartbeat(&mut state, message, chrome_request_id);
+        return;
+    }
+
+    let client_id = match select_client_id_for_chrome_request(&state, &message) {
         Ok(client_id) => client_id,
         Err(error) => {
             state.send_chrome(&json!({
@@ -757,6 +1002,15 @@ fn handle_chrome_message(state: &SharedState, message: Value) {
     };
 
     let client_request_id = format!("chrome-{}-{}", process::id(), state.next_client_request_id);
+    if state.pending_client_request_count(client_id)
+        >= MAX_PENDING_REQUESTS_PER_CLIENT_PER_DIRECTION
+    {
+        state.send_chrome(&pending_request_limit_error(
+            chrome_request_id,
+            "Too many pending Chrome requests to this browser client",
+        ));
+        return;
+    }
     if state.pending_client_requests.len() >= MAX_PENDING_REQUESTS_PER_DIRECTION {
         state.send_chrome(&pending_request_limit_error(
             chrome_request_id,
@@ -769,14 +1023,104 @@ fn handle_chrome_message(state: &SharedState, message: Value) {
         client_request_id.clone(),
         PendingClientRequest {
             client_id,
-            chrome_request_id,
+            chrome_request_id: chrome_request_id.clone(),
+            fanout_group: None,
             created_at: Instant::now(),
         },
     );
-    state.send_client(
+    if !state.send_client(
         client_id,
         &with_id(message, Value::String(client_request_id)),
-    );
+    ) {
+        state.send_chrome(&json!({
+            "jsonrpc": "2.0",
+            "id": chrome_request_id,
+            "error": {
+                "code": -32000,
+                "message": "Browser client disconnected before the request could be forwarded"
+            }
+        }));
+    }
+}
+
+fn select_client_id_for_chrome_request(
+    state: &HostState,
+    message: &Value,
+) -> std::result::Result<usize, ChromeClientRouteError> {
+    if let Some(client_id) = state.session_owner(message) {
+        return Ok(client_id);
+    }
+
+    select_single_client_id(&state.clients)
+}
+
+fn forward_chrome_heartbeat(state: &mut HostState, message: Value, chrome_request_id: Value) {
+    if state.clients.is_empty() {
+        state.send_chrome(&json!({
+            "jsonrpc": "2.0",
+            "id": chrome_request_id,
+            "error": {
+                "code": -32000,
+                "message": ChromeClientRouteError::NoClients.message()
+            }
+        }));
+        return;
+    }
+
+    let remaining_global_capacity =
+        MAX_PENDING_REQUESTS_PER_DIRECTION.saturating_sub(state.pending_client_requests.len());
+    let mut client_ids = state
+        .clients
+        .keys()
+        .copied()
+        .filter(|client_id| {
+            state.pending_client_request_count(*client_id)
+                < MAX_PENDING_REQUESTS_PER_CLIENT_PER_DIRECTION
+        })
+        .collect::<Vec<_>>();
+    client_ids.sort_unstable_by_key(|client_id| {
+        (state.pending_client_request_count(*client_id), *client_id)
+    });
+    client_ids.truncate(remaining_global_capacity);
+
+    if client_ids.is_empty() {
+        state.send_chrome(&pending_request_limit_error(
+            chrome_request_id,
+            "Too many pending Chrome requests to connected browser clients",
+        ));
+        return;
+    }
+
+    let fanout_group = state.next_client_request_id;
+    let mut sent = false;
+    let mut message = message;
+    for client_id in client_ids {
+        let client_request_id =
+            format!("chrome-{}-{}", process::id(), state.next_client_request_id);
+        state.next_client_request_id += 1;
+        state.pending_client_requests.insert(
+            client_request_id.clone(),
+            PendingClientRequest {
+                client_id,
+                chrome_request_id: chrome_request_id.clone(),
+                fanout_group: Some(fanout_group),
+                created_at: Instant::now(),
+            },
+        );
+        set_message_id(&mut message, Value::String(client_request_id));
+        sent |= state.send_client(client_id, &message);
+    }
+
+    if !sent {
+        state.send_chrome(&json!({
+            "jsonrpc": "2.0",
+            "id": chrome_request_id,
+            "error": {
+                "code": -32000,
+                "message": "No writable Codex browser client is connected"
+            }
+        }));
+    }
 }
 
 fn select_single_client_id(
@@ -841,15 +1185,25 @@ fn is_response(message: &Value) -> bool {
     message.get("id").is_some() && message.get("method").and_then(Value::as_str).is_none()
 }
 
+fn is_successful_heartbeat_response(message: &Value) -> bool {
+    message.get("jsonrpc").and_then(Value::as_str) == Some("2.0")
+        && message.get("result").and_then(Value::as_str) == Some("pong")
+        && message.get("error").is_none()
+}
+
 fn message_id_as_str(message: &Value) -> Option<&str> {
     message.get("id").and_then(Value::as_str)
 }
 
 fn with_id(mut message: Value, id: Value) -> Value {
+    set_message_id(&mut message, id);
+    message
+}
+
+fn set_message_id(message: &mut Value, id: Value) {
     if let Value::Object(ref mut object) = message {
         object.insert("id".to_string(), id);
     }
-    message
 }
 
 fn is_missing_chrome_runtime_get_version_error(message: &Value) -> bool {
@@ -891,9 +1245,14 @@ fn extension_info_response(id: Value, extension_id: Option<&str>) -> Value {
 
 fn session_turn_from_message(message: &Value) -> Option<(String, String)> {
     let params = message.get("params")?;
-    let session_id = non_empty_string(params.get("session_id")?)?;
+    let session_id = session_id_from_message(message)?;
     let turn_id = non_empty_string(params.get("turn_id")?)?;
     Some((session_id.to_string(), turn_id.to_string()))
+}
+
+fn session_id_from_message(message: &Value) -> Option<&str> {
+    let session_id = non_empty_string(message.get("params")?.get("session_id")?)?;
+    (session_id.len() <= MAX_SESSION_ID_BYTES).then_some(session_id)
 }
 
 fn non_empty_string(value: &Value) -> Option<&str> {
@@ -1026,16 +1385,27 @@ fn read_frame(reader: &mut impl Read) -> io::Result<Option<Value>> {
 }
 
 fn write_frame(writer: &mut impl Write, message: &Value) -> io::Result<()> {
-    let body = serde_json::to_vec(message).map_err(io::Error::other)?;
-    if body.len() > u32::MAX as usize {
+    let frame = serialize_frame(message)?;
+    write_serialized_frame(writer, &frame)
+}
+
+fn serialize_frame(message: &Value) -> io::Result<SharedClientFrame> {
+    let mut frame = vec![0_u8; std::mem::size_of::<u32>()];
+    serde_json::to_writer(&mut frame, message).map_err(io::Error::other)?;
+    let body_len = frame.len() - std::mem::size_of::<u32>();
+    if body_len > u32::MAX as usize {
         return Err(io::Error::new(
             ErrorKind::InvalidInput,
             "message too large for 4-byte length prefix",
         ));
     }
 
-    writer.write_all(&(body.len() as u32).to_ne_bytes())?;
-    writer.write_all(&body)?;
+    frame[..std::mem::size_of::<u32>()].copy_from_slice(&(body_len as u32).to_ne_bytes());
+    Ok(frame.into())
+}
+
+fn write_serialized_frame(writer: &mut impl Write, frame: &[u8]) -> io::Result<()> {
+    writer.write_all(frame)?;
     writer.flush()
 }
 
@@ -1386,12 +1756,12 @@ while True:
     }
 
     #[test]
-    fn replacing_browser_client_evicts_stale_clients_and_pending_requests() {
+    fn adding_browser_client_preserves_existing_clients_and_pending_requests() {
         let mut state = test_host_state();
 
-        let (first_client_id, evicted_clients) =
-            state.replace_with_client(test_client().writer.clone());
-        assert!(evicted_clients.is_empty());
+        let first_client_id = state
+            .add_client(test_client())
+            .expect("first client should be accepted");
         assert!(state.clients.contains_key(&first_client_id));
 
         state.pending_chrome_requests.insert(
@@ -1408,24 +1778,35 @@ while True:
             PendingClientRequest {
                 client_id: first_client_id,
                 chrome_request_id: json!("chrome-request-1"),
+                fanout_group: None,
                 created_at: Instant::now(),
             },
         );
 
-        let (second_client_id, evicted_clients) =
-            state.replace_with_client(test_client().writer.clone());
+        let second_client_id = state
+            .add_client(test_client())
+            .expect("second client should be accepted");
 
         assert_ne!(first_client_id, second_client_id);
-        assert_eq!(evicted_clients.len(), 1);
-        assert_eq!(evicted_clients[0].0, first_client_id);
-        assert!(!state.clients.contains_key(&first_client_id));
+        assert!(state.clients.contains_key(&first_client_id));
         assert!(state.clients.contains_key(&second_client_id));
-        assert!(state.pending_chrome_requests.is_empty());
-        assert!(state.pending_client_requests.is_empty());
+        assert!(state.pending_chrome_requests.contains_key("chrome-request"));
+        assert!(state.pending_client_requests.contains_key("client-request"));
     }
 
     #[test]
-    fn evicted_client_requests_are_ignored() {
+    fn connected_browser_clients_are_bounded() {
+        let mut state = test_host_state();
+        for _ in 0..MAX_CONNECTED_CLIENTS {
+            assert!(state.add_client(test_client()).is_some());
+        }
+
+        assert_eq!(state.clients.len(), MAX_CONNECTED_CLIENTS);
+        assert!(state.add_client(test_client()).is_none());
+    }
+
+    #[test]
+    fn unknown_client_requests_are_ignored() {
         let state = Arc::new(Mutex::new(test_host_state()));
 
         handle_client_message(
@@ -1437,6 +1818,330 @@ while True:
         let state = state.lock().unwrap();
         assert!(state.pending_chrome_requests.is_empty());
         assert_eq!(state.next_chrome_id, 1);
+    }
+
+    #[test]
+    fn interleaved_requests_return_to_the_originating_clients() {
+        let (client_one_writer, mut client_one_reader) = UnixStream::pair().unwrap();
+        let (client_two_writer, mut client_two_reader) = UnixStream::pair().unwrap();
+        let (mut host_state, chrome_output) = test_host_state_with_output();
+        host_state
+            .clients
+            .insert(1, queued_test_client(client_one_writer));
+        host_state
+            .clients
+            .insert(2, queued_test_client(client_two_writer));
+        let state = Arc::new(Mutex::new(host_state));
+
+        handle_client_message(
+            &state,
+            1,
+            json!({
+                "jsonrpc": "2.0",
+                "id": "client-one-request",
+                "method": "getTabs",
+                "params": {
+                    "session_id": "session-one",
+                    "turn_id": "turn-one"
+                }
+            }),
+        );
+        handle_client_message(
+            &state,
+            2,
+            json!({
+                "jsonrpc": "2.0",
+                "id": "client-two-request",
+                "method": "getTabs",
+                "params": {
+                    "session_id": "session-two",
+                    "turn_id": "turn-two"
+                }
+            }),
+        );
+
+        let forwarded = read_captured_messages(&chrome_output);
+        assert_eq!(forwarded.len(), 2);
+        let first_chrome_id = forwarded[0]["id"].clone();
+        let second_chrome_id = forwarded[1]["id"].clone();
+        assert_eq!(forwarded[0]["params"]["session_id"], "session-one");
+        assert_eq!(forwarded[1]["params"]["session_id"], "session-two");
+
+        handle_chrome_message(
+            &state,
+            json!({ "jsonrpc": "2.0", "id": second_chrome_id, "result": "two" }),
+        );
+        handle_chrome_message(
+            &state,
+            json!({ "jsonrpc": "2.0", "id": first_chrome_id, "result": "one" }),
+        );
+
+        assert_eq!(
+            read_frame(&mut client_one_reader).unwrap().unwrap(),
+            json!({ "jsonrpc": "2.0", "id": "client-one-request", "result": "one" })
+        );
+        assert_eq!(
+            read_frame(&mut client_two_reader).unwrap().unwrap(),
+            json!({ "jsonrpc": "2.0", "id": "client-two-request", "result": "two" })
+        );
+        let state = state.lock().unwrap();
+        assert_eq!(state.session_owners.get("session-one"), Some(&1));
+        assert_eq!(state.session_owners.get("session-two"), Some(&2));
+        assert!(state.pending_chrome_requests.is_empty());
+    }
+
+    #[test]
+    fn session_scoped_chrome_messages_route_to_the_owning_client() {
+        let (client_one_writer, client_one_reader) = UnixStream::pair().unwrap();
+        let (client_two_writer, mut client_two_reader) = UnixStream::pair().unwrap();
+        client_one_reader.set_nonblocking(true).unwrap();
+        let mut host_state = test_host_state();
+        host_state
+            .clients
+            .insert(1, queued_test_client(client_one_writer));
+        host_state
+            .clients
+            .insert(2, queued_test_client(client_two_writer));
+        host_state
+            .session_owners
+            .insert("session-two".to_string(), 2);
+        let state = Arc::new(Mutex::new(host_state));
+        let notification = json!({
+            "jsonrpc": "2.0",
+            "method": "onPageEvent",
+            "params": {
+                "session_id": "session-two",
+                "type": "navigation"
+            }
+        });
+
+        handle_chrome_message(&state, notification.clone());
+
+        assert_eq!(
+            read_frame(&mut client_two_reader).unwrap().unwrap(),
+            notification
+        );
+        let mut client_one_reader = client_one_reader;
+        assert_eq!(
+            read_frame(&mut client_one_reader).unwrap_err().kind(),
+            ErrorKind::WouldBlock
+        );
+    }
+
+    #[test]
+    fn unscoped_chrome_notifications_are_broadcast_to_all_clients() {
+        let (client_one_writer, mut client_one_reader) = UnixStream::pair().unwrap();
+        let (client_two_writer, mut client_two_reader) = UnixStream::pair().unwrap();
+        let mut host_state = test_host_state();
+        host_state
+            .clients
+            .insert(1, queued_test_client(client_one_writer));
+        host_state
+            .clients
+            .insert(2, queued_test_client(client_two_writer));
+        let state = Arc::new(Mutex::new(host_state));
+        let notification = json!({
+            "jsonrpc": "2.0",
+            "method": "onCDPEvent",
+            "params": {
+                "source": { "tabId": 42 },
+                "method": "Runtime.consoleAPICalled"
+            }
+        });
+
+        handle_chrome_message(&state, notification.clone());
+
+        assert_eq!(
+            read_frame(&mut client_one_reader).unwrap().unwrap(),
+            notification
+        );
+        assert_eq!(
+            read_frame(&mut client_two_reader).unwrap().unwrap(),
+            notification
+        );
+    }
+
+    #[test]
+    fn session_scoped_chrome_request_returns_through_the_owning_client() {
+        let (client_one_writer, client_one_reader) = UnixStream::pair().unwrap();
+        let (client_two_writer, mut client_two_reader) = UnixStream::pair().unwrap();
+        client_one_reader.set_nonblocking(true).unwrap();
+        let (mut host_state, chrome_output) = test_host_state_with_output();
+        host_state
+            .clients
+            .insert(1, queued_test_client(client_one_writer));
+        host_state
+            .clients
+            .insert(2, queued_test_client(client_two_writer));
+        host_state
+            .session_owners
+            .insert("session-two".to_string(), 2);
+        let state = Arc::new(Mutex::new(host_state));
+
+        handle_chrome_message(
+            &state,
+            json!({
+                "jsonrpc": "2.0",
+                "id": "chrome-session-request",
+                "method": "sessionCommand",
+                "params": { "session_id": "session-two" }
+            }),
+        );
+
+        let forwarded = read_frame(&mut client_two_reader).unwrap().unwrap();
+        assert_eq!(forwarded["method"], "sessionCommand");
+        let forwarded_id = forwarded["id"].clone();
+        handle_client_message(
+            &state,
+            2,
+            json!({ "jsonrpc": "2.0", "id": forwarded_id, "result": "done" }),
+        );
+
+        assert_eq!(
+            read_captured_message(&chrome_output),
+            json!({
+                "jsonrpc": "2.0",
+                "id": "chrome-session-request",
+                "result": "done"
+            })
+        );
+        let mut client_one_reader = client_one_reader;
+        assert_eq!(
+            read_frame(&mut client_one_reader).unwrap_err().kind(),
+            ErrorKind::WouldBlock
+        );
+        assert!(state.lock().unwrap().pending_client_requests.is_empty());
+    }
+
+    #[test]
+    fn chrome_heartbeat_uses_the_first_healthy_client_response() {
+        let (client_one_writer, mut client_one_reader) = UnixStream::pair().unwrap();
+        let (client_two_writer, mut client_two_reader) = UnixStream::pair().unwrap();
+        let (mut host_state, chrome_output) = test_host_state_with_output();
+        host_state
+            .clients
+            .insert(1, queued_test_client(client_one_writer));
+        host_state
+            .clients
+            .insert(2, queued_test_client(client_two_writer));
+        let state = Arc::new(Mutex::new(host_state));
+
+        handle_chrome_message(
+            &state,
+            json!({ "jsonrpc": "2.0", "id": "heartbeat", "method": "ping" }),
+        );
+
+        let client_one_request = read_frame(&mut client_one_reader).unwrap().unwrap();
+        let client_two_request = read_frame(&mut client_two_reader).unwrap().unwrap();
+        assert_eq!(client_one_request["method"], "ping");
+        assert_eq!(client_two_request["method"], "ping");
+        handle_client_message(
+            &state,
+            2,
+            json!({ "jsonrpc": "2.0", "id": client_two_request["id"], "result": "pong" }),
+        );
+
+        assert_eq!(
+            read_captured_message(&chrome_output),
+            json!({ "jsonrpc": "2.0", "id": "heartbeat", "result": "pong" })
+        );
+        handle_client_message(
+            &state,
+            1,
+            json!({ "jsonrpc": "2.0", "id": client_one_request["id"], "result": "late" }),
+        );
+        assert_eq!(read_captured_messages(&chrome_output).len(), 1);
+        let state = state.lock().unwrap();
+        assert_eq!(state.clients.len(), 2);
+        assert!(state.pending_client_requests.is_empty());
+    }
+
+    #[test]
+    fn chrome_heartbeat_waits_for_a_healthy_response_after_invalid_responses() {
+        let (client_one_writer, mut client_one_reader) = UnixStream::pair().unwrap();
+        let (client_two_writer, mut client_two_reader) = UnixStream::pair().unwrap();
+        let (client_three_writer, mut client_three_reader) = UnixStream::pair().unwrap();
+        let (mut host_state, chrome_output) = test_host_state_with_output();
+        host_state
+            .clients
+            .insert(1, queued_test_client(client_one_writer));
+        host_state
+            .clients
+            .insert(2, queued_test_client(client_two_writer));
+        host_state
+            .clients
+            .insert(3, queued_test_client(client_three_writer));
+        let state = Arc::new(Mutex::new(host_state));
+
+        handle_chrome_message(
+            &state,
+            json!({ "jsonrpc": "2.0", "id": "heartbeat", "method": "ping" }),
+        );
+
+        let client_one_request = read_frame(&mut client_one_reader).unwrap().unwrap();
+        let client_two_request = read_frame(&mut client_two_reader).unwrap().unwrap();
+        let client_three_request = read_frame(&mut client_three_reader).unwrap().unwrap();
+
+        handle_client_message(
+            &state,
+            1,
+            json!({
+                "jsonrpc": "2.0",
+                "id": client_one_request["id"],
+                "error": { "code": -32000, "message": "not ready" }
+            }),
+        );
+        assert!(chrome_output.lock().unwrap().is_empty());
+        assert_eq!(state.lock().unwrap().pending_client_requests.len(), 2);
+
+        handle_client_message(
+            &state,
+            2,
+            json!({
+                "id": client_two_request["id"],
+                "result": "unexpected"
+            }),
+        );
+        assert!(chrome_output.lock().unwrap().is_empty());
+        assert_eq!(state.lock().unwrap().pending_client_requests.len(), 1);
+
+        handle_client_message(
+            &state,
+            3,
+            json!({
+                "jsonrpc": "2.0",
+                "id": client_three_request["id"],
+                "result": "pong"
+            }),
+        );
+
+        assert_eq!(
+            read_captured_message(&chrome_output),
+            json!({ "jsonrpc": "2.0", "id": "heartbeat", "result": "pong" })
+        );
+        let state = state.lock().unwrap();
+        assert_eq!(state.clients.len(), 3);
+        assert!(state.pending_client_requests.is_empty());
+    }
+
+    #[test]
+    fn ambiguous_unscoped_chrome_request_fails_without_evicting_clients() {
+        let (mut host_state, chrome_output) = test_host_state_with_output();
+        host_state.clients.insert(1, test_client());
+        host_state.clients.insert(2, test_client());
+        let state = Arc::new(Mutex::new(host_state));
+
+        handle_chrome_message(
+            &state,
+            json!({ "jsonrpc": "2.0", "id": "ambiguous", "method": "browserCommand" }),
+        );
+
+        let response = read_captured_message(&chrome_output);
+        assert_eq!(response["id"], "ambiguous");
+        assert_eq!(response["error"]["code"], -32000);
+        let state = state.lock().unwrap();
+        assert_eq!(state.clients.len(), 2);
+        assert!(state.pending_client_requests.is_empty());
     }
 
     #[test]
@@ -1512,12 +2217,7 @@ while True:
     fn forwards_chrome_raw_cdp_responses_to_the_requesting_client() {
         let (client_writer, mut client_reader) = UnixStream::pair().unwrap();
         let mut state = test_host_state();
-        state.clients.insert(
-            1,
-            Client {
-                writer: Arc::new(Mutex::new(client_writer)),
-            },
-        );
+        state.clients.insert(1, queued_test_client(client_writer));
         state.pending_chrome_requests.insert(
             "linux-1-1".to_string(),
             PendingChromeRequest {
@@ -1553,12 +2253,7 @@ while True:
     fn get_info_falls_back_when_runtime_get_version_is_missing() {
         let (client_writer, mut client_reader) = UnixStream::pair().unwrap();
         let mut state = test_host_state();
-        state.clients.insert(
-            1,
-            Client {
-                writer: Arc::new(Mutex::new(client_writer)),
-            },
-        );
+        state.clients.insert(1, queued_test_client(client_writer));
         state.pending_chrome_requests.insert(
             "linux-1-1".to_string(),
             PendingChromeRequest {
@@ -1622,6 +2317,7 @@ while True:
             PendingClientRequest {
                 client_id: 3,
                 chrome_request_id: json!("expired-chrome-id"),
+                fanout_group: None,
                 created_at: expired_at,
             },
         );
@@ -1630,6 +2326,7 @@ while True:
             PendingClientRequest {
                 client_id: 4,
                 chrome_request_id: json!("live-chrome-id"),
+                fanout_group: None,
                 created_at: now,
             },
         );
@@ -1673,12 +2370,7 @@ while True:
     fn oversized_client_request_id_is_rejected_without_retention() {
         let (client_writer, mut client_reader) = UnixStream::pair().unwrap();
         let (mut state, chrome_output) = test_host_state_with_output();
-        state.clients.insert(
-            1,
-            Client {
-                writer: Arc::new(Mutex::new(client_writer)),
-            },
-        );
+        state.clients.insert(1, queued_test_client(client_writer));
         let state = Arc::new(Mutex::new(state));
 
         handle_client_message(
@@ -1720,17 +2412,256 @@ while True:
     }
 
     #[test]
-    fn full_chrome_request_map_returns_correlated_error_to_client() {
-        let (client_writer, mut client_reader) = UnixStream::pair().unwrap();
-        let (mut state, chrome_output) = test_host_state_with_output();
+    fn client_writer_byte_limit_does_not_block_another_client() {
+        let first_message = json!({ "jsonrpc": "2.0", "method": "fill-byte-budget" });
+        let first_frame = serialize_frame(&first_message).unwrap();
+        let (stalled_sender, stalled_receiver) = sync_channel(CLIENT_WRITE_QUEUE_MAX_MESSAGES);
+        let stalled_queued_bytes = Arc::new(AtomicUsize::new(0));
+        let (stalled_shutdown, _stalled_peer) = UnixStream::pair().unwrap();
+
+        let (healthy_sender, healthy_receiver) = sync_channel(CLIENT_WRITE_QUEUE_MAX_MESSAGES);
+        let healthy_queued_bytes = Arc::new(AtomicUsize::new(0));
+        let (healthy_shutdown, _healthy_peer) = UnixStream::pair().unwrap();
+        let mut state = test_host_state();
         state.clients.insert(
             1,
-            Client {
-                writer: Arc::new(Mutex::new(client_writer)),
-            },
+            Client::with_max_queued_bytes(
+                stalled_sender,
+                Arc::clone(&stalled_queued_bytes),
+                first_frame.len(),
+                stalled_shutdown,
+            ),
         );
+        state.clients.insert(
+            2,
+            Client::new(
+                healthy_sender,
+                Arc::clone(&healthy_queued_bytes),
+                healthy_shutdown,
+            ),
+        );
+        assert!(state.send_client(1, &first_message));
+        assert_eq!(
+            stalled_queued_bytes.load(Ordering::Acquire),
+            first_frame.len()
+        );
+
+        let message = json!({ "jsonrpc": "2.0", "method": "healthy" });
+
+        state.broadcast_clients(&message);
+
+        let healthy_frame = healthy_receiver
+            .recv_timeout(Duration::from_secs(1))
+            .unwrap();
+        assert_eq!(
+            healthy_frame.bytes.as_ref(),
+            serialize_frame(&message).unwrap().as_ref()
+        );
+        let stalled_frame = stalled_receiver
+            .recv_timeout(Duration::from_secs(1))
+            .unwrap();
+        assert_eq!(stalled_frame.bytes.as_ref(), first_frame.as_ref());
+        assert!(!state.clients.contains_key(&1));
+        assert!(state.clients.contains_key(&2));
+
+        drop(stalled_frame);
+        drop(healthy_frame);
+        assert_eq!(stalled_queued_bytes.load(Ordering::Acquire), 0);
+        assert_eq!(healthy_queued_bytes.load(Ordering::Acquire), 0);
+    }
+
+    #[test]
+    fn full_client_writer_message_queue_does_not_block_another_client() {
+        let (stalled_sender, stalled_receiver) = sync_channel(CLIENT_WRITE_QUEUE_MAX_MESSAGES);
+        let stalled_queued_bytes = Arc::new(AtomicUsize::new(0));
+        let (stalled_shutdown, _stalled_peer) = UnixStream::pair().unwrap();
+        let (healthy_sender, healthy_receiver) = sync_channel(CLIENT_WRITE_QUEUE_MAX_MESSAGES);
+        let healthy_queued_bytes = Arc::new(AtomicUsize::new(0));
+        let (healthy_shutdown, _healthy_peer) = UnixStream::pair().unwrap();
+        let mut state = test_host_state();
+        state.clients.insert(
+            1,
+            Client::new(
+                stalled_sender,
+                Arc::clone(&stalled_queued_bytes),
+                stalled_shutdown,
+            ),
+        );
+        state.clients.insert(
+            2,
+            Client::new(
+                healthy_sender,
+                Arc::clone(&healthy_queued_bytes),
+                healthy_shutdown,
+            ),
+        );
+        for index in 0..CLIENT_WRITE_QUEUE_MAX_MESSAGES {
+            assert!(state.send_client(1, &json!(index)));
+        }
+
+        let message = json!({ "jsonrpc": "2.0", "method": "healthy" });
+        assert!(!state.send_client(1, &message));
+        assert!(state.send_client(2, &message));
+
+        let healthy_frame = healthy_receiver
+            .recv_timeout(Duration::from_secs(1))
+            .unwrap();
+        assert_eq!(
+            healthy_frame.bytes.as_ref(),
+            serialize_frame(&message).unwrap().as_ref()
+        );
+        assert_eq!(
+            stalled_receiver.try_iter().count(),
+            CLIENT_WRITE_QUEUE_MAX_MESSAGES
+        );
+        assert!(!state.clients.contains_key(&1));
+        assert!(state.clients.contains_key(&2));
+
+        drop(healthy_frame);
+        assert_eq!(stalled_queued_bytes.load(Ordering::Acquire), 0);
+        assert_eq!(healthy_queued_bytes.load(Ordering::Acquire), 0);
+    }
+
+    #[test]
+    fn broadcast_reuses_one_serialized_frame_for_all_clients() {
+        let (client_one_sender, client_one_receiver) =
+            sync_channel(CLIENT_WRITE_QUEUE_MAX_MESSAGES);
+        let client_one_queued_bytes = Arc::new(AtomicUsize::new(0));
+        let (client_one_shutdown, _client_one_peer) = UnixStream::pair().unwrap();
+        let (client_two_sender, client_two_receiver) =
+            sync_channel(CLIENT_WRITE_QUEUE_MAX_MESSAGES);
+        let client_two_queued_bytes = Arc::new(AtomicUsize::new(0));
+        let (client_two_shutdown, _client_two_peer) = UnixStream::pair().unwrap();
+        let mut state = test_host_state();
+        state.clients.insert(
+            1,
+            Client::new(
+                client_one_sender,
+                Arc::clone(&client_one_queued_bytes),
+                client_one_shutdown,
+            ),
+        );
+        state.clients.insert(
+            2,
+            Client::new(
+                client_two_sender,
+                Arc::clone(&client_two_queued_bytes),
+                client_two_shutdown,
+            ),
+        );
+        let message = json!({ "jsonrpc": "2.0", "method": "shared" });
+
+        state.broadcast_clients(&message);
+
+        let client_one_frame = client_one_receiver
+            .recv_timeout(Duration::from_secs(1))
+            .unwrap();
+        let client_two_frame = client_two_receiver
+            .recv_timeout(Duration::from_secs(1))
+            .unwrap();
+        assert!(Arc::ptr_eq(
+            &client_one_frame.bytes,
+            &client_two_frame.bytes
+        ));
+        assert_eq!(
+            client_one_frame.bytes.as_ref(),
+            serialize_frame(&message).unwrap().as_ref()
+        );
+        assert_eq!(
+            client_one_queued_bytes.load(Ordering::Acquire),
+            client_one_frame.bytes.len()
+        );
+        assert_eq!(
+            client_two_queued_bytes.load(Ordering::Acquire),
+            client_two_frame.bytes.len()
+        );
+
+        drop(client_one_frame);
+        drop(client_two_frame);
+        assert_eq!(client_one_queued_bytes.load(Ordering::Acquire), 0);
+        assert_eq!(client_two_queued_bytes.load(Ordering::Acquire), 0);
+    }
+
+    #[test]
+    fn stalled_client_cannot_exhaust_chrome_request_capacity_for_another_client() {
+        let (client_two_writer, _client_two_reader) = UnixStream::pair().unwrap();
+        let (mut state, chrome_output) = test_host_state_with_output();
+        state.clients.insert(1, test_client());
+        state
+            .clients
+            .insert(2, queued_test_client(client_two_writer));
         let now = Instant::now();
-        for index in 0..MAX_PENDING_REQUESTS_PER_DIRECTION {
+        for index in 0..MAX_PENDING_REQUESTS_PER_CLIENT_PER_DIRECTION {
+            state.pending_chrome_requests.insert(
+                format!("stalled-{index}"),
+                PendingChromeRequest {
+                    client_id: 1,
+                    client_request_id: json!(index),
+                    fallback_extension_info: false,
+                    created_at: now,
+                },
+            );
+        }
+        let state = Arc::new(Mutex::new(state));
+
+        handle_client_message(
+            &state,
+            2,
+            json!({ "jsonrpc": "2.0", "id": "healthy", "method": "getTabs" }),
+        );
+
+        let forwarded = read_captured_message(&chrome_output);
+        assert_eq!(forwarded["method"], "getTabs");
+        assert_eq!(state.lock().unwrap().pending_chrome_request_count(2), 1);
+    }
+
+    #[test]
+    fn stalled_client_cannot_exhaust_client_request_capacity_for_another_client() {
+        let (client_two_writer, mut client_two_reader) = UnixStream::pair().unwrap();
+        let (mut state, _chrome_output) = test_host_state_with_output();
+        state.clients.insert(1, test_client());
+        state
+            .clients
+            .insert(2, queued_test_client(client_two_writer));
+        state
+            .session_owners
+            .insert("healthy-session".to_string(), 2);
+        let now = Instant::now();
+        for index in 0..MAX_PENDING_REQUESTS_PER_CLIENT_PER_DIRECTION {
+            state.pending_client_requests.insert(
+                format!("stalled-{index}"),
+                PendingClientRequest {
+                    client_id: 1,
+                    chrome_request_id: json!(index),
+                    fanout_group: None,
+                    created_at: now,
+                },
+            );
+        }
+        let state = Arc::new(Mutex::new(state));
+
+        handle_chrome_message(
+            &state,
+            json!({
+                "jsonrpc": "2.0",
+                "id": "healthy",
+                "method": "sessionCommand",
+                "params": { "session_id": "healthy-session" }
+            }),
+        );
+
+        let forwarded = read_frame(&mut client_two_reader).unwrap().unwrap();
+        assert_eq!(forwarded["method"], "sessionCommand");
+        assert_eq!(state.lock().unwrap().pending_client_request_count(2), 1);
+    }
+
+    #[test]
+    fn client_to_chrome_per_client_limit_returns_correlated_error() {
+        let (client_writer, mut client_reader) = UnixStream::pair().unwrap();
+        let (mut state, chrome_output) = test_host_state_with_output();
+        state.clients.insert(1, queued_test_client(client_writer));
+        let now = Instant::now();
+        for index in 0..MAX_PENDING_REQUESTS_PER_CLIENT_PER_DIRECTION {
             state.pending_chrome_requests.insert(
                 format!("pending-{index}"),
                 PendingChromeRequest {
@@ -1756,22 +2687,65 @@ while True:
         let state = state.lock().unwrap();
         assert_eq!(
             state.pending_chrome_requests.len(),
-            MAX_PENDING_REQUESTS_PER_DIRECTION
+            MAX_PENDING_REQUESTS_PER_CLIENT_PER_DIRECTION
         );
         assert_eq!(state.next_chrome_id, 1);
     }
 
     #[test]
-    fn full_client_request_map_returns_correlated_error_to_chrome() {
+    fn client_to_chrome_global_limit_returns_correlated_error() {
+        let (client_writer, mut client_reader) = UnixStream::pair().unwrap();
+        let (mut state, chrome_output) = test_host_state_with_output();
+        for client_id in 1..=4 {
+            state.clients.insert(client_id, test_client());
+        }
+        state.clients.insert(5, queued_test_client(client_writer));
+        let now = Instant::now();
+        for index in 0..MAX_PENDING_REQUESTS_PER_DIRECTION {
+            let client_id = index / MAX_PENDING_REQUESTS_PER_CLIENT_PER_DIRECTION + 1;
+            state.pending_chrome_requests.insert(
+                format!("pending-{index}"),
+                PendingChromeRequest {
+                    client_id,
+                    client_request_id: json!(index),
+                    fallback_extension_info: false,
+                    created_at: now,
+                },
+            );
+        }
+        let state = Arc::new(Mutex::new(state));
+
+        handle_client_message(
+            &state,
+            5,
+            json!({ "jsonrpc": "2.0", "id": "global-over-cap", "method": "getTabs" }),
+        );
+
+        let response = read_frame(&mut client_reader).unwrap().unwrap();
+        assert_eq!(response["id"], "global-over-cap");
+        assert_eq!(response["error"]["code"], PENDING_REQUEST_LIMIT_ERROR_CODE);
+        assert!(chrome_output.lock().unwrap().is_empty());
+        let state = state.lock().unwrap();
+        assert_eq!(
+            state.pending_chrome_requests.len(),
+            MAX_PENDING_REQUESTS_PER_DIRECTION
+        );
+        assert_eq!(state.pending_chrome_request_count(5), 0);
+        assert_eq!(state.next_chrome_id, 1);
+    }
+
+    #[test]
+    fn chrome_to_client_per_client_limit_returns_correlated_error() {
         let (mut state, chrome_output) = test_host_state_with_output();
         state.clients.insert(1, test_client());
         let now = Instant::now();
-        for index in 0..MAX_PENDING_REQUESTS_PER_DIRECTION {
+        for index in 0..MAX_PENDING_REQUESTS_PER_CLIENT_PER_DIRECTION {
             state.pending_client_requests.insert(
                 format!("pending-{index}"),
                 PendingClientRequest {
                     client_id: 1,
                     chrome_request_id: json!(index),
+                    fanout_group: None,
                     created_at: now,
                 },
             );
@@ -1789,8 +2763,52 @@ while True:
         let state = state.lock().unwrap();
         assert_eq!(
             state.pending_client_requests.len(),
+            MAX_PENDING_REQUESTS_PER_CLIENT_PER_DIRECTION
+        );
+        assert_eq!(state.next_client_request_id, 1);
+    }
+
+    #[test]
+    fn chrome_to_client_global_limit_returns_correlated_error() {
+        let (mut state, chrome_output) = test_host_state_with_output();
+        for client_id in 1..=5 {
+            state.clients.insert(client_id, test_client());
+        }
+        state.session_owners.insert("target-session".to_string(), 5);
+        let now = Instant::now();
+        for index in 0..MAX_PENDING_REQUESTS_PER_DIRECTION {
+            let client_id = index / MAX_PENDING_REQUESTS_PER_CLIENT_PER_DIRECTION + 1;
+            state.pending_client_requests.insert(
+                format!("pending-{index}"),
+                PendingClientRequest {
+                    client_id,
+                    chrome_request_id: json!(index),
+                    fanout_group: None,
+                    created_at: now,
+                },
+            );
+        }
+        let state = Arc::new(Mutex::new(state));
+
+        handle_chrome_message(
+            &state,
+            json!({
+                "jsonrpc": "2.0",
+                "id": "chrome-global-over-cap",
+                "method": "sessionCommand",
+                "params": { "session_id": "target-session" }
+            }),
+        );
+
+        let response = read_captured_message(&chrome_output);
+        assert_eq!(response["id"], "chrome-global-over-cap");
+        assert_eq!(response["error"]["code"], PENDING_REQUEST_LIMIT_ERROR_CODE);
+        let state = state.lock().unwrap();
+        assert_eq!(
+            state.pending_client_requests.len(),
             MAX_PENDING_REQUESTS_PER_DIRECTION
         );
+        assert_eq!(state.pending_client_request_count(5), 0);
         assert_eq!(state.next_client_request_id, 1);
     }
 
@@ -1822,6 +2840,7 @@ while True:
                 PendingClientRequest {
                     client_id: 1,
                     chrome_request_id: json!("client-request-1"),
+                    fanout_group: None,
                     created_at: Instant::now(),
                 },
             ),
@@ -1830,6 +2849,7 @@ while True:
                 PendingClientRequest {
                     client_id: 2,
                     chrome_request_id: json!("client-request-2"),
+                    fanout_group: None,
                     created_at: Instant::now(),
                 },
             ),
@@ -1843,11 +2863,49 @@ while True:
         assert!(!pending_client.contains_key("drop"));
     }
 
+    #[test]
+    fn disconnect_cleanup_preserves_other_clients_and_session_routes() {
+        let mut state = test_host_state();
+        state.clients.insert(1, test_client());
+        state.clients.insert(2, test_client());
+        state.session_owners.insert("session-one".to_string(), 1);
+        state.session_owners.insert("session-two".to_string(), 2);
+        state.pending_chrome_requests.insert(
+            "drop".to_string(),
+            PendingChromeRequest {
+                client_id: 1,
+                client_request_id: json!("client-request"),
+                fallback_extension_info: false,
+                created_at: Instant::now(),
+            },
+        );
+
+        state.remove_client(1);
+
+        assert!(!state.clients.contains_key(&1));
+        assert!(state.clients.contains_key(&2));
+        assert!(!state.session_owners.contains_key("session-one"));
+        assert_eq!(state.session_owners.get("session-two"), Some(&2));
+        assert!(state.pending_chrome_requests.is_empty());
+    }
+
     fn test_client() -> Client {
         let (stream, _peer) = UnixStream::pair().unwrap();
-        Client {
-            writer: Arc::new(Mutex::new(stream)),
-        }
+        queued_test_client(stream)
+    }
+
+    fn queued_test_client(mut stream: UnixStream) -> Client {
+        let shutdown = stream.try_clone().unwrap();
+        let (sender, receiver) = sync_channel::<QueuedClientFrame>(CLIENT_WRITE_QUEUE_MAX_MESSAGES);
+        let queued_bytes = Arc::new(AtomicUsize::new(0));
+        thread::spawn(move || {
+            while let Ok(frame) = receiver.recv() {
+                if write_serialized_frame(&mut stream, &frame.bytes).is_err() {
+                    break;
+                }
+            }
+        });
+        Client::new(sender, queued_bytes, shutdown)
     }
 
     fn test_host_state() -> HostState {
@@ -1891,9 +2949,20 @@ while True:
     }
 
     fn read_captured_message(output: &Arc<Mutex<Vec<u8>>>) -> Value {
+        read_captured_messages(output)
+            .into_iter()
+            .next()
+            .expect("one captured message")
+    }
+
+    fn read_captured_messages(output: &Arc<Mutex<Vec<u8>>>) -> Vec<Value> {
         let data = output.lock().unwrap().clone();
         let mut cursor = io::Cursor::new(data);
-        read_frame(&mut cursor).unwrap().unwrap()
+        let mut messages = Vec::new();
+        while let Some(message) = read_frame(&mut cursor).unwrap() {
+            messages.push(message);
+        }
+        messages
     }
 
     fn process_is_live(pid: libc::pid_t) -> bool {
