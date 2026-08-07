@@ -57,16 +57,6 @@ jobs:
           git merge upstream/main --no-edit --allow-unrelated-histories
           echo "MERGED=1" >> "$GITHUB_ENV"
 
-      - name: Discard upstream workflow changes
-        if: env.MERGED == '1'
-        run: |
-          set -euo pipefail
-          # 上游 workflow 文件变更不合并：推送它们需要 workflows 权限，
-          # GITHUB_TOKEN 默认没有。我们的 workflow 由 appotry-patches 提供。
-          # checkout 恢复已跟踪文件到 HEAD，clean 删除 merge 新增的 untracked 文件。
-          git checkout -- .github/workflows/
-          git clean -fd -- .github/workflows/
-
       - name: Apply appotry patches
         if: env.MERGED == '1'
         run: |
@@ -75,9 +65,9 @@ jobs:
       - name: Commit and push
         if: env.MERGED == '1'
         env:
-          # SYNC_PAT: 可选，用于推送含 workflow 变更的合并结果
-          # 未配置时回退 GITHUB_TOKEN（需 repo 设置允许写 workflows）
-          PUSH_TOKEN: ${{ secrets.SYNC_PAT || github.token }}
+          # TOKEN: 用户配置的 PAT（有 workflows 权限），用于推送
+          # 含上游 workflow 文件变更的合并结果
+          PUSH_TOKEN: ${{ secrets.TOKEN }}
         run: |
           set -euo pipefail
           SHA="$(git rev-parse --short upstream/main)"
