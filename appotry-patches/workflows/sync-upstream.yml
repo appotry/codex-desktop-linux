@@ -57,35 +57,6 @@ jobs:
           git merge upstream/main --no-edit --allow-unrelated-histories
           echo "MERGED=1" >> "$GITHUB_ENV"
 
-      - name: Verify push token
-        if: env.MERGED == '1'
-        env:
-          PUSH_TOKEN: ${{ secrets.TOKEN }}
-        run: |
-          # 诊断：确认 TOKEN 是 PAT 且有 workflows 权限。
-          # classic PAT 的 scope 在响应头 x-oauth-scopes 中。
-          echo "--- whoami ---"
-          curl -s -D /tmp/headers -H "Authorization: Bearer ${PUSH_TOKEN}" \
-            "https://api.github.com/user" | python3 -c \
-            "import json,sys; d=json.load(sys.stdin); print('login:', d.get('login', 'NOT-A-PAT'))"
-          echo "--- x-oauth-scopes (classic PAT) ---"
-          grep -i '^x-oauth-scopes:' /tmp/headers || echo "(无此头，可能是 fine-grained PAT 或 GITHUB_TOKEN)"
-          echo "--- workflow write test ---"
-          # 尝试写 workflow 文件，验证 workflows 权限
-          curl -s -X PUT \
-            -H "Authorization: Bearer ${PUSH_TOKEN}" \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/${GITHUB_REPOSITORY}/contents/.github/workflows/.token-test" \
-            -d '{"message":"token test","content":"dGVzdA=="}' \
-            -o /tmp/wtest -w "write_http=%{http_code}\n"
-          cat /tmp/wtest | python3 -c \
-            "import json,sys; d=json.load(sys.stdin); print('write_msg:', d.get('message','OK'))" 2>/dev/null || true
-          # 清理测试文件
-          curl -s -X DELETE \
-            -H "Authorization: Bearer ${PUSH_TOKEN}" \
-            "https://api.github.com/repos/${GITHUB_REPOSITORY}/contents/.github/workflows/.token-test" \
-            -o /dev/null -w "delete_http=%{http_code}\n" || true
-
       - name: Apply appotry patches
         if: env.MERGED == '1'
         run: |
@@ -106,5 +77,7 @@ jobs:
           # 先拉远程最新 releases，rebase 后推送，避免并发下的 fetch-first 拒绝
           git fetch origin releases
           git rebase origin/releases || true
-          git push "https://x-access-token:${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" releases
+          # oauth2: 前缀用于 PAT；x-access-token: 前缀会把 token 当 GitHub App
+          # 身份验证，导致 PAT 的 workflow scope 失效
+          git push "https://oauth2:${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" releases
           echo "Pushed merged upstream ${SHA} to releases."
