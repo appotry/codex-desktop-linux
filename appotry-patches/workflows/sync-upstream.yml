@@ -22,6 +22,9 @@ on:
 
 permissions:
   contents: write
+  # 合并上游时会带入 workflow 文件修改（如 upstream-build-app.yml），
+  # 推送这些文件需要 workflows 权限
+  workflows: write
 
 concurrency:
   group: sync-upstream
