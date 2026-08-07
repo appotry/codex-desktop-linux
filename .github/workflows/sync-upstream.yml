@@ -79,9 +79,11 @@ jobs:
           git commit -m "chore: apply appotry patches on upstream ${SHA}"
           # reset-based 策略：我们是 releases 的权威重建方，
           # 用 --force-with-lease 推送（防止并发覆盖别人的新提交）。
+          # 先 fetch 远程 releases 更新 lease 基准，否则报 stale info。
           # actions/checkout 配置了 http.extraheader（GITHUB_TOKEN），
           # 它会覆盖 URL 中的 PAT 导致 workflow 权限失效。
           # 用 -c 覆盖为空 + oauth2: 前缀强制使用 PAT。
+          git fetch origin releases
           git -c credential.helper= -c "http.https://github.com/.extraheader=" push \
             --force-with-lease \
             "https://oauth2:${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" releases
