@@ -9,6 +9,9 @@ const {
   patchWrapperUpdateSettingsAssets,
 } = require("../../../linux-features/codex-wrapper-updater/patch.js");
 const {
+  patchDeferredUpdateBuildSettingsAssets,
+} = require("../../../linux-features/deferred-update-build/patch.js");
+const {
   linuxDesktopSettingsAsset,
   patchKeybindsSettingsAssets,
 } = require("./keybinds-settings.js");
@@ -36,7 +39,7 @@ function assetSources(assetsDir) {
   );
 }
 
-test("preserves wrapper updater extensions across Linux settings patch passes", () => {
+test("preserves optional update settings extensions across Linux settings patch passes", () => {
   const { extractedDir, assetsDir } =
     createModernNativeKeyboardShortcutsSettingsFixture();
   try {
@@ -51,6 +54,10 @@ test("preserves wrapper updater extensions across Linux settings patch passes", 
 
     const firstFeatureResult = patchWrapperUpdateSettingsAssets(extractedDir);
     assert.deepEqual(firstFeatureResult, { matched: true, changed: 1 });
+    assert.deepEqual(
+      patchDeferredUpdateBuildSettingsAssets(extractedDir),
+      { matched: true, changed: 1 },
+    );
     const composedSource = fs.readFileSync(settingsPath, "utf8");
     assert.match(
       composedSource,
@@ -60,6 +67,10 @@ test("preserves wrapper updater extensions across Linux settings patch passes", 
       composedSource,
       /featurePickerOnUpdate:"codex-linux-feature-picker-on-update"/,
     );
+    assert.match(
+      composedSource,
+      /settingKey:KEYS\.autoBuildUpdates,label:"Build updates automatically"/,
+    );
 
     const secondCoreResult = patchKeybindsSettingsAssets(extractedDir);
     assert.equal(secondCoreResult.matched, true);
@@ -68,6 +79,10 @@ test("preserves wrapper updater extensions across Linux settings patch passes", 
 
     assert.deepEqual(
       patchWrapperUpdateSettingsAssets(extractedDir),
+      { matched: true, changed: 0 },
+    );
+    assert.deepEqual(
+      patchDeferredUpdateBuildSettingsAssets(extractedDir),
       { matched: true, changed: 0 },
     );
     assert.equal(fs.readFileSync(settingsPath, "utf8"), composedSource);

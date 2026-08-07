@@ -325,7 +325,15 @@ pub fn settings_wrapper_updates_override() -> Option<bool> {
 
 const FEATURE_CONFIG_FILE: &str = "linux-features.json";
 const BUNDLED_FEATURE_CONFIG_FILE: &str = "features.json";
+const UPDATER_POLICY_FILE: &str = "updater-policy.json";
 const FEATURE_PICKER_ON_UPDATE_SETTING_KEY: &str = "codex-linux-feature-picker-on-update";
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdaterFeaturePolicy {
+    schema_version: u32,
+    auto_build_updates_setting_key: Option<String>,
+}
 
 /// Resolves the stable per-user feature-config path
 /// (`<config>/<appId>/linux-features.json`), alongside `settings.json`. The
@@ -351,6 +359,71 @@ pub fn effective_feature_config_path(config: &RuntimeConfig) -> Option<PathBuf> 
                 .join(BUNDLED_FEATURE_CONFIG_FILE);
             bundled.is_file().then_some(bundled)
         })
+}
+
+fn valid_feature_id(id: &str) -> bool {
+    !id.is_empty()
+        && id
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+        && id.as_bytes()[0].is_ascii_alphanumeric()
+}
+
+fn valid_setting_key(key: &str) -> bool {
+    !key.is_empty()
+        && key
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+}
+
+/// Loads an updater preference declared by enabled Linux features. Core does
+/// not know feature ids or setting keys: it scans only enabled feature roots
+/// for a versioned `updater-policy.json` declaration. Missing, malformed, or
+/// conflicting declarations fail closed to the normal automatic-build path.
+fn auto_build_updates_setting_key(config: &RuntimeConfig) -> Option<String> {
+    let feature_config = effective_feature_config_path(config)?;
+    let parsed =
+        serde_json::from_str::<serde_json::Value>(&fs::read_to_string(feature_config).ok()?)
+            .ok()?;
+    let enabled = parsed.get("enabled")?.as_array()?;
+    let features_root = config.builder_bundle_root.join("linux-features");
+    let mut resolved = None;
+
+    for feature_id in enabled.iter().filter_map(serde_json::Value::as_str) {
+        if !valid_feature_id(feature_id) {
+            continue;
+        }
+        let policy_path = features_root.join(feature_id).join(UPDATER_POLICY_FILE);
+        let Some(policy) = fs::read_to_string(&policy_path)
+            .ok()
+            .and_then(|content| serde_json::from_str::<UpdaterFeaturePolicy>(&content).ok())
+            .filter(|policy| policy.schema_version == 1)
+        else {
+            continue;
+        };
+        let Some(key) = policy
+            .auto_build_updates_setting_key
+            .filter(|key| valid_setting_key(key))
+        else {
+            continue;
+        };
+        match resolved.as_deref() {
+            None => resolved = Some(key),
+            Some(existing) if existing == key => {}
+            Some(_) => {
+                warn!("conflicting enabled Linux feature updater policies; using automatic builds");
+                return None;
+            }
+        }
+    }
+
+    resolved
+}
+
+/// Reads the optional automatic-build preference owned by an enabled Linux
+/// feature. No enabled declaration means the updater keeps automatic builds.
+pub fn settings_auto_build_updates_override(config: &RuntimeConfig) -> Option<bool> {
+    settings_bool_override(&auto_build_updates_setting_key(config)?)
 }
 
 /// Reads the user's "ask which features to enable on update" preference (the
@@ -564,6 +637,49 @@ app_executable_path = "/opt/codex-desktop/electron"
         );
 
         std::env::remove_var("CODEX_LINUX_SETTINGS_FILE");
+        Ok(())
+    }
+
+    #[test]
+    fn auto_build_setting_is_loaded_only_for_an_enabled_feature_policy() -> Result<()> {
+        let _guard = crate::test_util::env_lock();
+        let _restore_env =
+            crate::test_util::EnvRestoreGuard::capture(&["CODEX_LINUX_SETTINGS_FILE"]);
+        let temp = tempdir()?;
+        let settings_dir = temp.path().join("settings");
+        let settings_file = settings_dir.join("settings.json");
+        let saved_feature_config = settings_dir.join("linux-features.json");
+        let builder_root = temp.path().join("builder");
+        let bundled_feature_config = builder_root.join("linux-features/features.json");
+        let policy_path =
+            builder_root.join("linux-features/deferred-update-build/updater-policy.json");
+        fs::create_dir_all(policy_path.parent().unwrap())?;
+        fs::create_dir_all(&settings_dir)?;
+        fs::write(
+            &policy_path,
+            r#"{"schemaVersion":1,"autoBuildUpdatesSettingKey":"codex-linux-auto-build-updates"}"#,
+        )?;
+        fs::write(&bundled_feature_config, r#"{"enabled":[]}"#)?;
+        fs::write(
+            &settings_file,
+            r#"{"codex-linux-auto-build-updates":false}"#,
+        )?;
+        std::env::set_var("CODEX_LINUX_SETTINGS_FILE", &settings_file);
+
+        let paths = test_paths(temp.path());
+        let mut config = RuntimeConfig::default_with_paths(&paths);
+        config.builder_bundle_root = builder_root;
+
+        assert_eq!(settings_auto_build_updates_override(&config), None);
+
+        fs::write(
+            &saved_feature_config,
+            r#"{"enabled":["deferred-update-build"]}"#,
+        )?;
+        assert_eq!(settings_auto_build_updates_override(&config), Some(false));
+
+        fs::write(&saved_feature_config, r#"{"enabled":[]}"#)?;
+        assert_eq!(settings_auto_build_updates_override(&config), None);
         Ok(())
     }
 

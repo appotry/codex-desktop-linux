@@ -1,0 +1,9 @@
+{
+  "id": "deferred-update-build",
+  "title": "Deferred update builds",
+  "description": "Adds a Linux setting that can defer local package builds until Check for updates is selected.",
+  "defaultEnabled": false,
+  "entrypoints": {
+    "patchDescriptors": "./patch.js"
+  }
+}

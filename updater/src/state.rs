@@ -21,6 +21,7 @@ const STATE_LOCK_FILE_NAME: &str = "state.lock";
 pub enum UpdateStatus {
     Idle,
     CheckingUpstream,
+    #[serde(alias = "update_available")]
     UpdateDetected,
     DownloadingDmg,
     PreparingWorkspace,
@@ -80,6 +81,11 @@ pub struct PersistedState {
     pub installed_version: String,
     pub candidate_version: Option<String>,
     pub status: UpdateStatus,
+    /// True when an enabled Linux feature deferred the candidate's package
+    /// build. Optional so older state files remain readable; older updater
+    /// binaries ignore this unknown field and retain their automatic behavior.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub deferred_build: bool,
     pub last_check_at: Option<DateTime<Utc>>,
     pub last_successful_check_at: Option<DateTime<Utc>>,
     pub remote_headers_fingerprint: Option<String>,
@@ -145,6 +151,7 @@ impl PersistedState {
             installed_version: "unknown".to_string(),
             candidate_version: None,
             status: UpdateStatus::Idle,
+            deferred_build: false,
             last_check_at: None,
             last_successful_check_at: None,
             remote_headers_fingerprint: None,
@@ -302,6 +309,10 @@ impl PersistedState {
     }
 }
 
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 pub(crate) fn atomic_write(path: &Path, contents: &[u8]) -> Result<()> {
     let parent = path
         .parent()
@@ -422,6 +433,7 @@ mod tests {
         let mut state = PersistedState::new(false);
         state.installed_version = "2026.03.24+deadbeef".to_string();
         state.status = UpdateStatus::WaitingForAppExit;
+        state.deferred_build = true;
         state.candidate_version = Some("2026.03.25+feedface".to_string());
         state.rollback_blocked_dmg_sha256 = Some("full-rollback-dmg-sha256".to_string());
         state.notified_events.insert("ready_to_install".to_string());
@@ -442,6 +454,26 @@ mod tests {
         );
         assert!(!loaded.auto_install_on_app_exit);
         assert!(loaded.waiting_for_app_exit_auto_install);
+        assert!(loaded.deferred_build);
+        Ok(())
+    }
+
+    #[test]
+    fn legacy_deferred_status_migrates_to_update_detected() -> Result<()> {
+        let mut value = serde_json::to_value(PersistedState::new(true))?;
+        value["status"] = serde_json::Value::String("update_available".to_string());
+        value
+            .as_object_mut()
+            .expect("state object")
+            .remove("deferred_build");
+
+        let loaded = serde_json::from_value::<PersistedState>(value)?;
+        assert_eq!(loaded.status, UpdateStatus::UpdateDetected);
+        assert!(!loaded.deferred_build);
+        assert_eq!(
+            serde_json::to_value(&loaded)?["status"],
+            serde_json::Value::String("update_detected".to_string())
+        );
         Ok(())
     }
 
