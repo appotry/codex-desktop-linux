@@ -51,7 +51,12 @@ jobs:
           # 策略：releases 永远等于 上游 main + 补丁。
           # reset 到上游最新（丢弃旧的补丁提交），再重新应用补丁，
           # 避免 merge 历史累积导致分支与上游无限分叉。
+          # appotry-patches/ 只存在于 releases 分支，reset 会删除它，
+          # 因此先备份到临时目录，reset 后再恢复。
+          cp -a appotry-patches /tmp/appotry-patches
           git reset --hard upstream/main
+          rm -rf appotry-patches
+          mv /tmp/appotry-patches appotry-patches
           echo "RESET=1" >> "$GITHUB_ENV"
 
       - name: Apply appotry patches
