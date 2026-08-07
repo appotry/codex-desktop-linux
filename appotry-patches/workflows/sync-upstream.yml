@@ -62,6 +62,25 @@ jobs:
         run: |
           bash appotry-patches/apply.sh
 
+      - name: Diagnose push auth
+        if: env.MERGED == '1'
+        env:
+          PUSH_TOKEN: ${{ secrets.TOKEN }}
+        run: |
+          set -euo pipefail
+          echo "--- git version ---"
+          git --version
+          echo "--- credential helpers ---"
+          git config --list | grep -i credential || echo "(none)"
+          echo "--- test ls-remote with URL token ---"
+          git -c credential.helper= ls-remote \
+            "https://oauth2:${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD \
+            && echo "AUTH OK (URL token works)" || echo "AUTH FAILED"
+          echo "--- test ls-remote with plain token ---"
+          git -c credential.helper= ls-remote \
+            "https://${PUSH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD \
+            && echo "AUTH2 OK" || echo "AUTH2 FAILED"
+
       - name: Commit and push
         if: env.MERGED == '1'
         env:
