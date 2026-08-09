@@ -7131,7 +7131,10 @@ PY
         fail "CLI lookup must resolve mise-installed codex through the mise shim, got $selected_cli"
 
     # no mise install dir present: fall back to nothing rather than the mise binary
-    selected_cli="$(env -i PATH="$mise_shim_dir:$clean_tool_path" HOME="$fake_home" "$launcher_probe" find)"
+    local empty_home="$workspace/empty-mise-home"
+    mkdir -p "$empty_home"
+    chmod 0755 "$empty_home"
+    selected_cli="$(env -i PATH="$mise_shim_dir:$clean_tool_path" HOME="$empty_home" "$launcher_probe" find)"
     [ -z "$selected_cli" ] || fail "CLI lookup must never select the mise shim binary, got $selected_cli"
 
     local brew_home="$workspace/brew-home"
