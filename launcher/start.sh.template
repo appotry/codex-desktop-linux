@@ -2046,22 +2046,19 @@ find_mise_codex_cli() {
 }
 
 is_codex_cli_path() {
-    # 排除 mise 本体：mise shim 的 readlink 会指向 mise 二进制，
-    # 若 resolve 后是 mise 则跳过（否则应用会 spawn mise 报 "no tasks defined"）。
+    # 只拒绝解析到 mise 本体的候选（mise shim 的 readlink 指向 mise 二进制，
+    # 若采纳会 spawn mise 报 "no tasks defined"）。其他可执行目标一律接受，
+    # 包括 codex 指向不同 basename 的合法符号链接。
     local candidate="$1"
     [ -n "$candidate" ] || return 1
     local resolved
     resolved="$(readlink -f "$candidate" 2>/dev/null || echo "$candidate")"
     case "$(basename "$resolved")" in
-        codex|codex.js|codex.exe)
-            return 0
-            ;;
         mise|mise.exe)
             return 1
             ;;
     esac
-    # 未知名字的二进制：保守跳过，让后续候选接管
-    return 1
+    return 0
 }
 
 pid_parent_matches() {

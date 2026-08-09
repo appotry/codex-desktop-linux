@@ -7168,6 +7168,16 @@ PY
     resolved_cli="$(env -i PATH="$HOST_TOOL_PATH" HOME="$fake_home" "$launcher_probe" resolve "$visible_cli")"
     [ "$resolved_cli" = "$(realpath "$external_cli")" ] || fail "CLI resolver must canonicalize visible symlinks, got $resolved_cli"
 
+    local alt_name_bin="$workspace/alt-name-bin"
+    local alt_name_target="$workspace/alt-name-target/openai-codex-bin"
+    mkdir -p "$alt_name_bin" "$(dirname "$alt_name_target")"
+    printf '#!/usr/bin/env bash\nprintf "codex-cli 0.173.0\\n"\n' > "$alt_name_target"
+    chmod 0755 "$alt_name_target" "$(dirname "$alt_name_target")"
+    ln -s "$alt_name_target" "$alt_name_bin/codex"
+    selected_cli="$(env -i PATH="$alt_name_bin:$clean_tool_path" HOME="$fake_home" "$launcher_probe" find)"
+    [ "$selected_cli" = "$alt_name_bin/codex" ] || \
+        fail "CLI lookup must accept a codex symlink to an executable with another basename, got $selected_cli"
+
     local custom_brew_prefix="$workspace/custom-homebrew"
     local custom_brew_target_dir="$workspace/custom-homebrew-cellar/openai-codex/0.42.0/bin"
     local custom_brew_visible="$custom_brew_prefix/bin/codex"
