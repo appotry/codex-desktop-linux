@@ -22,6 +22,7 @@ PATCHES=(
   "appotry-patches/workflows/auto-build.yml:.github/workflows/auto-build.yml"
   "appotry-patches/workflows/sync-upstream.yml:.github/workflows/sync-upstream.yml"
   "appotry-patches/scripts/lib/linux-update-bridge-patch.js:scripts/lib/linux-update-bridge-patch.js"
+  "appotry-patches/launcher/start.sh.template:launcher/start.sh.template"
   "appotry-patches/docs/LOCAL-BUILD.zh.md:docs/LOCAL-BUILD.zh.md"
 )
 
