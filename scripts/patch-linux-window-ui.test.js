@@ -155,6 +155,7 @@ const {
 const {
   applyLinuxAppUpdaterBridgePatch,
   applyLinuxAppUpdaterMenuPatch,
+  applyLinuxAppUpdateViewStatePatch,
   patchLinuxAppUpdaterBridge,
 } = require("./lib/linux-update-bridge-patch.js");
 const {
@@ -7849,6 +7850,48 @@ test("implements the current Sparkle AppView, menu, and RPC contract on Linux", 
   );
   assert.match(patched, /setSparkleQueryParams:\(\)=>\{\}/);
   assert.match(patched, /latchInAppUpdatesEnabledForLaunch:async\(\)=>\{\}/);
+});
+
+test("fixes the upstream getAppUpdateViewState options.sparkleManager bug", () => {
+  const broken =
+    "class Zoe{windowManager;origin;sparkleManager;constructor(e,t,n){this.windowManager=e,this.origin=t,this.sparkleManager=n}getAppUpdateViewState(){return{downloadProgressPercent:this.options.sparkleManager.getDownloadProgressPercent(),downloadedUpdateAppBrand:this.options.sparkleManager.getDownloadedUpdateAppBrand(),installProgressPercent:this.options.sparkleManager.getInstallProgressPercent(),isUpdateReady:this.options.sparkleManager.getIsUpdateReady(),lifecycleState:this.options.sparkleManager.getUpdateLifecycleState(),relaunchNotice:this.options.sparkleManager.getRelaunchNotice()}}}";
+  const patched = applyLinuxAppUpdateViewStatePatch(broken);
+
+  assert.notEqual(patched, broken, "getAppUpdateViewState should be patched");
+  assert.match(patched, /let e=this\.sparkleManager\?\?this\.options\?\.sparkleManager/);
+  assert.doesNotMatch(
+    patched,
+    /downloadProgressPercent:this\.options\.sparkleManager/,
+    "old options.sparkleManager direct access must be gone",
+  );
+
+  const makeEval = () => {
+    const factory = new Function(
+      "instance",
+      `${patched};return new Zoe(instance.windowManager, instance.origin, instance.sparkleManager).getAppUpdateViewState()`,
+    );
+    return factory;
+  };
+  const withManager = makeEval()({
+    windowManager: {},
+    origin: "test",
+    sparkleManager: {
+      getDownloadProgressPercent: () => 42,
+      getDownloadedUpdateAppBrand: () => "brand",
+      getInstallProgressPercent: () => 10,
+      getIsUpdateReady: () => true,
+      getUpdateLifecycleState: () => "ready",
+      getRelaunchNotice: () => "notice",
+    },
+  });
+  assert.equal(withManager.downloadProgressPercent, 42);
+  assert.equal(withManager.downloadedUpdateAppBrand, "brand");
+  assert.equal(withManager.isUpdateReady, true);
+
+  const withoutManager = makeEval()({ windowManager: {}, origin: "test", sparkleManager: undefined });
+  assert.equal(withoutManager.downloadProgressPercent, null);
+  assert.equal(withoutManager.isUpdateReady, false);
+  assert.equal(withoutManager.lifecycleState, "idle");
 });
 
 test("keeps every exact-DMG Sparkle manager caller callable on the Linux replacement", async () => {
