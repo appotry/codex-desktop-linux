@@ -30,7 +30,6 @@ git push appotry releases
 |--------|---------|------|
 | `workflows/auto-build.yml` | `.github/workflows/auto-build.yml` | 自动构建 .deb/.rpm/AppImage 并发布 Release |
 | `workflows/sync-upstream.yml` | `.github/workflows/sync-upstream.yml` | 定时拉取上游并合并到 releases（每 6 小时） |
-| `scripts/lib/linux-update-bridge-patch.js` | `scripts/lib/linux-update-bridge-patch.js` | 修复上游 getAppUpdateViewState sparkleManager bug |
 | `docs/LOCAL-BUILD.zh.md` | `docs/LOCAL-BUILD.zh.md` | 中文构建指南（国内镜像、GitHub Release 安装说明） |
 
 ## 自动同步 + 自动构建流程

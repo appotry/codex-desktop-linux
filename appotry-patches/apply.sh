@@ -21,7 +21,6 @@ REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 PATCHES=(
   "appotry-patches/workflows/auto-build.yml:.github/workflows/auto-build.yml"
   "appotry-patches/workflows/sync-upstream.yml:.github/workflows/sync-upstream.yml"
-  "appotry-patches/scripts/lib/linux-update-bridge-patch.js:scripts/lib/linux-update-bridge-patch.js"
   "appotry-patches/docs/LOCAL-BUILD.zh.md:docs/LOCAL-BUILD.zh.md"
 )
 
