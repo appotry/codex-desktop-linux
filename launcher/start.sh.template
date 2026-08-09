@@ -1967,6 +1967,10 @@ find_codex_cli() {
         fi
     fi
 
+    if find_mise_codex_cli; then
+        return 0
+    fi
+
     local nvm_dir="${NVM_DIR:-}"
     if [ -z "$nvm_dir" ]; then
         if [ -s "${XDG_CONFIG_HOME:-$HOME/.config}/nvm/nvm.sh" ]; then
@@ -2003,12 +2007,59 @@ find_codex_cli() {
         "/usr/local/bin/codex" \
         "/usr/bin/codex"
     do
-        if [ -x "$candidate" ]; then
+        if [ -x "$candidate" ] && is_codex_cli_path "$candidate"; then
             echo "$candidate"
             return 0
         fi
     done
 
+    return 1
+}
+
+find_mise_codex_cli() {
+    # 优先用 mise which codex 解析（mise shim 指向 mise 本体，不能直接用 shim 路径）
+    if command -v mise >/dev/null 2>&1; then
+        local mise_resolved
+        if mise_resolved="$(mise which codex 2>/dev/null || true)" && [ -n "$mise_resolved" ] && [ -x "$mise_resolved" ]; then
+            echo "$mise_resolved"
+            return 0
+        fi
+    fi
+
+    # fallback: 直接找 mise 安装目录下的 codex（取 latest，避免版本号漂移）
+    local mise_root="${XDG_DATA_HOME:-$HOME/.local/share}/mise/installs/npm-openai-codex"
+    local latest_candidate="$mise_root/latest/bin/codex"
+    if [ -x "$latest_candidate" ]; then
+        echo "$latest_candidate"
+        return 0
+    fi
+    local versioned
+    for versioned in "$mise_root"/*/bin/codex; do
+        if [ -x "$versioned" ]; then
+            echo "$versioned"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+is_codex_cli_path() {
+    # 排除 mise 本体：mise shim 的 readlink 会指向 mise 二进制，
+    # 若 resolve 后是 mise 则跳过（否则应用会 spawn mise 报 "no tasks defined"）。
+    local candidate="$1"
+    [ -n "$candidate" ] || return 1
+    local resolved
+    resolved="$(readlink -f "$candidate" 2>/dev/null || echo "$candidate")"
+    case "$(basename "$resolved")" in
+        codex|codex.js|codex.exe)
+            return 0
+            ;;
+        mise|mise.exe)
+            return 1
+            ;;
+    esac
+    # 未知名字的二进制：保守跳过，让后续候选接管
     return 1
 }
 
