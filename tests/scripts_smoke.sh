@@ -163,7 +163,7 @@ JSON
 {"name":"browser","version":"0.1.0-alpha2","interface":{"category":"Engineering"}}
 JSON
     cat > "$resources_dir/plugins/openai-bundled/plugins/browser/scripts/browser-client.mjs" <<'JS'
-import{env as Ub}from"node:process";function lu(e){let t=globalThis.nodeRepl?.env[e];return typeof t=="string"?t:void 0}function Me(){let e=globalThis.nodeRepl;return e?.config==null?void 0:e}async function cM(e){let t=e.createElicitation.bind(e),r={...e,platform:`linux`,setResponseMeta:e.setResponseMeta,get requestMeta(){return e.requestMeta},async createElicitation(o){return await t(o)}},n=await $K(e,r);return n!=null&&(r.gaas=n),r}async function $K(){return null}function th(){let e=import.meta.__codexNativePipe;return e==null||typeof e.createConnection!="function"?null:e}var I2=new Set(["about:blank"]);function Gb(e){if(I2.has(e))return!0;let t;try{t=new URL(e)}catch{return!1}return t.protocol==="http:"||t.protocol==="https:"}class Uf{async fetchBlocked(e,t){let r=await bS(e.endpoint,{method:"GET"});if(!r.ok)throw new Error(ae(`${t} cannot determine if ${e.displayUrl} is allowed. Please try again later or use another source.`));let n=await r.json();return TF(n)}}var kE=t=>t==="win32"?"\\\\.\\pipe\\codex-browser-use":"/tmp/codex-browser-use";var Q6=e=>e.platform==="win32"?t4(e):e4(e),e4=async e=>{let t=kE(e.platform);return(await yP(t)).map(n=>wP.resolve(t,n))},t4=async e=>[];export function setupAtlasRuntime() {return Ub.XDG_CONFIG_HOME}
+import{env as Ub}from"node:process";function lu(e){let t=globalThis.nodeRepl?.env[e];return typeof t=="string"?t:void 0}function Me(){let e=globalThis.nodeRepl;return e?.config==null?void 0:e}async function cM(e){let t=e.createElicitation.bind(e),r={...e,platform:`linux`,setResponseMeta:e.setResponseMeta,get requestMeta(){return e.requestMeta},async createElicitation(o){return await t(o)}},n=await $K(e,r);return n!=null&&(r.gaas=n),r}async function $K(){return null}function th(){let e=import.meta.__codexNativePipe;return e==null||typeof e.createConnection!="function"?null:e}var I2=new Set(["about:blank"]);function Gb(e){if(I2.has(e))return!0;let t;try{t=new URL(e)}catch{return!1}return t.protocol==="http:"||t.protocol==="https:"}var siteStatusEvents=[];class SiteStatusHttpError extends Error{constructor(e){super("Browser Use site-status request failed.");this.httpStatus=e}}class SiteStatusPolicy{async throwIfBlocksUrl(e,t,r){let n;try{n=await this.isBlocked(e,t,r)}catch(o){recordSiteStatusError(o,r);return}if(n.blocked)throw new Error("site_status_blocked")}async isBlocked(e,t){return{blocked:await this.fetchBlocked(e,t),outcome:"success"}}async fetchBlocked(e,t){let r=await e.fetch(t.endpoint,{method:"GET"});if(!r.ok)throw new SiteStatusHttpError(r.status);let n=await r.json();return n.blocked===!0}}function recordSiteStatusError(e,t){siteStatusEvents.push({backend:t,httpStatus:e instanceof SiteStatusHttpError?e.httpStatus:void 0,outcome:"error_fail_open",reason:"site_status_unavailable"})}var kE=t=>t==="win32"?"\\\\.\\pipe\\codex-browser-use":"/tmp/codex-browser-use";var Q6=e=>e.platform==="win32"?t4(e):e4(e),e4=async e=>{let t=kE(e.platform);return(await yP(t)).map(n=>wP.resolve(t,n))},t4=async e=>[];export function setupAtlasRuntime() {return Ub.XDG_CONFIG_HOME}
 JS
 }
 
@@ -6405,7 +6405,7 @@ EOF
     assert_contains "$REPO_DIR/launcher/start.sh.template" ".tmp/bundled-marketplaces/openai-bundled"
     assert_contains "$REPO_DIR/launcher/start.sh.template" ".agents/plugins/marketplace.json"
     assert_contains "$REPO_DIR/scripts/lib/bundled-plugins.sh" "stage_chrome_plugin_from_upstream"
-    assert_contains "$REPO_DIR/scripts/lib/patch-chrome-plugin.js" "Linux native host manifest location"
+    assert_contains "$REPO_DIR/scripts/lib/patch-chrome-plugin.js" "Linux running browser profile resolver"
     assert_contains "$REPO_DIR/computer-use-linux/src/bin/codex-chrome-extension-host.rs" "CODEX_BROWSER_USE_SOCKET_DIR"
     assert_contains "$REPO_DIR/flake.nix" "Browser Use bundled marketplace metadata"
     assert_contains "$REPO_DIR/flake.nix" ".tmp/bundled-marketplaces/openai-bundled"
@@ -7712,7 +7712,6 @@ test_browser_use_node_repl_fallback_runtime() {
     cmp -s "$true_bin" "$install_dir/resources/node_repl" || fail "Expected fallback node_repl to come from the runtime archive"
     assert_contains "$install_dir/resources/plugins/openai-bundled/plugins/browser/scripts/browser-client.mjs" 'globalThis.nodeRepl?.env?.\[e\]'
     assert_not_contains "$install_dir/resources/plugins/openai-bundled/plugins/browser/scripts/browser-client.mjs" 'globalThis.nodeRepl?.env\[e\]'
-    assert_contains "$install_dir/resources/plugins/openai-bundled/plugins/browser/scripts/browser-client.mjs" "codexLinuxSiteStatusAllowlistFallback"
     assert_contains "$install_dir/resources/plugins/openai-bundled/plugins/browser/scripts/browser-client.mjs" "codexLinuxFileUrlPolicy"
     assert_contains "$output_log" "Browser Use node_repl runtime is not a Linux executable for x86_64; skipping"
     assert_not_contains "$output_log" "WARN.*Browser Use node_repl runtime is not a Linux executable"
@@ -7789,120 +7788,6 @@ for (const [key, value] of Object.entries(expected)) {
 NODE
 }
 
-test_browser_use_site_status_allowlist_fallback_patch_behavior() {
-    info "Checking Browser Use site_status allowlist fallback patch behavior"
-    local workspace="$TMP_DIR/browser-site-status-allowlist-fallback"
-    local client="$workspace/browser-client.mjs"
-    local first_patch="$workspace/browser-client.first-patch.mjs"
-    local output_log="$workspace/output.log"
-
-    mkdir -p "$workspace"
-    cat > "$client" <<'JS'
-var fetchImpl;function F(e,t){return fetchImpl(e,t)}function G(e){return e}function H(e){return e.blocked===!0}var policy={async fetchBlocked(e,t){let s=await F(e.endpoint,{method:"GET"});if(!s.ok)throw new Error(G(`${t} cannot determine if ${e.displayUrl} is allowed. Please try again later or use another source.`));let n=await s.json();return H(n)}};
-JS
-
-    (
-        warn() { echo "[WARN] $*" >&2; }
-        info() { echo "[INFO] $*" >&2; }
-        # shellcheck disable=SC1091
-        source "$REPO_DIR/scripts/lib/bundled-plugins.sh"
-        patch_browser_use_site_status_allowlist_fallback "$client"
-        cp "$client" "$first_patch"
-        patch_browser_use_site_status_allowlist_fallback "$client"
-    ) >"$output_log" 2>&1
-
-    cmp -s "$first_patch" "$client" || fail "Expected Browser Use site_status fallback patch to be byte-identical on second application"
-    assert_occurrence_count "$client" "codexLinuxSiteStatusAllowlistFallback" 1
-    assert_not_contains "$client" "console.warn"
-    assert_not_contains "$output_log" "Could not find Browser Use site_status allowlist fallback insertion point"
-
-    node - "$client" <<'NODE'
-const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const vm = require("node:vm");
-
-const client = process.argv[2];
-const source = fs.readFileSync(client, "utf8");
-const warnings = [];
-const context = {
-  console: {
-    warn(...args) {
-      warnings.push(args);
-    },
-  },
-};
-vm.createContext(context);
-vm.runInContext(source, context);
-
-const matchingUrl = {
-  endpoint: "http://127.0.0.1/aura/site_status?url=https%3A%2F%2Fexample.com",
-  displayUrl: "https://example.com/",
-};
-const otherUrl = {
-  endpoint: "http://127.0.0.1/aura/other",
-  displayUrl: "https://example.com/",
-};
-
-(async () => {
-  const allowlistError = new Error("native ALLOWLIST is unavailable");
-  context.fetchImpl = async () => {
-    throw allowlistError;
-  };
-  assert.strictEqual(await context.policy.fetchBlocked(matchingUrl, "Chrome"), false);
-
-  await assert.rejects(
-    context.policy.fetchBlocked(otherUrl, "Chrome"),
-    (error) => error === allowlistError,
-  );
-
-  const otherError = new Error("native policy is unavailable");
-  context.fetchImpl = async () => {
-    throw otherError;
-  };
-  await assert.rejects(
-    context.policy.fetchBlocked(matchingUrl, "Chrome"),
-    (error) => error === otherError,
-  );
-
-  context.fetchImpl = async () => ({ ok: false });
-  await assert.rejects(
-    context.policy.fetchBlocked(matchingUrl, "Chrome"),
-    (error) => error.message === "Chrome cannot determine if https://example.com/ is allowed. Please try again later or use another source.",
-  );
-
-  const jsonError = new Error("invalid site_status JSON");
-  context.fetchImpl = async () => ({
-    ok: true,
-    json: async () => {
-      throw jsonError;
-    },
-  });
-  await assert.rejects(
-    context.policy.fetchBlocked(matchingUrl, "Chrome"),
-    (error) => error === jsonError,
-  );
-
-  let fetchedEndpoint;
-  let fetchedMethod;
-  context.fetchImpl = async (endpoint, options) => {
-    fetchedEndpoint = endpoint;
-    fetchedMethod = options.method;
-    return {
-      ok: true,
-      json: async () => ({ blocked: true }),
-    };
-  };
-  assert.strictEqual(await context.policy.fetchBlocked(matchingUrl, "Chrome"), true);
-  assert.strictEqual(fetchedEndpoint, matchingUrl.endpoint);
-  assert.strictEqual(fetchedMethod, "GET");
-  assert.strictEqual(warnings.length, 0);
-})().catch((error) => {
-  console.error(error);
-  process.exitCode = 1;
-});
-NODE
-}
-
 test_browser_plugin_renamed_upstream_staging() {
     info "Checking Browser plugin staging from renamed upstream resources"
     local workspace="$TMP_DIR/browser-plugin-renamed"
@@ -7943,19 +7828,88 @@ test_browser_plugin_renamed_upstream_staging() {
     assert_contains "$browser_dir/scripts/browser-client.mjs" "codexLinuxBrowserUseRuntimeCloneShim"
     assert_contains "$browser_dir/scripts/browser-client.mjs" "nativePipe??import.meta.__codexNativePipe"
     assert_not_contains "$browser_dir/scripts/browser-client.mjs" "let e=import.meta.__codexNativePipe;return"
-    assert_contains "$browser_dir/scripts/browser-client.mjs" "codexLinuxSiteStatusAllowlistFallback"
     assert_contains "$browser_dir/scripts/browser-client.mjs" "codexLinuxFileUrlPolicy"
     assert_contains "$browser_dir/scripts/browser-client.mjs" "codexLinuxIabSocketScope"
     assert_contains "$browser_dir/scripts/browser-client.mjs" "codexLinuxPerUserBrowserSocketDir"
     assert_contains "$browser_dir/scripts/browser-client.mjs" "codexLinuxBrowserUseUserInfo"
     assert_not_contains "$browser_dir/scripts/browser-client.mjs" "process.env.CODEX_BROWSER_USE_SOCKET_DIR"
     assert_not_contains "$browser_dir/scripts/browser-client.mjs" '"/tmp/codex-browser-use"'
+    assert_contains "$browser_dir/scripts/browser-client.mjs" 'outcome:"error_fail_open"'
+    assert_contains "$browser_dir/scripts/browser-client.mjs" 'reason:"site_status_unavailable"'
+    assert_not_contains "$browser_dir/scripts/browser-client.mjs" "codexLinuxSiteStatusAllowlistFallback"
     assert_contains "$browser_dir/scripts/browser-client.mjs" 'protocol==="file:"'
     assert_not_contains "$browser_dir/scripts/browser-client.mjs" 'protocol==="data:"'
     assert_contains "$marketplace" '"name": "browser"'
     assert_contains "$marketplace" '"path": "./plugins/browser"'
     assert_contains "$output_log" "Browser plugin staged from upstream DMG"
     assert_not_contains "$output_log" "Browser bundled plugin resources not present"
+
+    node - "$browser_dir/scripts/browser-client.mjs" <<'NODE'
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const vm = require("node:vm");
+
+const source = fs
+  .readFileSync(process.argv[2], "utf8")
+  .replace(
+    'import{userInfo as codexLinuxBrowserUseUserInfo}from"node:os";',
+    "var codexLinuxBrowserUseUserInfo=()=>({uid:1000});",
+  )
+  .replaceAll("import.meta.__codexNativePipe", "globalThis.__codexNativePipe")
+  .replace("export function setupAtlasRuntime", "function setupAtlasRuntime");
+const context = { URL };
+vm.createContext(context);
+vm.runInContext(
+  `${source}\nglobalThis.__SiteStatusPolicy=SiteStatusPolicy;globalThis.__siteStatusEvents=siteStatusEvents;`,
+  context,
+);
+
+const policy = new context.__SiteStatusPolicy();
+const request = { endpoint: "http://127.0.0.1/aura/site_status" };
+
+(async () => {
+  for (const failure of [
+    new Error("network unavailable"),
+    { ok: false, status: 503, json: async () => ({ blocked: false }) },
+    { ok: true, status: 200, json: async () => { throw new Error("invalid JSON"); } },
+  ]) {
+    const before = context.__siteStatusEvents.length;
+    const runtime = {
+      async fetch() {
+        if (failure instanceof Error) throw failure;
+        return failure;
+      },
+    };
+    await policy.throwIfBlocksUrl(runtime, request, "cdp");
+    assert.equal(context.__siteStatusEvents.length, before + 1);
+    assert.equal(context.__siteStatusEvents.at(-1).outcome, "error_fail_open");
+    assert.equal(context.__siteStatusEvents.at(-1).reason, "site_status_unavailable");
+  }
+
+  const allowedRuntime = {
+    async fetch() {
+      return { ok: true, status: 200, json: async () => ({ blocked: false }) };
+    },
+  };
+  const beforeAllowed = context.__siteStatusEvents.length;
+  await policy.throwIfBlocksUrl(allowedRuntime, request, "cdp");
+  assert.equal(context.__siteStatusEvents.length, beforeAllowed);
+
+  const blockedRuntime = {
+    async fetch() {
+      return { ok: true, status: 200, json: async () => ({ blocked: true }) };
+    },
+  };
+  await assert.rejects(
+    policy.throwIfBlocksUrl(blockedRuntime, request, "cdp"),
+    /site_status_blocked/,
+  );
+  assert.equal(context.__siteStatusEvents.length, beforeAllowed);
+})().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});
+NODE
 }
 
 test_upstream_bundled_skills_staging() {
@@ -8586,15 +8540,16 @@ JSON
 {"name":"chrome","version":"0.1.7"}
 JSON
     cat > "$chrome_dir/scripts/installManifest.mjs" <<'JS'
-var n={extensionId:"hehggadaopoacecdllhhajmbjkdcmajg",extensionHostName:"com.openai.codexextension"};var p=o=>{let t=`${o.extensionHostName}.json`,r={darwin:["Library/Application Support/Google/Chrome/NativeMessagingHosts"],linux:[".config/google-chrome/NativeMessagingHosts"],win32:["AppData/Local/OpenAI/extension"]}[m.platform()];return r.map(s=>l.resolve(m.homedir(),s,t))};
+var w={chrome:{linux:{nativeMessagingManifestDirectories:[".config/google-chrome/NativeMessagingHosts",".config/chromium/NativeMessagingHosts",".config/google-chrome-beta/NativeMessagingHosts",".config/google-chrome-unstable/NativeMessagingHosts",".config/google-chrome-for-testing/NativeMessagingHosts"]}},edge:{linux:{nativeMessagingManifestDirectories:[".config/microsoft-edge/NativeMessagingHosts"]}},brave:{linux:{nativeMessagingManifestDirectories:[".config/BraveSoftware/Brave-Browser/NativeMessagingHosts"]}},opera:{linux:{nativeMessagingManifestDirectories:[".config/opera/NativeMessagingHosts"]}},vivaldi:{linux:{nativeMessagingManifestDirectories:[".config/vivaldi/NativeMessagingHosts"]}}};var manifestDirectories=Object.values(w).flatMap(t=>t.linux.nativeMessagingManifestDirectories);
 JS
     cat > "$chrome_dir/skills/control-chrome/SKILL.md" <<'MD'
 # Chrome
 
-Use the browser bound to `browser` for tasks in this skill.
+## Browser selection
+Do not inspect browser cookies, local storage, profiles, passwords, or session stores. Browser discovery must remain read-only.
 MD
     cat > "$chrome_dir/scripts/extension-ids.json" <<'JSON'
-{"extensionIds":["hehggadaopoacecdllhhajmbjkdcmajg"],"extensionHostName":"com.openai.codexextension"}
+{"extensionIds":["hehggadaopoacecdllhhajmbjkdcmajg","odlomjlbamekndcpllcnffbgeohgkmjh"],"extensionHostName":"com.openai.codexextension","browserDiagnostics":[{"browserFamily":"chrome","displayName":"Google Chrome","linux":{"commands":["google-chrome","google-chrome-stable","chromium","chromium-browser","google-chrome-beta","google-chrome-unstable","google-chrome-for-testing"],"nativeMessagingManifestDirectories":[".config/google-chrome/NativeMessagingHosts",".config/chromium/NativeMessagingHosts",".config/google-chrome-beta/NativeMessagingHosts",".config/google-chrome-unstable/NativeMessagingHosts",".config/google-chrome-for-testing/NativeMessagingHosts"],"processNames":["chrome"],"userDataDirectorySegments":[".config","google-chrome"]}},{"browserFamily":"edge","displayName":"Microsoft Edge","linux":{"commands":["microsoft-edge","microsoft-edge-stable"],"nativeMessagingManifestDirectories":[".config/microsoft-edge/NativeMessagingHosts"],"processNames":["msedge"],"userDataDirectorySegments":[".config","microsoft-edge"]}},{"browserFamily":"brave","displayName":"Brave","linux":{"commands":["brave-browser","brave-browser-stable","brave"],"nativeMessagingManifestDirectories":[".config/BraveSoftware/Brave-Browser/NativeMessagingHosts"],"processNames":["brave","brave-browser"],"userDataDirectorySegments":[".config","BraveSoftware","Brave-Browser"]}},{"browserFamily":"opera","displayName":"Opera","linux":{"commands":["opera","opera-stable"],"nativeMessagingManifestDirectories":[".config/opera/NativeMessagingHosts"],"processNames":["opera"],"userDataDirectorySegments":[".config","opera"]}},{"browserFamily":"vivaldi","displayName":"Vivaldi","linux":{"commands":["vivaldi","vivaldi-stable"],"nativeMessagingManifestDirectories":[".config/vivaldi/NativeMessagingHosts"],"processNames":["vivaldi","vivaldi-bin"],"userDataDirectorySegments":[".config","vivaldi"]}}]}
 JSON
     cat > "$chrome_dir/scripts/browser-client.mjs" <<'JS'
 const browserPreference={};function preferredWindowIdFor(){}function getForUrl(){}const extensionInstanceId=null;
@@ -8604,11 +8559,12 @@ function Me(){let e=globalThis.nodeRepl;return e?.config==null?void 0:e}
 async function cM(e){let t=e.createElicitation.bind(e),r={...e,platform:`linux`,setResponseMeta:e.setResponseMeta,get requestMeta(){return e.requestMeta},async createElicitation(o){return await t(o)}},n=await $K(e,r);return n!=null&&(r.gaas=n),r}
 async function $K(){return null}
 import{platform as yT}from"node:os";import{env as Ub}from"node:process";function eh(){return"privileged native pipe bridge is not available; browser-client is not trusted"}function th(){let e=globalThis.nodeRepl?.nativePipe;return e==null||typeof e.createConnection!="function"?null:e}var ml=class e{constructor(t){this.socket=t}static async create(t){let r=th();if(r!=null){let n=await r.createConnection(t);return new e(n)}throw new Error(eh())}};var chromeConfigHome=Ub.CHROME_CONFIG_HOME;
-async fetchBlocked(e,t){let r=await bS(e.endpoint,{method:"GET"});if(!r.ok)throw new Error(ae(`${t} cannot determine if ${e.displayUrl} is allowed. Please try again later or use another source.`));let n=await r.json();return TF(n)}
+var siteStatusEvents=[];class pd extends Error{constructor(e){super("site status failed");this.httpStatus=e}}async function OT(t,u,o){return t.fetch(u,o)}function cw(o){return o.blocked===true}function vi(fn){siteStatusEvents.push(fn())}var siteStatusPolicy=class{async throwIfBlocksUrl(t,r,n){let o;try{o=await this.isBlocked(t,r,n)}catch(i){recordSiteStatusError(i,n);return}if(o.blocked)throw new Error("blocked")}async isBlocked(t,r){return{blocked:await this.fetchBlocked(t,r),outcome:"success"}}async fetchBlocked(t,r){let n=await OT(t,r.endpoint,{method:"GET"});if(!n.ok)throw new pd(n.status);let o=await n.json();return cw(o)}};function recordSiteStatusError(e,t){vi(()=>({backend:t,check:"check-url-site-status",outcome:"error_fail_open",reason:"site_status_unavailable"}))}
 JS
     cat > "$chrome_dir/scripts/check-native-host-manifest.js" <<'JS'
 #!/usr/bin/env node
-function getNativeHostManifestLocation() {
+let resolveLinuxNativeMessagingManifestPath;
+function getNativeHostManifestLocation(expectedBrowser) {
   if (process.platform === "win32") {
     const registryKey = `${WINDOWS_NATIVE_HOST_REGISTRY_KEY_PREFIX}\\${expectedHostName}`;
     const registryManifestPath = readWindowsRegistryDefaultValue(registryKey);
@@ -8621,34 +8577,55 @@ function getNativeHostManifestLocation() {
     };
   }
 
+  if (process.platform === "linux") {
+    return {
+      manifestPath: resolveLinuxNativeMessagingManifestPath({
+        browser: expectedBrowser,
+        env: process.env,
+        homedir: os.homedir(),
+        hostName: expectedHostName,
+        path,
+      }),
+      registryKey: null,
+      registryManifestPath: null,
+      registryKeyExists: null,
+    };
+  }
+
   throw new Error(
-    `Unsupported platform for native host manifest check: ${process.platform}. This script supports macOS and Windows.`,
+    `Unsupported platform for native host manifest check: ${process.platform}.`,
   );
 }
 JS
     cat > "$chrome_dir/scripts/installed-browsers.js" <<'JS'
 #!/usr/bin/env node
-const KNOWN_BROWSERS = [
-  {
-    name: "Google Chrome",
-    bundleIds: ["com.google.Chrome"],
-    appNames: ["Google Chrome.app"],
-    commands: ["google-chrome", "chrome"],
-    windowsExecutable: "chrome.exe",
-  },
-];
+let knownBrowsers;
+function loadKnownBrowsers(config) {
+  knownBrowsers = config.browserDiagnostics.map((browser) => ({
+    browserFamily: browser.browserFamily,
+    name: browser.displayName,
+    commands: browser.linux.commands,
+  }));
+}
 JS
     cat > "$chrome_dir/scripts/chrome-is-running.js" <<'JS'
 #!/usr/bin/env node
-const CHROME_PROCESS_NAMES_BY_PLATFORM = {
-  darwin: new Set(["Google Chrome", "Google Chrome Helper"]),
-  win32: new Set(["chrome.exe"]),
-};
+let getBrowserDiagnostics;
+function findRunningChromeProcesses(browser) {
+  return new Set(browser.linux.processNames);
+}
 JS
     cat > "$chrome_dir/scripts/check-extension-installed.js" <<'JS'
 #!/usr/bin/env node
-function resolveChromeUserDataDirectory() {
-  return path.join(os.homedir(), ".config", "google-chrome");
+let resolveBrowserUserDataDirectory;
+function resolveChromeUserDataDirectory(browser) {
+  return resolveBrowserUserDataDirectory({
+    browser,
+    env: process.env,
+    homedir: os.homedir(),
+    path,
+    platform: process.platform,
+  });
 }
 
 function resolveChromeProfileDirectory(userDataDirectory) {
@@ -8676,8 +8653,15 @@ function isUsableChromeProfile(userDataDirectory, profileDirectory) {
 JS
     cat > "$chrome_dir/scripts/open-chrome-window.js" <<'JS'
 #!/usr/bin/env node
-function resolveChromeUserDataDirectory() {
-  return path.join(os.homedir(), ".config", "google-chrome");
+let resolveBrowserUserDataDirectory;
+function resolveChromeUserDataDirectory(browser) {
+  return resolveBrowserUserDataDirectory({
+    browser,
+    env: process.env,
+    homedir: os.homedir(),
+    path,
+    platform: process.platform,
+  });
 }
 
 function resolveChromeProfileDirectory(userDataDirectory) {
@@ -8703,7 +8687,11 @@ function isUsableChromeProfile(userDataDirectory, profileDirectory) {
   return profileDirectory.length > 0;
 }
 
-function getOpenChromeCommand(profileDirectory) {
+function commandPath(command) {
+  return command;
+}
+
+function getOpenChromeCommand(browser, profileDirectory) {
   const chromeArgs = [
     `--profile-directory=${profileDirectory}`,
     "--new-window",
@@ -8711,7 +8699,9 @@ function getOpenChromeCommand(profileDirectory) {
   ];
 
   return {
-    command: "google-chrome",
+    command:
+      browser.linux.commands.find((command) => commandPath(command) != null) ??
+      browser.linux.commands[0],
     args: chromeArgs,
   };
 }
@@ -8725,11 +8715,14 @@ test_chrome_plugin_staging() {
     local install_dir="$workspace/install"
     local output_log="$workspace/output.log"
     local chrome_dir="$install_dir/resources/plugins/openai-bundled/plugins/chrome"
+    local upstream_chrome_dir="$app_dir/Contents/Resources/plugins/openai-bundled/plugins/chrome"
     local host="$chrome_dir/extension-host/linux/x64/extension-host"
 
     mkdir -p "$workspace" "$install_dir/resources"
     chmod 0775 "$install_dir" "$install_dir/resources"
     make_fake_chrome_upstream_app "$app_dir"
+    cp "$upstream_chrome_dir/scripts/installManifest.mjs" "$workspace/upstream-installManifest.mjs"
+    cp "$upstream_chrome_dir/scripts/extension-ids.json" "$workspace/upstream-extension-ids.json"
 
     (
         SCRIPT_DIR="$REPO_DIR"
@@ -8762,25 +8755,46 @@ test_chrome_plugin_staging() {
     assert_mode "$chrome_dir/scripts/chrome-is-running.js" "755"
     assert_mode "$chrome_dir/scripts/check-extension-installed.js" "755"
     assert_mode "$chrome_dir/scripts/open-chrome-window.js" "755"
-    assert_contains "$chrome_dir/scripts/installManifest.mjs" "BraveSoftware/Brave-Browser/NativeMessagingHosts"
+    assert_contains "$chrome_dir/scripts/installManifest.mjs" "nativeMessagingManifestDirectories"
+    assert_contains "$chrome_dir/scripts/installManifest.mjs" ".config/BraveSoftware/Brave-Browser/NativeMessagingHosts"
     assert_contains "$chrome_dir/scripts/installManifest.mjs" ".config/chromium/NativeMessagingHosts"
-    assert_contains "$chrome_dir/scripts/installed-browsers.js" "Brave Browser"
-    assert_contains "$chrome_dir/scripts/installed-browsers.js" "Chromium"
-    assert_contains "$chrome_dir/scripts/chrome-is-running.js" "brave-browser"
-    assert_contains "$chrome_dir/scripts/chrome-is-running.js" "chromium-browser"
+    assert_contains "$chrome_dir/scripts/installManifest.mjs" ".config/google-chrome-beta/NativeMessagingHosts"
+    assert_contains "$chrome_dir/scripts/installManifest.mjs" ".config/google-chrome-unstable/NativeMessagingHosts"
+    assert_contains "$chrome_dir/scripts/installManifest.mjs" ".config/google-chrome-for-testing/NativeMessagingHosts"
+    assert_contains "$chrome_dir/scripts/installManifest.mjs" ".config/microsoft-edge/NativeMessagingHosts"
+    assert_contains "$chrome_dir/scripts/installManifest.mjs" ".config/opera/NativeMessagingHosts"
+    assert_contains "$chrome_dir/scripts/installManifest.mjs" ".config/vivaldi/NativeMessagingHosts"
+    assert_contains "$chrome_dir/scripts/installManifest.mjs" "Object.values(w).flatMap"
+    cmp -s "$workspace/upstream-installManifest.mjs" "$chrome_dir/scripts/installManifest.mjs" \
+        || fail "Expected current installManifest.mjs to stage byte-for-byte"
     assert_contains "$chrome_dir/scripts/check-native-host-manifest.js" 'process.platform === "linux"'
-    assert_contains "$chrome_dir/scripts/check-native-host-manifest.js" "BraveSoftware"
-    assert_contains "$chrome_dir/scripts/check-native-host-manifest.js" "chromium"
-    assert_contains "$chrome_dir/scripts/check-extension-installed.js" "linuxBraveUserDataDirectory"
-    assert_contains "$chrome_dir/scripts/check-extension-installed.js" "linuxChromiumUserDataDirectory"
-    assert_contains "$chrome_dir/scripts/check-extension-installed.js" "linuxCandidateWithInstalledExtension"
+    assert_contains "$chrome_dir/scripts/check-native-host-manifest.js" "resolveLinuxNativeMessagingManifestPath"
+    assert_contains "$chrome_dir/scripts/installed-browsers.js" "config.browserDiagnostics"
+    assert_not_contains "$chrome_dir/scripts/installed-browsers.js" "KNOWN_BROWSERS"
+    assert_contains "$chrome_dir/scripts/chrome-is-running.js" "getBrowserDiagnostics"
+    assert_not_contains "$chrome_dir/scripts/chrome-is-running.js" "CHROME_PROCESS_NAMES_BY_PLATFORM"
+    assert_contains "$chrome_dir/scripts/check-extension-installed.js" "resolveBrowserUserDataDirectory"
     assert_contains "$chrome_dir/scripts/check-extension-installed.js" "resolveChromeProfileDirectoryFromRunningProcess"
     assert_contains "$chrome_dir/scripts/check-extension-installed.js" "defaultLinuxUserDataDirectoryForCommand"
-    assert_contains "$chrome_dir/scripts/open-chrome-window.js" "brave-browser"
-    assert_contains "$chrome_dir/scripts/open-chrome-window.js" "chromium"
-    assert_contains "$chrome_dir/scripts/open-chrome-window.js" "defaultBrowser ==="
+    assert_contains "$chrome_dir/scripts/open-chrome-window.js" "resolveBrowserUserDataDirectory"
+    assert_contains "$chrome_dir/scripts/open-chrome-window.js" "browser.linux.commands"
     assert_contains "$chrome_dir/scripts/open-chrome-window.js" "resolveChromeProfileDirectoryFromRunningProcess"
     assert_contains "$chrome_dir/scripts/open-chrome-window.js" "defaultLinuxUserDataDirectoryForCommand"
+    # upstream registry behaviour must survive staging untouched
+    assert_contains "$chrome_dir/scripts/extension-ids.json" '"browserFamily":"chrome"'
+    assert_contains "$chrome_dir/scripts/extension-ids.json" '"browserFamily":"edge"'
+    assert_contains "$chrome_dir/scripts/extension-ids.json" '"browserFamily":"brave"'
+    assert_contains "$chrome_dir/scripts/extension-ids.json" '"browserFamily":"opera"'
+    assert_contains "$chrome_dir/scripts/extension-ids.json" '"browserFamily":"vivaldi"'
+    assert_contains "$chrome_dir/scripts/extension-ids.json" ".config/BraveSoftware/Brave-Browser/NativeMessagingHosts"
+    assert_contains "$chrome_dir/scripts/extension-ids.json" ".config/chromium/NativeMessagingHosts"
+    assert_contains "$chrome_dir/scripts/extension-ids.json" '"google-chrome-beta"'
+    assert_contains "$chrome_dir/scripts/extension-ids.json" '"google-chrome-unstable"'
+    assert_contains "$chrome_dir/scripts/extension-ids.json" '"google-chrome-for-testing"'
+    cmp -s "$workspace/upstream-extension-ids.json" "$chrome_dir/scripts/extension-ids.json" \
+        || fail "Expected current extension-ids.json to stage byte-for-byte"
+    assert_contains "$chrome_dir/skills/control-chrome/SKILL.md" "start a different Chrome, Brave, or Chromium profile"
+    assert_contains "$chrome_dir/skills/control-chrome/SKILL.md" "browser.tabs.new()"
     assert_contains "$chrome_dir/scripts/browser-client.mjs" "browserPreference"
     assert_contains "$chrome_dir/scripts/browser-client.mjs" "preferredWindowIdFor"
     assert_contains "$chrome_dir/scripts/browser-client.mjs" "getForUrl"
@@ -8802,14 +8816,79 @@ test_chrome_plugin_staging() {
     assert_contains "$chrome_dir/scripts/browser-client.mjs" "nativePipe??import.meta.__codexNativePipe"
     assert_not_contains "$chrome_dir/scripts/browser-client.mjs" "codexLinuxNativePipeFallback"
     assert_not_contains "$chrome_dir/scripts/browser-client.mjs" 'await import("node:net")'
-    assert_contains "$chrome_dir/scripts/browser-client.mjs" "codexLinuxSiteStatusAllowlistFallback"
+    assert_contains "$chrome_dir/scripts/browser-client.mjs" 'outcome:"error_fail_open"'
+    assert_contains "$chrome_dir/scripts/browser-client.mjs" 'reason:"site_status_unavailable"'
+    assert_not_contains "$chrome_dir/scripts/browser-client.mjs" "codexLinuxSiteStatusAllowlistFallback"
     assert_contains "$chrome_dir/scripts/browser-client.mjs" "codexLinuxPerUserBrowserSocketDir"
     assert_contains "$chrome_dir/scripts/browser-client.mjs" "codexLinuxBrowserUseUserInfo"
     assert_not_contains "$chrome_dir/scripts/browser-client.mjs" "process.env.CODEX_BROWSER_USE_SOCKET_DIR"
     assert_not_contains "$chrome_dir/scripts/browser-client.mjs" '"/tmp/codex-browser-use"'
     assert_not_contains "$chrome_dir/scripts/browser-client.mjs" "codexLinuxIabSocketScope"
-    assert_contains "$chrome_dir/skills/control-chrome/SKILL.md" "agent.browsers.list()"
-    assert_contains "$chrome_dir/skills/control-chrome/SKILL.md" "browser.tabs.new()"
+
+    node - "$chrome_dir/scripts/browser-client.mjs" <<'NODE'
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const vm = require("node:vm");
+
+const source = fs
+  .readFileSync(process.argv[2], "utf8")
+  .replace(
+    'import{userInfo as codexLinuxBrowserUseUserInfo}from"node:os";',
+    "var codexLinuxBrowserUseUserInfo=()=>({uid:1000});",
+  )
+  .replace('import{platform as yT}from"node:os";', 'var yT=()=>"linux";')
+  .replaceAll("import.meta.__codexNativePipe", "globalThis.__codexNativePipe");
+const context = { URL };
+vm.createContext(context);
+vm.runInContext(
+  `${source}\nglobalThis.__SiteStatusPolicy=siteStatusPolicy;globalThis.__siteStatusEvents=siteStatusEvents;`,
+  context,
+);
+
+const policy = new context.__SiteStatusPolicy();
+const request = { endpoint: "http://127.0.0.1/aura/site_status" };
+
+(async () => {
+  for (const failure of [
+    new Error("network unavailable"),
+    { ok: false, status: 503, json: async () => ({ blocked: false }) },
+    { ok: true, status: 200, json: async () => { throw new Error("invalid JSON"); } },
+  ]) {
+    const before = context.__siteStatusEvents.length;
+    const runtime = {
+      async fetch() {
+        if (failure instanceof Error) throw failure;
+        return failure;
+      },
+    };
+    await policy.throwIfBlocksUrl(runtime, request, "cdp");
+    assert.equal(context.__siteStatusEvents.length, before + 1);
+    assert.equal(context.__siteStatusEvents.at(-1).outcome, "error_fail_open");
+    assert.equal(context.__siteStatusEvents.at(-1).reason, "site_status_unavailable");
+  }
+
+  const allowedRuntime = {
+    async fetch() {
+      return { ok: true, status: 200, json: async () => ({ blocked: false }) };
+    },
+  };
+  const beforeAllowed = context.__siteStatusEvents.length;
+  await policy.throwIfBlocksUrl(allowedRuntime, request, "cdp");
+  assert.equal(context.__siteStatusEvents.length, beforeAllowed);
+
+  const blockedRuntime = {
+    async fetch() {
+      return { ok: true, status: 200, json: async () => ({ blocked: true }) };
+    },
+  };
+  await assert.rejects(policy.throwIfBlocksUrl(blockedRuntime, request, "cdp"), /blocked/);
+  assert.equal(context.__siteStatusEvents.length, beforeAllowed);
+})().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});
+NODE
+
     assert_contains "$install_dir/resources/plugins/openai-bundled/.agents/plugins/marketplace.json" '"name": "chrome"'
     assert_mode "$install_dir" "755"
     assert_mode "$install_dir/resources" "755"
@@ -11252,7 +11331,6 @@ main() {
     test_bundled_plugin_system_computer_use_preserves_cosmic_helper_name
     test_browser_use_node_repl_fallback_runtime
     test_browser_use_file_url_policy_patch_behavior
-    test_browser_use_site_status_allowlist_fallback_patch_behavior
     test_browser_plugin_renamed_upstream_staging
     test_upstream_bundled_skills_staging
     test_upstream_bundled_skills_validator_guards

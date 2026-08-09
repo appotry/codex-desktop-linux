@@ -519,7 +519,7 @@
     },
     {
       "id": "browser_use_policy_shims",
-      "title": "Browser Use policy shims and site-status allowlist",
+      "title": "Browser Use policy shims and upstream site-status fail-open",
       "category": "webview",
       "pathPatterns": [
         "browser-client\\.mjs",
@@ -539,19 +539,33 @@
       ],
       "requiredEvidence": [
         {
-          "id": "browser-policy-shim",
+          "id": "browser-plugin-policy-shim",
           "pathPatterns": [
-            "browser-client\\.mjs"
+            "plugins/openai-bundled/plugins/browser/.*browser-client\\.mjs$"
           ],
           "contentNeedles": [
             "config.toml",
-            "/aura/site_status"
+            "/aura/site_status",
+            "error_fail_open",
+            "site_status_unavailable"
+          ]
+        },
+        {
+          "id": "chrome-plugin-policy-shim",
+          "pathPatterns": [
+            "plugins/openai-bundled/plugins/chrome/.*browser-client\\.mjs$"
+          ],
+          "contentNeedles": [
+            "config.toml",
+            "/aura/site_status",
+            "error_fail_open",
+            "site_status_unavailable"
           ]
         }
       ],
       "linuxSubstrate": {
         "requiredPaths": [
-          "scripts/lib/patch-chrome-plugin.js"
+          "scripts/lib/bundled-plugins.sh"
         ]
       }
     },

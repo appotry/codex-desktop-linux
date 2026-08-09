@@ -30,7 +30,13 @@ function withTempFeatureRoot(enabled, fn) {
 
 function writeFakeChromePlugin(pluginDir) {
   const scriptsDir = path.join(pluginDir, "scripts");
+  const skillDir = path.join(pluginDir, "skills", "control-chrome");
   fs.mkdirSync(scriptsDir, { recursive: true });
+  fs.mkdirSync(skillDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(skillDir, "SKILL.md"),
+    "Do not inspect browser cookies, local storage, profiles, passwords, or session stores. Browser discovery must remain read-only.\n",
+  );
   fs.writeFileSync(
     path.join(scriptsDir, "extension-ids.json"),
     `${JSON.stringify(

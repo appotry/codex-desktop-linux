@@ -448,6 +448,66 @@ test("protects the current Hatch Pet skill and Linux bundled-skill staging owner
     ]);
   }));
 
+test("tracks Browser and Chrome site-status fail-open policy independently", () =>
+  withTempDir((workspace) => {
+    const policySurface = productionRegistry.surfaces.find(
+      (surface) => surface.id === "browser_use_policy_shims",
+    );
+    assert.ok(policySurface, "expected production registry to protect Browser Use policy shims");
+
+    const focusedRegistry = {
+      version: productionRegistry.version,
+      surfaces: [policySurface],
+    };
+    const goodPolicy = [
+      "config.toml",
+      "/aura/site_status",
+      "codexLinuxFileUrlPolicy",
+      "error_fail_open",
+      "site_status_unavailable",
+    ].join(" ");
+    const incompletePolicy = [
+      "config.toml",
+      "/aura/site_status",
+      "codexLinuxFileUrlPolicy",
+    ].join(" ");
+
+    for (const missingPlugin of ["browser", "chrome"]) {
+      const appDir = path.join(workspace, missingPlugin, "ChatGPT.app");
+      for (const plugin of ["browser", "chrome"]) {
+        writeFile(
+          path.join(
+            appDir,
+            "Contents/Resources/plugins/openai-bundled/plugins",
+            plugin,
+            "scripts/browser-client.mjs",
+          ),
+          plugin === missingPlugin ? incompletePolicy : goodPolicy,
+        );
+      }
+
+      const protectedSurfaces = extractProtectedSurfaces({
+        inventory: createInventory({ registry: focusedRegistry, sourcePath: appDir }),
+        registry: focusedRegistry,
+        repoRoot: process.cwd(),
+      });
+      const surface = protectedSurfaces.surfacesById.browser_use_policy_shims;
+
+      assert.equal(surface.status, "PARTIAL");
+      assert.ok(
+        surface.missingAnchors.some(
+          (anchor) => anchor.id === `${missingPlugin}-plugin-policy-shim`,
+        ),
+      );
+      assert.ok(
+        surface.satisfiedAnchors.some(
+          (anchor) =>
+            anchor.id === `${missingPlugin === "browser" ? "chrome" : "browser"}-plugin-policy-shim`,
+        ),
+      );
+    }
+  }));
+
 test("marks Chronicle settings toggle surface partial when the Memory master toggle path disappears", () =>
   withTempDir((workspace) => {
     const appDir = createFixtureApp(workspace, "missing-memory-chronicle-disable");
