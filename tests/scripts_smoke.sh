@@ -7011,7 +7011,9 @@ pathlib.Path(sys.argv[2]).write_text(
     + r'''
 case "${1:?}" in
     find)
-        find_codex_cli
+        # 容忍查找失败：CLI 可能不存在（如仅 mise shim 无真实安装），
+        # 此时应输出空并返回 0，供上层断言"未选中 mise shim"。
+        find_codex_cli || true
         ;;
     version)
         codex_cli_version "$2"
