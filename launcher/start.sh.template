@@ -1954,14 +1954,15 @@ find_fnm_codex_cli() {
 }
 
 find_codex_cli() {
-    if command -v codex >/dev/null 2>&1; then
-        command -v codex
+    local path_hit
+    if path_hit="$(command -v codex 2>/dev/null || true)" && [ -n "$path_hit" ] && is_codex_cli_path "$path_hit"; then
+        echo "$path_hit"
         return 0
     fi
 
     if [ -n "${HOMEBREW_PREFIX:-}" ]; then
         local homebrew_candidate="$HOMEBREW_PREFIX/bin/codex"
-        if [ -x "$homebrew_candidate" ]; then
+        if [ -x "$homebrew_candidate" ] && is_codex_cli_path "$homebrew_candidate"; then
             echo "$homebrew_candidate"
             return 0
         fi
@@ -1983,8 +1984,8 @@ find_codex_cli() {
         export NVM_DIR="$nvm_dir"
         # shellcheck disable=SC1090
         . "$NVM_DIR/nvm.sh" >/dev/null 2>&1 || true
-        if command -v codex >/dev/null 2>&1; then
-            command -v codex
+        if path_hit="$(command -v codex 2>/dev/null || true)" && [ -n "$path_hit" ] && is_codex_cli_path "$path_hit"; then
+            echo "$path_hit"
             return 0
         fi
     fi
