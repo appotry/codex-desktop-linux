@@ -7011,7 +7011,9 @@ pathlib.Path(sys.argv[2]).write_text(
     + r'''
 case "${1:?}" in
     find)
-        find_codex_cli
+        # 容忍查找失败：CLI 可能不存在（如仅 mise shim 无真实安装），
+        # 此时应输出空并返回 0，供上层断言"未选中 mise shim"。
+        find_codex_cli || true
         ;;
     version)
         codex_cli_version "$2"
@@ -7131,7 +7133,10 @@ PY
         fail "CLI lookup must resolve mise-installed codex through the mise shim, got $selected_cli"
 
     # no mise install dir present: fall back to nothing rather than the mise binary
-    selected_cli="$(env -i PATH="$mise_shim_dir:$clean_tool_path" HOME="$fake_home" "$launcher_probe" find)"
+    local empty_home="$workspace/empty-mise-home"
+    mkdir -p "$empty_home"
+    chmod 0755 "$empty_home"
+    selected_cli="$(env -i PATH="$mise_shim_dir:$clean_tool_path" HOME="$empty_home" "$launcher_probe" find)"
     [ -z "$selected_cli" ] || fail "CLI lookup must never select the mise shim binary, got $selected_cli"
 
     local brew_home="$workspace/brew-home"
@@ -7164,6 +7169,16 @@ PY
     ln -s "$external_cli" "$visible_cli"
     resolved_cli="$(env -i PATH="$HOST_TOOL_PATH" HOME="$fake_home" "$launcher_probe" resolve "$visible_cli")"
     [ "$resolved_cli" = "$(realpath "$external_cli")" ] || fail "CLI resolver must canonicalize visible symlinks, got $resolved_cli"
+
+    local alt_name_bin="$workspace/alt-name-bin"
+    local alt_name_target="$workspace/alt-name-target/openai-codex-bin"
+    mkdir -p "$alt_name_bin" "$(dirname "$alt_name_target")"
+    printf '#!/usr/bin/env bash\nprintf "codex-cli 0.173.0\\n"\n' > "$alt_name_target"
+    chmod 0755 "$alt_name_target" "$(dirname "$alt_name_target")"
+    ln -s "$alt_name_target" "$alt_name_bin/codex"
+    selected_cli="$(env -i PATH="$alt_name_bin:$clean_tool_path" HOME="$fake_home" "$launcher_probe" find)"
+    [ "$selected_cli" = "$alt_name_bin/codex" ] || \
+        fail "CLI lookup must accept a codex symlink to an executable with another basename, got $selected_cli"
 
     local custom_brew_prefix="$workspace/custom-homebrew"
     local custom_brew_target_dir="$workspace/custom-homebrew-cellar/openai-codex/0.42.0/bin"
