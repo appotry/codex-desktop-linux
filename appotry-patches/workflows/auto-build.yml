@@ -7,7 +7,10 @@
 # 注意：推送到 main 的修改会被上游同步覆盖，不要在 main 上工作。
 # 所有修改请推到 releases 分支。
 #
-# 构建策略：同一 job 内完成 build + package，避免 artifact 传递问题
+# 构建策略（跟随上游 916a833 "complete official Linux package migration"）：
+#   - 上游已从 DMG 迁移到官方签名 APT 仓库 deb 包
+#   - install.sh 自动解析最新签名 deb（或传入 UPSTREAM_DEB）
+#   - 本 workflow 与上游 upstream-build-app.yml 保持同构
 
 name: Auto Build & Release
 
@@ -28,61 +31,53 @@ permissions:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-  UPSTREAM_DMG_URL: https://persistent.oaistatic.com/codex-app-prod/ChatGPT.dmg
-  UPSTREAM_DMG_PATH: /tmp/codex-upstream-ci/ChatGPT.dmg
-  DMG_CACHE_SCHEMA_VERSION: v3
+  CODEX_LINUX_FEATURES_CONFIG: ${{ github.workspace }}/linux-features/features.example.json
+  PACKAGE_WITH_UPDATER: '0'
 
 jobs:
   # ============================================================
-  # 构建 + 打包（统一 job，避免 artifact 传递）
+  # 构建 deb + rpm（同一 job，从签名 deb 构建）
   # ============================================================
   build-and-package:
-    name: Build & Package
+    name: Build & Package (deb/rpm)
     runs-on: ubuntu-latest
     timeout-minutes: 120
 
-    strategy:
-      fail-fast: false
-      matrix:
-        package:
-          - deb
-          - rpm
-        # pacman 需 Docker，拆到独立 job
-
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
 
       - name: Install build dependencies
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y pkg-config libssl-dev rpm
+          sudo apt-get install -y dpkg-dev gnupg patchelf rpm
           bash scripts/install-deps.sh
 
       - name: Detect upstream version
         id: upstream
         run: |
           set -euo pipefail
-          hf="$(mktemp)"; trap 'rm -f "$hf"' EXIT
-          curl -fsSLI "$UPSTREAM_DMG_URL" > "$hf"
-          lm="$(awk 'tolower($0)~/^last-modified:/{sub(/\r$/,"");sub(/^[^:]+: /,"");print;exit}' "$hf")"
-          et="$(awk 'tolower($0)~/^etag:/{sub(/\r$/,"");sub(/^[^:]+: /,"");gsub(/"/,"");print;exit}' "$hf")"
-          echo "last_modified=${lm:-unknown}" >> "$GITHUB_OUTPUT"
-          echo "etag=${et:-no-etag}" >> "$GITHUB_OUTPUT"
+          mkdir -p upstream
+          package="$(node scripts/lib/upstream-linux-package.js \
+            --output-dir upstream/amd64 \
+            --metadata upstream/amd64.json \
+            --key-base64 assets/openai-codex-linux-repository-key.gpg.base64 \
+            --arch amd64)"
+          echo "package=$package" >> "$GITHUB_OUTPUT"
 
           # 版本号
           DATE_TAG=$(date -u '+%Y%m%d')
           VER="${DATE_TAG}.${{ github.run_number }}"
-          CACHE_KEY=$(echo "${et:-$lm}" | sha256sum | cut -c1-16)
           echo "version=$VER" >> "$GITHUB_OUTPUT"
-          echo "cache_key=$CACHE_KEY" >> "$GITHUB_OUTPUT"
 
       - name: Check if build is needed
         id: check
         run: |
           LAST_VER=""
-          gh release view latest --json tagName --jq '.tagName' 2>/dev/null && \
-            LAST_VER=$(gh release view latest --json tagName --jq '.tagName' 2>/dev/null || echo "")
+          LAST_VER=$(gh release view latest --json tagName --jq '.tagName' 2>/dev/null || echo "")
           VER="${{ steps.upstream.outputs.version }}"
 
           if [ "${{ github.event.inputs.force }}" = "true" ]; then
@@ -103,151 +98,40 @@ jobs:
           echo "Version unchanged (${{ steps.upstream.outputs.version }}), skipping."
           exit 0
 
-      # ---- 构建 ----
-      - name: Cache ChatGPT.dmg
-        id: dmg-cache
-        uses: actions/cache@v4
-        with:
-          path: /tmp/codex-upstream-ci/ChatGPT.dmg
-          key: upstream-dmg-${{ env.DMG_CACHE_SCHEMA_VERSION }}-${{ steps.upstream.outputs.cache_key }}
-
-      - name: Download ChatGPT.dmg
-        if: steps.dmg-cache.outputs.cache-hit != 'true'
-        run: |
-          mkdir -p "$(dirname "$UPSTREAM_DMG_PATH")"
-          curl -fL --retry 3 -o "$UPSTREAM_DMG_PATH" "$UPSTREAM_DMG_URL"
-
       - name: Build app
-        run: make build-app DMG=/tmp/codex-upstream-ci/ChatGPT.dmg
+        run: ./install.sh "${{ steps.upstream.outputs.package }}"
 
-      # ---- 打包 ----
-      - name: Build ${{ matrix.package }} package
-        run: |
-          PACKAGE_VERSION="${{ steps.upstream.outputs.version }}" \
-            ./scripts/build-${{ matrix.package }}.sh
+      - name: Build deb package
+        env:
+          PACKAGE_VERSION: ${{ steps.upstream.outputs.version }}
+        run: ./scripts/build-deb.sh
 
-      - name: Upload ${{ matrix.package }} package
-        uses: actions/upload-artifact@v4
-        with:
-          name: codex-desktop-${{ matrix.package }}
-          path: dist/*.${{ matrix.package }}
-          retention-days: 90
+      - name: Build rpm package
+        env:
+          PACKAGE_VERSION: ${{ steps.upstream.outputs.version }}
+        run: ./scripts/build-rpm.sh
 
-  # ============================================================
-  # Pacman 包（Docker Arch Linux，自包含构建）
-  # ============================================================
-  package-pacman:
-    name: Build Pacman Package
-    runs-on: ubuntu-latest
-    timeout-minutes: 90
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Get version
-        id: ver
-        run: |
-          echo "version=$(date -u '+%Y%m%d').${{ github.run_number }}" >> "$GITHUB_OUTPUT"
-
-      - name: Build pacman package in Docker
-        run: |
-          docker run --rm \
-            -e PACKAGE_VERSION="${{ steps.ver.outputs.version }}" \
-            -e UPSTREAM_DMG_URL="${{ env.UPSTREAM_DMG_URL }}" \
-            -v "$PWD:/work" -w /work \
-            archlinux:base-devel \
-            bash -lc '
-              set -euo pipefail
-              pacman -Syu --noconfirm --needed rust nodejs npm zstd sudo p7zip curl unzip
-              useradd -m builder
-              chown -R builder:builder /work
-              runuser -u builder -- bash -lc "
-                set -euo pipefail
-                cd /work
-                # Download upstream DMG
-                mkdir -p /tmp/codex-upstream-ci
-                curl -fL --retry 3 -o /tmp/codex-upstream-ci/ChatGPT.dmg \"\$UPSTREAM_DMG_URL\"
-                # Build app
-                make build-app DMG=/tmp/codex-upstream-ci/ChatGPT.dmg
-                # Build updater
-                cargo build --release -p codex-update-manager
-                # Build pacman package
-                ./scripts/build-pacman.sh
-              "
-            '
-
-      - name: Upload pacman package
-        uses: actions/upload-artifact@v4
-        with:
-          name: codex-desktop-pacman
-          path: dist/*.pkg.tar.*
-          retention-days: 90
-
-  # ============================================================
-  # AppImage 包（从 DMG 缓存构建）
-  # ============================================================
-  package-appimage:
-    name: Build AppImage
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Install build dependencies
-        run: |
-          set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y pkg-config libssl-dev
-          bash scripts/install-deps.sh
-
-      - name: Detect upstream DMG cache key
-        id: dmg-key
-        run: |
-          hf="$(mktemp)"; trap 'rm -f "$hf"' EXIT
-          curl -fsSLI "$UPSTREAM_DMG_URL" > "$hf"
-          et="$(awk 'tolower($0)~/^etag:/{sub(/\r$/,"");sub(/^[^:]+: /,"");gsub(/"/,"");print;exit}' "$hf")"
-          lm="$(awk 'tolower($0)~/^last-modified:/{sub(/\r$/,"");sub(/^[^:]+: /,"");print;exit}' "$hf")"
-          echo "cache_key=$(echo "${et:-$lm}" | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
-
-      - name: Cache ChatGPT.dmg
-        id: dmg-cache
-        uses: actions/cache@v4
-        with:
-          path: /tmp/codex-upstream-ci/ChatGPT.dmg
-          key: upstream-dmg-${{ env.DMG_CACHE_SCHEMA_VERSION }}-${{ steps.dmg-key.outputs.cache_key }}
-
-      - name: Download ChatGPT.dmg
-        if: steps.dmg-cache.outputs.cache-hit != 'true'
-        run: |
-          mkdir -p "$(dirname "$UPSTREAM_DMG_PATH")"
-          curl -fL --retry 3 -o "$UPSTREAM_DMG_PATH" "$UPSTREAM_DMG_URL"
-
-      - name: Build app
-        run: make build-app DMG=/tmp/codex-upstream-ci/ChatGPT.dmg
-
-      - name: Download appimagetool
+      - name: Build AppImage
+        env:
+          APPIMAGETOOL: /tmp/appimagetool.AppImage
+          PACKAGE_VERSION: ${{ steps.upstream.outputs.version }}
         run: |
           wget -q "https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-$(uname -m).AppImage" -O /tmp/appimagetool.AppImage
           chmod +x /tmp/appimagetool.AppImage
+          APPIMAGE_EXTRACT_AND_RUN=1 ./scripts/build-appimage.sh
 
-      - name: Get version
-        id: ver
-        run: |
-          echo "version=$(date -u '+%Y%m%d').${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+      - name: Stage pacman package
+        run: PACMAN_STAGE_ONLY=1 ./scripts/build-pacman.sh
 
-      - name: Build AppImage
-        run: |
-          APPIMAGETOOL=/tmp/appimagetool.AppImage \
-          APPIMAGE_EXTRACT_AND_RUN=1 \
-          PACKAGE_VERSION="${{ steps.ver.outputs.version }}" \
-            ./scripts/build-appimage.sh
-
-      - name: Upload AppImage
+      - name: Upload packages
         uses: actions/upload-artifact@v4
         with:
-          name: codex-desktop-appimage
-          path: dist/*.AppImage
+          name: codex-desktop-build
+          path: |
+            dist/*.deb
+            dist/*.rpm
+            dist/*.AppImage
+            dist/pacman-stage*
           retention-days: 90
 
   # ============================================================
@@ -257,21 +141,20 @@ jobs:
     name: Create Release
     if: ${{ github.event_name != 'pull_request' }}
     runs-on: ubuntu-latest
-    needs: [build-and-package, package-pacman, package-appimage]
+    needs: [build-and-package]
     steps:
       - uses: actions/checkout@v7
 
       - name: Download all packages
         uses: actions/download-artifact@v4
         with:
-          pattern: codex-desktop-*
+          pattern: codex-desktop-build
           merge-multiple: true
           path: /tmp/release-artifacts
 
       - name: Get version
         id: ver
         run: |
-          # 从 artifacts 获取版本
           VER="$(date -u '+%Y%m%d').${{ github.run_number }}"
           echo "version=$VER" >> "$GITHUB_OUTPUT"
 
@@ -286,8 +169,8 @@ jobs:
             🖥️ 支持平台：
             - **Debian/Ubuntu** → `.deb`
             - **Fedora/RHEL/openSUSE** → `.rpm`
-            - **Arch/Manjaro** → `.pkg.tar.zst`
             - **通用 Linux** → `.AppImage`（无需安装，直接运行）
+            - **Arch/Manjaro** → pacman staging（`pacman-stage.PKGBUILD` + `pacman-stage/`，`makepkg -si` 打包安装）
 
             自动构建于 $(date -u '+%Y-%m-%d %H:%M UTC')。
 
@@ -300,12 +183,16 @@ jobs:
             # Fedora/RHEL
             sudo rpm -ivh codex-desktop-*.rpm
 
-            # Arch/Manjaro
-            sudo pacman -U codex-desktop-*.pkg.tar.zst
-
             # 通用 Linux（AppImage）
             chmod +x codex-desktop-*.AppImage
             ./codex-desktop-*.AppImage
+
+            # Arch/Manjaro（staging 包）
+            mkdir -p pacman-build && cd pacman-build
+            tar -xzf ../codex-desktop-pacman-stage.tar.gz 2>/dev/null || cp -a ../pacman-stage/ . 2>/dev/null || true
+            cp ../pacman-stage.PKGBUILD PKGBUILD
+            cp ../pacman-stage.install .install 2>/dev/null || true
+            makepkg -si
             ```
 
             首次启动后应用会引导安装 CLI。
