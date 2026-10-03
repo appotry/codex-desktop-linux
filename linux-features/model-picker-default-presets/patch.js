@@ -555,7 +555,7 @@ function applySliderMinimumPatch(source, context = {}) {
 function localComposerResolverSection(source) {
   return uniqueFunctionWithMarkers(source, [
     "sliderModelsConfig:",
-    "includeUltraInSlider:",
+    "removeXHigh:",
     "stripGptPrefix:",
     ".presets){",
   ]);
@@ -690,7 +690,7 @@ const LOCAL_COMPOSER_FALLBACK_PATTERN =
 function localComposerResetContext(section) {
   const matches = [
     ...(section?.source ?? "").matchAll(
-      /resetContextKey:JSON\.stringify\(\[([A-Za-z_$][\w$]*),([A-Za-z_$][\w$]*(?:\.hostId)?),([A-Za-z_$][\w$]*)\.cwd\]\)/gu,
+      /resetContextKey:JSON\.stringify\(\[([A-Za-z_$][\w$]*),([A-Za-z_$][\w$]*),([A-Za-z_$][\w$]*)\.cwd\]\)/gu,
     ),
   ];
   if (matches.length !== 1) return null;

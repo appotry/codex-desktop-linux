@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <a href="README.md">English</a> | 简体中文
+  <a href="README.md">English</a> | 简体中文 | <a href="README.fa.md">فارسی</a>
 </p>
 
 `codex-desktop` 是 OpenAI 官方 Linux ChatGPT 桌面应用的非官方社区发行版。
@@ -72,7 +72,23 @@ make bootstrap-native
 make install-native
 ```
 
-需要先选择可选扩展时：
+若要使用图形化引导安装器，请运行仓库中的独立入口：
+
+```bash
+./install-community
+```
+
+（`make guided-install` 调用同一个入口。）安装器属于仓库安装流程本身，
+不是一个可选 Linux 扩展。在支持 GTK4/PyGObject 的桌面环境中，它会依次
+完成扩展选择、安装选项、配置确认以及带实时日志的构建/安装进度。依赖扩展
+会自动选中；与当前选择冲突的扩展会被禁用，并显示原因。
+
+图形化安装器不会修改扩展实现或扩展设置。它只更新被启用的扩展列表以及
+gitignored 的 `linux-features/features.json` 中属于安装器自己的偏好，
+已有扩展设置会保持不变。无论是否包含自动更新器，原生输出始终保持
+`codex-desktop` 软件包身份并安装到 `/opt/codex-desktop`。
+
+如果只想配置扩展而暂不安装，仍然使用：
 
 ```bash
 make setup-native
@@ -101,9 +117,10 @@ UPSTREAM_DEB=/path/to/chatgpt_<version>_<arch>.deb make build-app
 - 构建需要 Node.js 20+、npm、Python 3、curl、`gpgv`、`dpkg-deb`、tar、
   make 和 C/C++ 工具链。更新器及启用的原生扩展 helper 还需要 Rust。
   `make bootstrap-native` 会安装或提示这些依赖。
-- 官方 `chatgpt` 与自定义 `codex-desktop` 可以同时安装，但两者会共享上游
-  `Codex` 用户 profile。请勿同时运行；上游 single-instance lock 可能把第二次
-  启动交给已经运行的进程。
+- 官方 `chatgpt` 与自定义 `codex-desktop` 可以同时安装。默认情况下两者会
+  共享上游 `Codex` 用户 profile，因此不应同时运行。可选的
+  `community-profile-isolation` 扩展会为 Community 使用独立的 Codex 与
+  Electron 状态，并固定其内置 CLI，从而避免这条共享 profile 边界。
 - AppImage 不会自动添加 `--no-sandbox`。若发行版禁用了 unprivileged user
   namespaces，请使用原生软件包或参阅[故障排除](docs/troubleshooting.md)。
 
@@ -170,9 +187,13 @@ Nix 用户应从 profile、Home Manager 配置或 NixOS module 中删除该包�
 ~/.cache/codex-update-manager
 ```
 
+若启用了 `community-profile-isolation`，Community 自己的状态位于
+`~/.codex-community`，Electron profile 位于 `~/.config/Codex-Community`。
+只有在确实要删除这份隔离的 Community 数据时才删除这些路径。
+
 若启用了 `remote-mobile-control`，删除 private device keys 前请先撤销配对设备。
-除非你确实希望删除官方与 Community 共用的 Codex profile、配置、插件和项目
-状态，否则不要删除 `~/.codex`。
+除非你确实希望删除默认共享的 Codex profile、配置、插件和项目状态，否则不要
+删除 `~/.codex`。
 
 ## 功能矩阵
 
@@ -207,6 +228,7 @@ Nix 用户应从 profile、Home Manager 配置或 NixOS module 中删除该包�
 | `browser-proxy` | 让 Browser Use 的网络辅助进程继承显式代理设置 | [文档](linux-features/browser-proxy/README.zh-CN.md) |
 | `chronicle-skysight` | 可选的 Linux 桌面活动记忆与受限 Skysight MCP 工具 | [文档](linux-features/chronicle-skysight/README.md) |
 | `codex-micro` | 使用上游 `node-hid` 的 Codex Micro hotplug/hidraw policy | [文档](linux-features/codex-micro/README.md) |
+| `community-profile-isolation` | 将 Community 的 Codex/Electron 状态与子进程 CLI 解析和官方 ChatGPT 隔离 | [文档](linux-features/community-profile-isolation/README.md) |
 | `computer-use-linux` | Linux desktop-control UI 与原生 MCP backend | [文档](linux-features/computer-use-linux/README.md) |
 | `copilot-reasoning-effort` | Copilot auth 的 reasoning-effort 默认值 | [文档](linux-features/copilot-reasoning-effort/README.md) |
 | `directory-only-working-tree-watch` | 有界 Watchbound 工作树监听 | [文档](linux-features/directory-only-working-tree-watch/README.md) |
@@ -234,6 +256,9 @@ Nix 用户应从 profile、Home Manager 配置或 NixOS module 中删除该包�
 | `thorium-chrome-plugin` | 为官方 Chrome integration 添加 Thorium | [文档](linux-features/thorium-chrome-plugin/README.md) |
 | `tray-usage` | 在 Linux 系统托盘菜单显示剩余用量 | [文档](linux-features/tray-usage/README.md) |
 | `ui-tweaks` | 可选 UI 与交互自定义 | [文档](linux-features/ui-tweaks/README.md) |
+
+可选的 Computer Use backend 提供 `guard-accessibility` 命令，可显式在前台保持
+GNOME 辅助功能开启。它不会自动启动；详见 [Linux Computer Use](docs/linux-computer-use.md)。
 
 启用 `shared-app-server-socket` 并保持 Desktop 运行后，可使用
 `codex-desktop --cli` 将 Codex CLI 连接到 Desktop 的 app-server。详见

@@ -24,8 +24,11 @@ jobs:
           sudo apt-get install -y --no-install-recommends ripgrep
       - name: Shell syntax
         run: |
-          bash -n install.sh launcher/start.sh.template scripts/lib/*.sh
+          bash -n install.sh install-community launcher/start.sh.template scripts/lib/*.sh
+          bash -n scripts/bootstrap-wizard.sh scripts/install-deps.sh
           bash -n scripts/build-deb.sh scripts/build-rpm.sh scripts/build-pacman.sh scripts/build-appimage.sh
+      - name: Guided installer tests
+        run: python3 scripts/feature-picker.test.py
       - name: Node tests
         run: |
           node --test scripts/ci/*.test.js
@@ -52,6 +55,18 @@ jobs:
       - run: cargo clippy -p codex-update-manager -- -D warnings
       - run: cargo test -p codex-record-replay-linux
       - run: cargo clippy -p codex-record-replay-linux --all-targets -- -D warnings
+      - name: Install private D-Bus test session
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends dbus
+      - name: Test embedded Computer Use in isolation
+        env:
+          CARGO_BUILD_JOBS: '2'
+        run: |
+          dbus-run-session -- env -u DISPLAY -u WAYLAND_DISPLAY -u AT_SPI_BUS_ADDRESS \
+            -u XDG_CURRENT_DESKTOP -u XDG_SESSION_TYPE \
+            cargo test -p codex-computer-use-linux --all-targets -- --test-threads=1
+          cargo clippy -p codex-computer-use-linux --all-targets -- -D warnings
 
   nix-build:
     strategy:

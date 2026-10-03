@@ -35,6 +35,101 @@ methods already emit the image and should not be emitted a second time.
 
 ## Runtime Dependencies
 
+The embedded backend includes the standalone v0.7.6 accessibility setup,
+guard, native activation, coordinate-contract, completion-notification, and
+accessibility-tree scoping changes. Setup verifies GNOME's saved toolkit-accessibility key even when
+runtime AT-SPI is ready, and warns when the saved key cannot be verified.
+Other accessibility tools can change the key later; setup does not hold it on.
+
+`get_app_state` returns screenshots as a structured image content block followed
+by the JSON report. The JSON `screenshot` value contains dimensions, scale,
+format, and byte counts without an inline base64 `data_url`; callers should read
+the image block for pixels.
+
+`doctor` reports an XDG portal interface only when the portal exports its
+methods: Screenshot needs `Screenshot`, ScreenCast needs `CreateSession`,
+`SelectSources`, and `Start`, and InputCapture needs `GetZones`, `Enable`, and
+`ConnectToEIS`. `busctl introspect` exits 0 with only a header line for a
+missing interface, so exit status alone was a false positive. Readiness reports
+`can_capture_screenshots` and a blocker when no screenshot route is detected;
+that is detection, not a test capture.
+
+On a native X11 session (never XWayland), screenshots can use one root-window
+`GetImage` after GNOME Shell, the Codex GNOME Shell extension, and the portal,
+and before `gnome-screenshot`. Pixels are device pixels, the space xdotool input
+uses. `doctor` reports it as `platform.x11_display` and the `x11`
+screenshot capability; `CODEX_COMPUTER_USE_SCREENSHOT_BACKEND=x11` pins it.
+X11/EWMH window origins come from the X server instead of `wmctrl -lG`, which
+counts the frame offset twice, so window crops and relative clicks line up
+with the client area.
+
+Native X11 connections and replies share a transport deadline; a stalled server
+closes the query connection instead of leaving a blocked worker behind. Unix
+sockets, literal IP addresses, and `localhost` need no resolver helper. A remote
+hostname in `DISPLAY` requires `getent ahosts` for bounded name resolution;
+missing or failed resolution reports the X11 route as unavailable.
+
+Element-targeted `click` and `scroll` refuse an `element_index` from another
+app's `get_app_state` snapshot and ask for a snapshot of the target. On GNOME
+Wayland with a scaled monitor, portal pointer input multiplies the stream point
+by the monitor scale, matching mutter's logical layout mode. After targeted
+typing, focus feedback reports an incomplete search or an app without an AT-SPI
+tree instead of a false "no focused element" warning.
+
+On Wayland, portal `press_key` sends modifiers and named keys as keysyms
+resolved by the compositor's active keymap, so Ctrl shortcuts still work when
+Caps Lock and Control are swapped. Letters and digits retain physical US
+keycodes so shortcuts also work under non-Latin layouts. KDE Plasma retains
+physical keycodes for all portal chords.
+
+On X11, `type_text` keeps xdotool's 12 ms per-character delay so XTEST events
+stay ordered. `CODEX_COMPUTER_USE_XDOTOOL_TYPE_DELAY_MS` overrides it; the
+standalone `COMPUTER_USE_LINUX_XDOTOOL_TYPE_DELAY_MS` name remains an alias.
+
+For an explicit foreground hold-open, run `codex-computer-use-linux guard-accessibility`.
+It holds a passive AT-SPI listener and watches/reasserts the saved toolkit setting
+for the current user. It is never started by MCP, setup, or observation. Stop
+with Ctrl-C or SIGTERM before disabling accessibility. Stop cancels pending
+work and releases the listener without disabling other clients or restoring
+an old setting. Applications launched during a reset/reassertion interval may
+still need restarting.
+
+Scope `get_app_state` with `app_name_or_bundle_identifier` or a window target
+(`window_id`, `pid`, `app_id`, `wm_class`, `title`). Without one it returns the
+whole desktop AT-SPI tree, reports `tree_scoped=false`, and appends a warning to
+`message`, which can exhaust a small context window. `accessibility_tree_truncated=true`
+means the node, depth, or read budget stopped traversal with unread elements
+left; recover by scoping to a narrower target and raising `max_nodes` or
+`max_depth` (hard caps 2000 and 64), not by lowering `max_nodes`.
+
+Plain left element/selector clicks prefer a native AT-SPI `click`, `press`, or
+`toggle` action, resolved by name against the live action list. Entry `activate`
+and slider `jump` actions are not substituted for pointer clicks. This avoids guessing a
+GTK toolkit-to-pointer scale. Explicit coordinates, right clicks, and multiple
+clicks retain pointer semantics. Relative coordinates use the clipped screenshot
+crop origin in coordinate pixels: divide preview pixels by the returned scale.
+Raw GDK surface coordinates and widget-local coordinates are not that origin.
+This does not qualify every GNOME X11 EWMH move/resize or mixed-monitor mapping.
+
+Set `CODEX_COMPUTER_USE_NOTIFY_ON_COMPLETE=1` in the MCP server environment
+to expose `complete_interaction`, a parameter-free completion notification.
+The standalone `COMPUTER_USE_LINUX_NOTIFY_ON_COMPLETE` alias is accepted only
+when the Codex variable is unset; an explicit Codex value of `0` disables it.
+The tool uses `notify-send` with bounded execution and cleanup. Missing services,
+failures, and timeouts skip the cue without failing the task. It does not grant
+exclusive desktop ownership and is disabled by default.
+
+The direct MCP server also exposes `run_shell` only when explicitly started
+with `CODEX_COMPUTER_USE_ENABLE_SHELL=1`. The standalone
+`COMPUTER_USE_LINUX_ENABLE_SHELL=1` alias is used only when the Codex variable
+is unset; an explicit Codex value of `0` keeps it disabled. The in-app native
+adapter does not expose this tool. It runs `/bin/sh -c` with the current user's
+host permissions, without a sandbox or login profiles. The host must approve
+the requested command. Ambient credentials and agent sockets are removed from
+the environment; additional variables must be supplied explicitly. Execution
+defaults to 30 seconds (maximum 120), and returned output is bounded. An audit
+digest is written to backend stderr without logging command text.
+
 Install `ydotool` 1.0.3 or newer when you need the fallback input path. The
 backend probes the exact absolute move, wheel move, click, delayed key, and
 stdin typing command shapes it emits. Earlier or incompatible CLIs are rejected
@@ -81,7 +176,20 @@ keyboard selection with `COMPUTER_USE_LINUX_FORCE_YDOTOOL_KEYBOARD=1` or
 `CODEX_COMPUTER_USE_FORCE_YDOTOOL_KEYBOARD=1`; the corresponding
 `*_FORCE_XDOTOOL_KEYBOARD=1` names force XTEST when available. Set
 `COMPUTER_USE_LINUX_FORCE_YDOTOOL_POINTER=1` or
-`CODEX_COMPUTER_USE_FORCE_YDOTOOL_POINTER=1` to skip native-X11 xdotool clicks.
+`CODEX_COMPUTER_USE_FORCE_YDOTOOL_POINTER=1` to skip native-X11 xdotool clicks
+and scroll. Native X11 scroll sends XTEST wheel buttons (4 up, 5 down, 6 left,
+7 right) through xdotool, because GTK 3 drops the single wheel event that
+follows ydotool's absolute move.
+
+The Wayland RemoteDesktop portal asks for consent on every new process by
+default. Set `CODEX_COMPUTER_USE_PERSIST_REMOTE_DESKTOP=1` (standalone alias
+`COMPUTER_USE_LINUX_PERSIST_REMOTE_DESKTOP=1`) to request `persist_mode=2` on
+`SelectDevices` and reuse the single-use restore token that `Start` returns.
+Tokens are stored per device kind, mode `0600`, under
+`$XDG_STATE_HOME/codex-computer-use-linux/` or
+`~/.local/state/codex-computer-use-linux/`. The first grant still shows the
+dialog; later processes restore until the desktop revokes the grant. This needs
+RemoteDesktop interface version 2.
 
 Some distros name the unit `ydotool.service` instead of `ydotoold.service`, and
 some install `/usr/bin/ydotoold` without a service unit. If the system unit path

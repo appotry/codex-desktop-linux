@@ -7,6 +7,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- Synchronize the embedded Computer Use backend from v0.4.9 to standalone
+  v0.7.6 as `0.7.6-linux-alpha1`. Carry the accessibility setup/guard, native
+  AT-SPI actions, X11 geometry and screenshots, bounded KWin transactions,
+  safe typing/cancellation, optional completion cue and portal persistence
+  changes. Portal keyboard chords resolve modifiers and named keys through
+  the live keymap on GNOME; letters/digits stay physical and KDE retains its
+  keycode path. Preserve Codex DBus, Chrome, identity and operation guards.
+
 - The launcher sends at most one anonymous `/app-launch` count per UTC day to
   the public GoatCounter dashboard so maintainers can gauge whether the
   distribution is useful. The background request uses one fixed,

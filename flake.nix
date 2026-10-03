@@ -631,12 +631,19 @@
         remoteMobile = codexDesktop.override { linuxFeatureIds = [ "remote-mobile-control" ]; };
         computerUse = codexDesktop.override { linuxFeatureIds = [ "computer-use-linux" ]; };
         chronicleSkysight = codexDesktop.override { linuxFeatureIds = [ "chronicle-skysight" ]; };
+        # Maximal profiles keep the historical shared-profile feature set.
+        # Community profile isolation intentionally conflicts with
+        # shared-app-server-socket and is validated by its dedicated signed
+        # feature-only job instead.
+        maximalSharedProfileFeatureIds = lib.filter (
+          featureId: featureId != "community-profile-isolation"
+        ) nixLinuxFeatures.supportedFeatureIds;
         maximalDirectoryFeatureIds = lib.filter (
           featureId: featureId != "shallow-repository-watches"
-        ) nixLinuxFeatures.supportedFeatureIds;
+        ) maximalSharedProfileFeatureIds;
         maximalShallowFeatureIds = lib.filter (
           featureId: featureId != "directory-only-working-tree-watch"
-        ) nixLinuxFeatures.supportedFeatureIds;
+        ) maximalSharedProfileFeatureIds;
         maximalDirectory = codexDesktop.override {
           linuxFeatureIds = maximalDirectoryFeatureIds;
         };
@@ -1065,7 +1072,8 @@
             node ${sourceRoot}/scripts/ci/validate-patch-report.js \
               "$app/.codex-linux/patch-report.json" \
               --require-enabled-feature nix-store-bundled-marketplace-permissions \
-              --require-applied feature:nix-store-bundled-marketplace-permissions:bundled-marketplace-staging-copy-permissions
+              --require-applied feature:nix-store-bundled-marketplace-permissions:bundled-marketplace-staging-copy-permissions \
+              --require-applied feature:nix-store-bundled-marketplace-permissions:executor-plugin-copy-permissions
             ''}
             test -x ${pkgs.pipewire}/lib/alsa-lib/libasound_module_pcm_pipewire.so
             ! grep -q 'LD_LIBRARY_PATH=' ${package}/bin/codex-desktop
