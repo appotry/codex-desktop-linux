@@ -1,0 +1,202 @@
+# ChatGPT Desktop Linux 自动构建与发布
+#
+# 触发方式：
+#   - 推送到 releases 分支
+#   - 手动触发 (workflow_dispatch)
+#
+# 注意：推送到 main 的修改会被上游同步覆盖，不要在 main 上工作。
+# 所有修改请推到 releases 分支。
+#
+# 构建策略（跟随上游 916a833 "complete official Linux package migration"）：
+#   - 上游已从 DMG 迁移到官方签名 APT 仓库 deb 包
+#   - install.sh 自动解析最新签名 deb（或传入 UPSTREAM_DEB）
+#   - 本 workflow 与上游 upstream-build-app.yml 保持同构
+
+name: Auto Build & Release
+
+on:
+  push:
+    branches:
+      - releases
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Force build (skip version check)'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  CODEX_LINUX_FEATURES_CONFIG: ${{ github.workspace }}/linux-features/features.example.json
+  PACKAGE_WITH_UPDATER: '0'
+
+jobs:
+  # ============================================================
+  # 构建 deb + rpm（同一 job，从签名 deb 构建）
+  # ============================================================
+  build-and-package:
+    name: Build & Package (deb/rpm)
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Install build dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y dpkg-dev gnupg patchelf rpm
+          bash scripts/install-deps.sh
+
+      - name: Detect upstream version
+        id: upstream
+        run: |
+          set -euo pipefail
+          mkdir -p upstream
+          package="$(node scripts/lib/upstream-linux-package.js \
+            --output-dir upstream/amd64 \
+            --metadata upstream/amd64.json \
+            --key-base64 assets/openai-codex-linux-repository-key.gpg.base64 \
+            --arch amd64)"
+          echo "package=$package" >> "$GITHUB_OUTPUT"
+
+          # 版本号
+          DATE_TAG=$(date -u '+%Y%m%d')
+          VER="${DATE_TAG}.${{ github.run_number }}"
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+
+      - name: Check if build is needed
+        id: check
+        run: |
+          LAST_VER=""
+          LAST_VER=$(gh release view latest --json tagName --jq '.tagName' 2>/dev/null || echo "")
+          VER="${{ steps.upstream.outputs.version }}"
+
+          if [ "${{ github.event.inputs.force }}" = "true" ]; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event_name }}" = "push" ]; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          elif [ -z "$LAST_VER" ]; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          elif [ "$LAST_VER" != "$VER" ]; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Skip build
+        if: steps.check.outputs.skip == 'true'
+        run: |
+          echo "Version unchanged (${{ steps.upstream.outputs.version }}), skipping."
+          exit 0
+
+      - name: Build app
+        run: ./install.sh "${{ steps.upstream.outputs.package }}"
+
+      - name: Build deb package
+        env:
+          PACKAGE_VERSION: ${{ steps.upstream.outputs.version }}
+        run: ./scripts/build-deb.sh
+
+      - name: Build rpm package
+        env:
+          PACKAGE_VERSION: ${{ steps.upstream.outputs.version }}
+        run: ./scripts/build-rpm.sh
+
+      - name: Build AppImage
+        env:
+          APPIMAGETOOL: /tmp/appimagetool.AppImage
+          PACKAGE_VERSION: ${{ steps.upstream.outputs.version }}
+        run: |
+          wget -q "https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-$(uname -m).AppImage" -O /tmp/appimagetool.AppImage
+          chmod +x /tmp/appimagetool.AppImage
+          APPIMAGE_EXTRACT_AND_RUN=1 ./scripts/build-appimage.sh
+
+      - name: Stage pacman package
+        run: PACMAN_STAGE_ONLY=1 ./scripts/build-pacman.sh
+
+      - name: Upload packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: codex-desktop-build
+          path: |
+            dist/*.deb
+            dist/*.rpm
+            dist/*.AppImage
+            dist/pacman-stage*
+          retention-days: 90
+
+  # ============================================================
+  # 发布 Release（收集 artifacts）
+  # ============================================================
+  release:
+    name: Create Release
+    if: ${{ github.event_name != 'pull_request' }}
+    runs-on: ubuntu-latest
+    needs: [build-and-package]
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Download all packages
+        uses: actions/download-artifact@v4
+        with:
+          pattern: codex-desktop-build
+          merge-multiple: true
+          path: /tmp/release-artifacts
+
+      - name: Get version
+        id: ver
+        run: |
+          VER="$(date -u '+%Y%m%d').${{ github.run_number }}"
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.ver.outputs.version }}
+          name: "ChatGPT Desktop Linux ${{ steps.ver.outputs.version }}"
+          body: |
+            ## ChatGPT Desktop Linux ${{ steps.ver.outputs.version }}
+
+            🖥️ 支持平台：
+            - **Debian/Ubuntu** → `.deb`
+            - **Fedora/RHEL/openSUSE** → `.rpm`
+            - **通用 Linux** → `.AppImage`（无需安装，直接运行）
+            - **Arch/Manjaro** → pacman staging（`pacman-stage.PKGBUILD` + `pacman-stage/`，`makepkg -si` 打包安装）
+
+            自动构建于 $(date -u '+%Y-%m-%d %H:%M UTC')。
+
+            ### 安装
+
+            ```bash
+            # Debian/Ubuntu
+            sudo dpkg -i codex-desktop_*.deb
+
+            # Fedora/RHEL
+            sudo rpm -ivh codex-desktop-*.rpm
+
+            # 通用 Linux（AppImage）
+            chmod +x codex-desktop-*.AppImage
+            ./codex-desktop-*.AppImage
+
+            # Arch/Manjaro（staging 包）
+            mkdir -p pacman-build && cd pacman-build
+            tar -xzf ../codex-desktop-pacman-stage.tar.gz 2>/dev/null || cp -a ../pacman-stage/ . 2>/dev/null || true
+            cp ../pacman-stage.PKGBUILD PKGBUILD
+            cp ../pacman-stage.install .install 2>/dev/null || true
+            makepkg -si
+            ```
+
+            首次启动后应用会引导安装 CLI。
+          files: /tmp/release-artifacts/*
+          draft: false
+          prerelease: false
+          make_latest: true
