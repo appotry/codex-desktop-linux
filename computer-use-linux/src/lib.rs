@@ -11,4 +11,5 @@ pub mod server;
 pub mod terminal;
 pub mod windowing;
 pub mod windows;
+mod x11_display;
 pub(crate) mod ydotool;

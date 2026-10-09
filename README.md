@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  English | <a href="README.zh-CN.md">简体中文</a>
+  English | <a href="README.zh-CN.md">简体中文</a> | <a href="README.fa.md">فارسی</a>
 </p>
 
 `codex-desktop` is an unofficial, community-maintained distribution of
@@ -16,9 +16,9 @@ repackages the signed upstream Linux payload, adds disabled-by-default Linux
 features, and produces deb, RPM, pacman, AppImage, and Nix outputs.
 
 The custom application appears in desktop menus as **ChatGPT Community** and
-uses an icon marked with a blue `C`. Its package, command, and installation
-identity remain `codex-desktop` and `/opt/codex-desktop`, so it is easy to
-distinguish from OpenAI's separate **ChatGPT** package.
+uses an icon marked with a blue `C`. Its package and command are
+`codex-desktop`, and its installation root is `/opt/codex-desktop`, so it is
+easy to distinguish from OpenAI's separate **ChatGPT** package.
 
 OpenAI's signed Linux `.deb` is the only upstream source. The official
 Electron runtime, native modules, bundled `codex` and `rg`, code-mode host,
@@ -57,8 +57,17 @@ cd codex-desktop-linux
 | Fedora | `make bootstrap-native` | Builds and installs an RPM |
 | openSUSE | `make bootstrap-native` | Builds and installs an RPM |
 | Arch, Manjaro, EndeavourOS | `make bootstrap-native` | Builds and installs a pacman package |
+| Gentoo | `make bootstrap-native` | Builds a local ebuild and installs through Portage; default features only, no updater |
 | NixOS or another Nix system | `nix run github:ilysenko/codex-desktop-linux` | Builds and runs the flake output; see [Nix](docs/nix.md) |
 | Atomic desktops or another distribution | `make build-app && make appimage` | Produces a local AppImage without the native updater |
+
+Gentoo's application merge ignores `EMERGE_DEFAULT_OPTS` to install through the
+generated ebuild rather than reuse a binary package. Global Portage settings are unchanged.
+Gentoo has a phase-aware dependency and package-resource framework for future
+audited features; no repository feature is declared supported yet. See the
+[Gentoo feature contract](docs/linux-features-architecture.md#gentoo-feature-contract).
+Gentoo's local ebuild path has been tested on OpenRC; a Gentoo systemd
+environment has not been tested. See [Gentoo validation scope](docs/native-setup.md#gentoo-local-ebuild).
 
 The recommended native installation is:
 
@@ -77,7 +86,27 @@ If the dependencies are already installed, use:
 make install-native
 ```
 
-To choose optional features before installing:
+For the graphical guided installer, run the standalone repository entrypoint:
+
+```bash
+./install-community
+```
+
+(`make guided-install` invokes the same entrypoint.) The installer is part of
+the repository setup experience, not an optional Linux feature. On desktops
+with GTK4/PyGObject it walks through feature selection, installation options,
+review, and build/install progress with a live log. Required features are
+selected automatically; conflicting choices are disabled with the reason kept
+visible.
+
+The graphical installer does not modify feature implementations or feature
+settings. It updates only the enabled-feature list and its own installer
+preferences in the gitignored `linux-features/features.json`; any existing
+feature settings are preserved unchanged. Native output always keeps the
+repository identity `codex-desktop` under `/opt/codex-desktop`, whether or not
+the automatic updater is included.
+
+To configure features without installing yet, keep using:
 
 ```bash
 make setup-native
@@ -110,10 +139,11 @@ Old `.dmg`, `DMG=`, and `CODEX_DMG_*` inputs are intentionally unsupported.
   `dpkg-deb`, tar, make, and a C/C++ toolchain. Rust is used for the updater and
   enabled native feature helpers. `make bootstrap-native` installs or guides
   you through these requirements.
-- The official `chatgpt` and custom `codex-desktop` packages may coexist, but
-  both intentionally use the upstream `Codex` user profile. Do not run them at
-  the same time; the upstream single-instance lock may route the second launch
-  into the process that is already running.
+- The official `chatgpt` and custom `codex-desktop` packages may coexist. By
+  default they intentionally share the upstream `Codex` user profile and should
+  not run at the same time. The optional `community-profile-isolation` feature
+  gives Community separate Codex and Electron state and pins its bundled CLI so
+  users who need isolated runtimes can avoid that shared-profile boundary.
 - AppImage never adds `--no-sandbox` automatically. If your distribution
   disables unprivileged user namespaces, use the native package or follow the
   sandbox guidance in [Troubleshooting](docs/troubleshooting.md).
@@ -154,6 +184,10 @@ sudo zypper remove codex-desktop
 
 # Arch / Manjaro
 sudo pacman -R codex-desktop
+
+# Gentoo
+sudo emerge --deselect app-misc/codex-desktop
+sudo emerge --unmerge app-misc/codex-desktop
 ```
 
 Native package removal disables the user update service. If a service from an
@@ -186,10 +220,15 @@ updater state, inspect and then delete the following directories:
 ~/.cache/codex-update-manager
 ```
 
+If `community-profile-isolation` was enabled, its Community-owned state is
+`~/.codex-community` and its Electron profile is `~/.config/Codex-Community`.
+Remove those paths only when you intentionally want to delete that isolated
+Community data.
+
 If `remote-mobile-control` was enabled, revoke paired devices before removing
 its private device keys. Do not remove `~/.codex` unless you intentionally want
-to delete the shared Codex profile, configuration, plugins, and project state
-used by both official and Community applications.
+to delete the default shared Codex profile, configuration, plugins, and project
+state.
 
 ## Feature matrix
 
@@ -225,6 +264,7 @@ requirements, known limitations, configuration, and tests.
 | `browser-proxy` | Pass explicit proxy settings to Browser Use network helpers | [Docs](linux-features/browser-proxy/README.md) |
 | `chronicle-skysight` | Opt-in Linux desktop activity memory and restricted Skysight MCP tools | [Docs](linux-features/chronicle-skysight/README.md) |
 | `codex-micro` | Work Louder Codex Micro hotplug and hidraw policy using upstream `node-hid` | [Docs](linux-features/codex-micro/README.md) |
+| `community-profile-isolation` | Isolate Community Codex/Electron state and child CLI resolution from official ChatGPT | [Docs](linux-features/community-profile-isolation/README.md) |
 | `computer-use-linux` | Linux desktop-control UI and native MCP backend | [Docs](linux-features/computer-use-linux/README.md) |
 | `copilot-reasoning-effort` | Persistent reasoning-effort defaults for Copilot-auth sessions | [Docs](linux-features/copilot-reasoning-effort/README.md) |
 | `directory-only-working-tree-watch` | Bounded Watchbound working-tree watching | [Docs](linux-features/directory-only-working-tree-watch/README.md) |
@@ -249,9 +289,14 @@ requirements, known limitations, configuration, and tests.
 | `remote-mobile-control` | Experimental Linux remote-host and outbound-control flows | [Docs](linux-features/remote-mobile-control/README.md) |
 | `shallow-repository-watches` | Avoid recursive main-thread walks for transient repository previews | [Docs](linux-features/shallow-repository-watches/README.md) |
 | `shared-app-server-socket` | Share one protocol-transparent Unix app-server socket | [Docs](linux-features/shared-app-server-socket/README.md) |
+| `start-minimized-to-tray` | Add opt-in General settings to start hidden in the tray, either on every launch or only at login autostart | [Docs](linux-features/start-minimized-to-tray/README.md) |
 | `thorium-chrome-plugin` | Add Thorium to the official bundled Chrome integration | [Docs](linux-features/thorium-chrome-plugin/README.md) |
 | `tray-usage` | Show usage remaining in the Linux system-tray menu | [Docs](linux-features/tray-usage/README.md) |
 | `ui-tweaks` | Optional visual and interaction customizations | [Docs](linux-features/ui-tweaks/README.md) |
+
+The optional Computer Use backend provides `guard-accessibility` for an
+explicit foreground GNOME accessibility hold-open. It never starts
+automatically; see [Linux Computer Use](docs/linux-computer-use.md).
 
 With `shared-app-server-socket` enabled and Desktop running, use
 `codex-desktop --cli` to attach Codex CLI to Desktop's app-server. See

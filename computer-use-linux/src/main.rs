@@ -6,6 +6,7 @@ use mimalloc::MiMalloc;
 static GLOBAL: MiMalloc = MiMalloc;
 
 mod abs_pointer;
+mod accessibility_guard;
 mod atspi_tree;
 mod command_runner;
 mod cosmic_helper;
@@ -18,6 +19,7 @@ mod server;
 mod terminal;
 mod windowing;
 mod windows;
+mod x11_display;
 mod ydotool;
 
 use anyhow::{Context, Result};
@@ -28,6 +30,7 @@ async fn main() -> Result<()> {
 
     match std::env::args().nth(1).as_deref() {
         Some("mcp") => server::serve_mcp().await,
+        Some("guard-accessibility") => accessibility_guard::run().await,
         Some("doctor") => {
             let report = diagnostics::doctor_report();
             println!(
@@ -87,7 +90,7 @@ async fn main() -> Result<()> {
             let cap = screenshot::capture_screenshot_raw().await?;
             eprintln!("desktop logical size: {}x{}", cap.width, cap.height);
             let mut p = abs_pointer::AbsPointer::create(cap.width as i32, cap.height as i32)?;
-            p.click(x, y, abs_pointer::PointerButton::Left, 1)?;
+            let _ = p.click(x, y, abs_pointer::PointerButton::Left, 1)?;
             println!(
                 "{}",
                 serde_json::json!({"ok": true, "x": x, "y": y, "w": cap.width, "h": cap.height})
@@ -160,7 +163,7 @@ async fn main() -> Result<()> {
         }
         Some(command) => {
             anyhow::bail!(
-                "unknown command '{command}'. Expected one of: mcp, doctor, setup, apps, state, screenshot, windows, setup-window-targeting"
+                "unknown command '{command}'. Expected one of: mcp, doctor, setup, guard-accessibility, apps, state, screenshot, windows, setup-window-targeting"
             );
         }
         None => {
@@ -171,6 +174,7 @@ async fn main() -> Result<()> {
 }
 
 fn print_help() {
+    println!("guard-accessibility: explicit foreground accessibility hold-open; stop with Ctrl-C or SIGTERM before disabling accessibility.\n");
     println!(
         "codex-computer-use-linux\n\nUsage:\n  codex-computer-use-linux mcp\n  codex-computer-use-linux doctor\n  codex-computer-use-linux setup\n  codex-computer-use-linux setup-window-targeting\n  codex-computer-use-linux apps\n  codex-computer-use-linux state [APP_NAME]\n  codex-computer-use-linux screenshot\n  codex-computer-use-linux windows"
     );

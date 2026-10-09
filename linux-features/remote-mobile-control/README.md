@@ -52,7 +52,8 @@ What it changes:
   after the matching input request has already cleared.
 - Keeps local Linux Remote turns on `summary = "none"` unless a turn explicitly
   requests a reasoning summary, preventing Desktop's rollout gate from adding
-  repeated English reasoning titles to the mobile transcript.
+  repeated English reasoning titles to the mobile transcript. Outside local
+  Linux durable turns, it preserves upstream Aeon and rollout summary overrides.
 - Keeps Chrome Browser Use available to remote/mobile controlled sessions when
   the local Chrome plugin and native host are healthy, and adds a diagnostic
   when the native browser bridge is not exposed to the session.
@@ -123,11 +124,11 @@ feature descriptor to appear exactly once in this table.
 | `linux-remote-control-feature-sync` | `shared-boundary` | Enables `remote_control` only for the local host and excludes Remote SSH hosts. |
 | `linux-remote-control-visibility` | `outbound-control` | Exposes remote-control Connections UI when the server permits it. |
 | `linux-remote-control-copy` | `shared-boundary` | Rewrites Linux copy shared by host setup and outbound Connections. |
-| `linux-remote-control-settings-ux` | `shared-boundary` | Composes outbound remote-control and Remote SSH actions in the shared settings bundle. |
+| `linux-remote-control-settings-ux` | `shared-boundary` | Adapts the shared Connections copy and outbound-control visibility without reviving the retired upstream SSH installer. |
 | `linux-remote-control-client-revoke-setup-reset` | `mobile-host` | Resets this host's mobile setup state only after the last external controller is removed. |
 | `linux-remote-connections-refresh` | `shared-boundary` | Refreshes the shared Connections list without starting or enabling any host runtime. |
 | `linux-remote-mobile-reasoning-summary-none` | `mobile-host` | Prevents inherited or rollout-forced reasoning summaries from polluting this host's mobile transcript. |
-| `linux-remote-mobile-conversation-hydration` | `mobile-host` | Normalizes active thread runtime state, hydrates and replays late unknown-conversation notifications in order, and restores completed items missing local started state. |
+| `linux-remote-mobile-conversation-hydration` | `mobile-host` | Extends upstream's hydration queue to recover unknown local conversations from ordered turn and item notifications. |
 | `linux-remote-terminal-status-recovery` | `mobile-host` | Reconciles stale mobile terminal state with actual pending requests. |
 | `linux-remote-control-status-read-guard` | `shared-boundary` | Sends `remoteControl/status/read` only to the local host, never Remote SSH or remote-control environment hosts. |
 | `linux-remote-control-status-wait` | `shared-boundary` | Gives the selected host a Linux-specific connection convergence window without changing host ownership. |
@@ -135,12 +136,10 @@ feature descriptor to appear exactly once in this table.
 | `linux-remote-control-enablement-bridge` | `shared-boundary` | Loads outbound clients and auto-connects the remote-control environment owned by this Desktop without overwriting saved choices for other hosts. |
 | `linux-remote-mobile-active-status` | `mobile-host` | Derives mobile active state from the local thread runtime. |
 
-Remote SSH behavior is nested inside the shared settings descriptor rather than
-registered as a separate descriptor. `applyLinuxRemoteControlSshInstallActionPatch`
-keeps the install action visible, and
-`applyLinuxRemoteControlSshInstallReleasePatch` selects the requested Codex
-release for install or update. Both remain `remote-ssh` responsibilities;
-neither function enables remote-control on the SSH host.
+The current upstream Connections bundle explicitly returns no action for
+`install-codex`. The settings descriptor preserves that contract; it does not
+reintroduce the retired Remote SSH installer or enable remote-control on an SSH
+host.
 
 Feature-owned surfaces outside the descriptor array are also topology-scoped:
 
@@ -150,8 +149,6 @@ Feature-owned surfaces outside the descriptor array are also topology-scoped:
 | `cold-start-hook.sh` | `mobile-host` | Elects one local remote-control runtime owner and starts only the bundled official Codex fallback. |
 | `applyLinuxRemoteMobileChromeBridgePatch` | `mobile-host` | Keeps local Browser Use available to an authorized mobile-controlled session. |
 | Nix `codex-remote-control.service` | `mobile-host` | Replaces the bundled-process fallback with one declarative local app-server owner. |
-| `applyLinuxRemoteControlSshInstallActionPatch` | `remote-ssh` | Keeps the existing Remote SSH install action available. |
-| `applyLinuxRemoteControlSshInstallReleasePatch` | `remote-ssh` | Sends an explicit Codex release only to the Remote SSH install/update action. |
 
 The app-server has exactly one Remote Control owner in either supported
 topology:

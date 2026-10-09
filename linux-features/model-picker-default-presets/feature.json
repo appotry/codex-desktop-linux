@@ -6,5 +6,16 @@
   "entrypoints": {
     "patchDescriptors": "./patch.js"
   },
-  "presets": []
+  "presets": [],
+  "officialBundleAuditScenarios": [
+    {
+      "name": "configured-presets",
+      "settings": {
+        "presets": [
+          { "model": "gpt-6-astra", "effort": "medium", "default": true },
+          { "model": "gpt-5.6-sol", "effort": "high" }
+        ]
+      }
+    }
+  ]
 }

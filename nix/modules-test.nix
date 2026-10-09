@@ -126,6 +126,9 @@ assert lib.assertMsg
   (!(builtins.tryEval (features.normalize [ "directory-only-working-tree-watch" "shallow-repository-watches" ])).success)
   "conflicting watcher features were accepted";
 assert lib.assertMsg
+  (!(builtins.tryEval (features.normalize [ "community-profile-isolation" "shared-app-server-socket" ])).success)
+  "Community profile isolation conflict with shared app-server socket was accepted";
+assert lib.assertMsg
   (!features.optionType.check [ "not-a-feature" ]
     && features.optionType.check [ "codex-wrapper-updater" ])
   "module option checking did not distinguish unknown and explicitly retired feature IDs";

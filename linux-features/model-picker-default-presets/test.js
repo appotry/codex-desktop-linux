@@ -83,46 +83,41 @@ function sliderFixture(name = "Wkr") {
 
 function localComposerResolverFixture(name = "LocalPower") {
   return [
-    `function ${name}(e,{includeUltraInSlider:t=false,removeXHigh:n=false,sliderModelsConfig:r,stripGptPrefix:i=true}={}){`,
-    "if(r!=null){let a=MapModels(e,{stripGptPrefix:i});for(let o of r.presets){",
-    "let r=unique(resolve(o.filter(({reasoning_effort:e})=>(t||e!==`ultra`)&&(!n||e!==`xhigh`)),e,i),({id:e})=>e);",
-    "if(r.length>=3)return r}}let a=fallbackA(e);if(a.length>=3)return a;",
-    "let o=fallbackB(e);return o.length>=3?o:[]}",
+    `function ${name}(e,{removeXHigh:t=false,sliderModelsConfig:n,stripGptPrefix:r=true}={}){`,
+    "if(n!=null){let i=MapModels(e,{stripGptPrefix:r});for(let a of n.presets){",
+    "let n=a.filter(({reasoning_effort:e})=>!t||e!==`xhigh`).flatMap(({model:e,reasoning_effort:t})=>{let n=i.find(n=>n.model===e&&n.reasoningEffort===t);return n==null?[]:[n]}),o=unique(resolve(n,e,r),({id:e})=>e);",
+    "if(o.length>=3)return o}}let i=fallbackA(e);if(i.length>=3)return i;",
+    "let a=fallbackB(e);return a.length>=3?a:[]}",
     "function Next(){}",
   ].join("");
 }
 
-function localComposerFixture(name = "LocalComposer", { splitHostContext = true } = {}) {
-  const resetContext = splitHostContext
-    ? "[conversationId,hostId,host.cwd]"
-    : "[conversationId,host.hostId,host.cwd]";
+function localComposerFixture(name = "LocalComposer") {
   return [
     `function ${name}(available,serverConfig,conversationId,manualSelection){`,
     "let host={hostId:`local`,cwd:`/repo`},hostId=host.hostId;",
-    "modelsForPicker(available);let{setDefaultModelAndReasoningEffort:setDefault}=selection;",
+    "modelsForPicker(available);let{setDefaultModelAndReasoningEffort:setDefault}=selection,draftSelection=null;",
     "let He=available.find(Wqr),Ue=Power(available,{includeUltraInSlider:true,sliderModelsConfig:serverConfig,stripGptPrefix:true}),",
     "Ge=Ue,Ke=zae(Ge,He==null?void 0:`${He.model}:${He.defaultReasoningEffort}`);",
-    "let scratch=(0,React.useRef)(null),choose=function(e,t){return(draft?.selectModelAndReasoningEffort??select)(e,t,()=>{})};",
-    "let selected=manualSelection?choose(`gpt-5.6-sol`,`high`):null;",
-    `picker({resetContextKey:JSON.stringify(${resetContext})});`,
-    "composer.mode.local.model.custom;let reset=zae(Ue,He==null?void 0:`${He.model}:${He.defaultReasoningEffort}`);",
+    "picker({resetContextKey:JSON.stringify([conversationId,hostId,host.cwd])});",
+    "composer.mode.local.model.custom;let scratch=(0,React.useRef)(null),choose=function(e,t,n){let callback=()=>{};return draftSelection==null?select(normalize(e),t,callback,n):draftSelection.selectModelAndReasoningEffort(normalize(e),t,callback)};",
+    "function normalize(e){return e}let selected=manualSelection?choose(`gpt-5.6-sol`,`high`):null;",
+    "let reset=zae(Ue,He==null?void 0:`${He.model}:${He.defaultReasoningEffort}`);",
     "render({onSelectDefault:reset});",
     "return{powerSelections:Ue,fallback:Ke,reset,selected}}",
     "function Next(){}",
   ].join("");
 }
 
-function existingChatStateFixture(cleanupName = "p6a", stateName = "q8a") {
+function existingChatStateFixture(stateName = "q8a") {
   return [
-    `function ${cleanupName}(e,t){e.get($1,t.target)===t.selection&&(e.set($1,t.target,null),e.get(Q1,t.target)===t.selection&&e.set(Q1,t.target,null),t.target[0]===\"default\"&&e.get(m6a)===t.selection&&e.set(m6a,null))}`,
     `function ${stateName}(e,t,n){`,
-    "let i=e,host={authMethod:t??`chatgpt`},isChatGptAuth=host?.authMethod===`chatgpt`,",
-    "a=n??[`conversation`,`thread`],hasManagedNewThreadSettings=false,",
+    "let store=e,host={authMethod:t??`chatgpt`},isChatGptAuth=host?.authMethod===`chatgpt`,",
+    "target=n??[`conversation`,`thread`],hasManagedNewThreadSettings=false,",
     "setModelAndReasoningEffortForNextTurn=()=>true,",
     "error=Error(`No conversation available for next-turn model update`),",
-    "G=()=>true,",
-    "de=(t,n,r)=>{let o=r?.serviceTier===void 0?void 0:r.serviceTier;",
-    "return d6a(i,a,{model:t,reasoningEffort:n,serviceTier:o},()=>G(t,n,`current`,o))};",
+    "de=async(t,n,r)=>{let i=target,o={model:t,reasoningEffort:n,serviceTier:r?.serviceTier};",
+    "store.set($1,i,o),await Promise.resolve(!0).finally(()=>{store.get($1,i)===o&&store.set($1,i,null)});return o};",
     "return{hasManagedNewThreadSettings:hasManagedNewThreadSettings,",
     "setModelAndReasoningEffortForNextTurn:setModelAndReasoningEffortForNextTurn,",
     "setModelAndReasoningEffort:de,error}}",
@@ -441,7 +436,7 @@ test("local composer uses configured pairs and lowers only its config threshold"
     fallbackA: () => [],
     fallbackB: () => [],
     MapModels: (models) => models,
-    resolve: (entries) => entries.map(({ model, reasoning_effort: reasoningEffort }) => ({
+    resolve: (entries) => entries.map(({ model, reasoningEffort }) => ({
       id: `${model}:${reasoningEffort}`,
       model,
       reasoningEffort,
@@ -452,40 +447,55 @@ test("local composer uses configured pairs and lowers only its config threshold"
     codexLinuxDefaultPresets: true,
     presets: [[{ model: "gpt-5.6-sol", reasoning_effort: "high" }]],
   };
+  const available = [
+    { model: "gpt-5.6-sol", reasoningEffort: "high" },
+    { model: "gpt-5.6-sol", reasoningEffort: "xhigh" },
+  ];
   assert.equal(
     evaluate(
       patchedResolver,
-      "LocalPower([],{sliderModelsConfig:config}).length",
-      { ...resolverGlobals, config: onePairConfig },
+      "LocalPower(available,{sliderModelsConfig:config}).length",
+      { ...resolverGlobals, config: onePairConfig, available },
     ),
     1,
   );
   assert.equal(
     evaluate(
       patchedResolver,
-      "LocalPower([],{sliderModelsConfig:config}).length",
-      { ...resolverGlobals, config: { presets: onePairConfig.presets } },
+      "LocalPower(available,{sliderModelsConfig:config}).length",
+      { ...resolverGlobals, config: { presets: onePairConfig.presets }, available },
     ),
     0,
   );
 
+  const twoPairConfig = {
+    codexLinuxDefaultPresets: true,
+    presets: [[
+      { model: "missing", reasoning_effort: "high" },
+      { model: "gpt-5.6-sol", reasoning_effort: "xhigh" },
+      { model: "gpt-5.6-sol", reasoning_effort: "high" },
+    ]],
+  };
+  for (const removeXHigh of [false, true]) {
+    assert.deepEqual(
+      plain(evaluate(
+        patchedResolver,
+        "LocalPower(available,{sliderModelsConfig:config,removeXHigh}).map(({id})=>id)",
+        { ...resolverGlobals, available, config: twoPairConfig, removeXHigh },
+      )),
+      removeXHigh ? ["gpt-5.6-sol:high"] : ["gpt-5.6-sol:xhigh", "gpt-5.6-sol:high"],
+    );
+  }
+  assert.deepEqual(
+    plain(evaluate(patchedResolver, "LocalPower([],{sliderModelsConfig:config})", {
+      ...resolverGlobals, config: twoPairConfig,
+      fallbackA: () => [{ id: "upstream-a" }, { id: "upstream-b" }, { id: "upstream-c" }],
+    })),
+    [{ id: "upstream-a" }, { id: "upstream-b" }, { id: "upstream-c" }],
+  );
+
   const composerSource = localComposerFixture();
   assert.equal(localComposerConfigContract(composerSource), "current");
-  assert.equal(
-    localComposerConfigContract(
-      localComposerFixture("LegacyLocalComposer", { splitHostContext: false }),
-    ),
-    "current",
-  );
-  const patchedLegacyComposer = applyLocalComposerConfigPatch(
-    localComposerFixture("LegacyLocalComposer", { splitHostContext: false }),
-    presets,
-  );
-  assert.equal(localComposerConfigContract(patchedLegacyComposer), "applied");
-  assert.match(
-    patchedLegacyComposer,
-    /codexLinuxLocalDraftDefaultScope=conversationId==null\?JSON\.stringify\(\[host\.hostId,host\.cwd\]\):null/,
-  );
   const patchedComposer = applyLocalComposerConfigPatch(composerSource, presets);
   assert.equal(localComposerConfigContract(patchedComposer), "applied");
   assert.equal(applyLocalComposerConfigPatch(patchedComposer, presets), patchedComposer);
@@ -693,7 +703,7 @@ test("local composer uses configured pairs and lowers only its config threshold"
   ]);
 });
 
-test("existing chats retain configured optimistic selections until another selection replaces them", () => {
+test("existing chats retain configured optimistic selections until another selection replaces them", async () => {
   const presets = context([
     { model: "gpt-5.6-sol", effort: "medium", default: true },
     { model: "gpt-5.6-sol", effort: "xhigh" },
@@ -720,66 +730,51 @@ test("existing chats retain configured optimistic selections until another selec
   };
   const globals = {
     $1: "pending",
-    Q1: "optimistic",
-    m6a: "default",
-    d6a: (_store, _target, selection) => selection,
     store,
   };
-  const configured = evaluate(
+  const configured = await evaluate(
     patched,
     "q8a(store).setModelAndReasoningEffort('gpt-5.6-sol','xhigh')",
     { ...globals },
   );
   const target = ["conversation", "thread"];
-  store.set("pending", target, configured);
-  store.set("optimistic", target, configured);
-  evaluate(patched, "p6a(store,{selection,target:['conversation','thread']})", {
-    ...globals,
-    selection: configured,
-  });
-  assert.equal(store.get("pending", target), null);
-  assert.strictEqual(store.get("optimistic", target), configured);
+  assert.strictEqual(store.get("pending", target), configured);
 
-  const translatedConfigured = evaluate(
+  const translatedConfigured = await evaluate(
     patched,
     "q8a(store).setModelAndReasoningEffort('gpt-5.6-sol','standard')",
     { ...globals },
   );
   assert.equal(translatedConfigured.codexLinuxKeepOptimisticSelection, true);
 
-  const nonChatGptConfigured = evaluate(
+  const nonChatGptConfigured = await evaluate(
     patched,
     "q8a(store,'api-key').setModelAndReasoningEffort('gpt-5.6-sol','xhigh')",
     { ...globals },
   );
   assert.equal(nonChatGptConfigured.codexLinuxKeepOptimisticSelection, false);
 
-  const newThreadConfigured = evaluate(
+  const newThreadConfigured = await evaluate(
     patched,
     "q8a(store,undefined,['default','local','/repo']).setModelAndReasoningEffort('gpt-5.6-sol','xhigh')",
     { ...globals },
   );
   assert.equal(newThreadConfigured.codexLinuxKeepOptimisticSelection, false);
 
-  const manual = evaluate(
+  const manual = await evaluate(
     patched,
     "q8a(store).setModelAndReasoningEffort('gpt-6-astra','standard')",
     { ...globals },
   );
-  store.set("pending", target, manual);
-  store.set("optimistic", target, manual);
-  evaluate(patched, "p6a(store,{selection,target:['conversation','thread']})", {
-    ...globals,
-    selection: manual,
-  });
-  assert.equal(store.get("optimistic", target), null);
+  assert.equal(manual.codexLinuxKeepOptimisticSelection, false);
+  assert.equal(store.get("pending", target), null);
 });
 
 test("existing-chat patch fails closed on drift, duplicate, and partial states", () => {
   const presets = context([{ model: "gpt-5.6-sol", effort: "medium", default: true }]);
   for (const source of [
     "function unrelated(){}",
-    existingChatStateFixture("pOne", "qOne") + existingChatStateFixture("pTwo", "qTwo"),
+    existingChatStateFixture("qOne") + existingChatStateFixture("qTwo"),
     `${EXISTING_CHAT_OPTIMISTIC_MARKER};${existingChatStateFixture()}`,
   ]) {
     const { result, warnings } = withCapturedWarnings(() =>
@@ -800,6 +795,13 @@ test("local composer patches fail closed on drift, duplicate, and partial states
       "function unrelated(){}",
       fixture("One") + fixture("Two"),
       `${marker};${fixture()}`,
+      ...(apply === applyLocalComposerResolverPatch ? [
+        fixture().replace("removeXHigh:", "changed:"),
+        fixture().replace("if(o.length>=3)return o", "if(o.length>=4)return o"),
+      ] : [fixture().replace(
+        "[conversationId,hostId,host.cwd]",
+        "[conversationId,host.hostId,host.cwd]",
+      )]),
     ]) {
       const { result, warnings } = withCapturedWarnings(() => apply(source, presets));
       assert.equal(result, source);
@@ -844,14 +846,14 @@ test("feature descriptors load alone and alongside ui-tweaks", () => {
   const root = path.resolve(__dirname, "..");
   const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "model-picker-presets-"));
   const configPath = path.join(temporaryDirectory, "features.json");
-  const writeConfig = (enabled) =>
+  const writeConfig = (enabled, presets = [{ model: "gpt-6-astra", effort: "medium", default: true }]) =>
     fs.writeFileSync(
       configPath,
       `${JSON.stringify({
         enabled,
         settings: {
           "model-picker-default-presets": {
-            presets: [{ model: "gpt-6-astra", effort: "medium", default: true }],
+            presets,
           },
         },
       })}\n`,
@@ -869,6 +871,12 @@ test("feature descriptors load alone and alongside ui-tweaks", () => {
     });
     assert.equal(alone.length, 5);
     assert.ok(alone.every(({ featureId }) => featureId === "model-picker-default-presets"));
+    const [scenario] = require("./feature.json").officialBundleAuditScenarios;
+    writeConfig(["model-picker-default-presets"], scenario.settings.presets);
+    assert.equal(loadLinuxFeaturePatchDescriptors({
+      featuresRoot: root,
+      featuresConfigPath: configPath,
+    }).length, 5);
     writeConfig(["model-picker-default-presets", "ui-tweaks"]);
     const together = loadLinuxFeaturePatchDescriptors({
       featuresRoot: root,

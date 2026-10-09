@@ -4,6 +4,7 @@ const {
   escapeRegExp,
   findMatchingBrace,
 } = require("../../scripts/patches/lib/minified-js.js");
+const JS_IDENT = "[A-Za-z_$][\\w$]*";
 
 const SIDEBAR_STYLE =
   "{animationName:`none`,animationTimeline:`auto`,\"--bottom-fade\":`calc(var(--spacing) * 10)`}";
@@ -18,7 +19,7 @@ const TAB_OVERFLOW_HELPER =
 
 function markdownRules(source) {
   const unpatched =
-    /(\._MarkdownRoot_([A-Za-z0-9]+)_\d+\[data-markdown-animated\] :is\(\._FadeIn_\2_\d+,\._HorizontalRule_\2_\d+,\._ListItem_\2_\d+,\._TableRow_\2_\d+,\._Blockquote_\2_\d+\))\{opacity:0;animation:_fade-in_\2_\d+ ([^{}]+);animation-delay:var\(--fade-delay,0s\)\}(\._MarkdownRoot_\2_\d+\[data-markdown-animated\] \._FadeListDecoration_\2_\d+::marker)\{animation:_fade-in-marker_\2_\d+ \3;animation-delay:var\(--fade-delay,0s\)\}/gu;
+    /(\._MarkdownRoot_([A-Za-z0-9]+)_\d+\[data-markdown-animated\] :is\(\._FadeIn_\2_\d+,\._HorizontalRule_\2_\d+,\._ListItem_\2_\d+,\._TableRow_\2_\d+,\._Blockquote_\2_\d+\))\{opacity:1;animation:_fade-in_\2_\d+ ([^{};]+) both;animation-delay:var\(--fade-delay,0s\)\}(\._MarkdownRoot_\2_\d+\[data-markdown-animated\] \._FadeListDecoration_\2_\d+::marker)\{animation:_fade-in-marker_\2_\d+ \3 forwards;animation-delay:var\(--fade-delay,0s\)\}/gu;
   const patched =
     /(\._MarkdownRoot_([A-Za-z0-9]+)_\d+\[data-markdown-animated\] :is\(\._FadeIn_\2_\d+,\._HorizontalRule_\2_\d+,\._ListItem_\2_\d+,\._TableRow_\2_\d+,\._Blockquote_\2_\d+\))\{opacity:1;animation:none\}(\._MarkdownRoot_\2_\d+\[data-markdown-animated\] \._FadeListDecoration_\2_\d+::marker)\{animation:none\}/gu;
   const candidates = [];
@@ -101,7 +102,8 @@ function mountAnimations(source) {
     const initialVar = controller[2];
     if (!ownerSource.includes("@container/app-shell-tab")) continue;
     const assignmentPattern = new RegExp(
-      `(?:let |,)${escapeRegExp(initialVar)}=(?<expression>!1|(?<animate>[A-Za-z_$][\\w$]*)\\?(?<collapsed>[A-Za-z_$][\\w$]*):!1),`,
+      `(?:let |,)${escapeRegExp(initialVar)}=(?<expression>!1|(?<animate>[A-Za-z_$][\\w$]*)&&` +
+        `(?<presence>[A-Za-z_$][\\w$]*)\\?\\.initial!==!1\\?(?<collapsed>[A-Za-z_$][\\w$]*):!1),`,
       "u",
     );
     const assignment = assignmentPattern.exec(ownerSource);
@@ -111,12 +113,20 @@ function mountAnimations(source) {
       if (!/animateLayout:[A-Za-z_$][\w$]*(?:[,}])/u.test(ownerSource)) continue;
     } else {
       if (!new RegExp(`animateLayout:${escapeRegExp(assignment.groups.animate)}(?:[,}])`, "u").test(ownerSource)) continue;
+      if (!new RegExp(`\\(0,${JS_IDENT}\\.useContext\\)\\(${JS_IDENT}\\)`, "u").test(ownerSource)) continue;
       const collapsedVar = assignment.groups.collapsed;
       const collapsedSelection = ownerSource.match(
-        new RegExp(`(?:let |,)${escapeRegExp(collapsedVar)}=[A-Za-z_$][\\w$]*\\?([A-Za-z_$][\\w$]*):([A-Za-z_$][\\w$]*),`, "u"),
+        new RegExp(
+          `(?:let |,)${escapeRegExp(collapsedVar)}=${JS_IDENT}==null\\?${JS_IDENT}\\?` +
+            `(${JS_IDENT}):(${JS_IDENT}):(${JS_IDENT}),`,
+          "u",
+        ),
       );
       if (collapsedSelection == null || !collapsedSelection.slice(1).every((name) =>
-        new RegExp("(?:var |,)" + escapeRegExp(name) + "=\\{maxWidth:`0px`", "u").test(source)
+        new RegExp(
+          "(?:var |,)" + escapeRegExp(name) + "=\\{(?:maxWidth|width):`0px`",
+          "u",
+        ).test(source)
       )) continue;
     }
     const relativeExpressionStart = assignment.index + assignment[0].indexOf(assignment.groups.expression);

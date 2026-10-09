@@ -176,6 +176,17 @@ jobs:
             if (result.status !== 0) process.exit(result.status ?? 1);
           }
           NODE
+      - name: Test Community profile isolation against the signed bootstrap
+        run: |
+          set -euo pipefail
+          upstream_root="$(mktemp -d)"
+          extracted_asar="$(mktemp -d)"
+          dpkg-deb -x "${{ steps.upstream.outputs.package }}" "$upstream_root"
+          npx --yes @electron/asar extract \
+            "$upstream_root/usr/lib/chatgpt/resources/app.asar" \
+            "$extracted_asar"
+          CODEX_SIGNED_EXTRACTED_APP="$extracted_asar" \
+            node --test linux-features/community-profile-isolation/test.js
       - name: Require signed renderer dependency regression
         env:
           EXPECTED_SIGNED_VERSION: ${{ inputs.version }}
@@ -332,6 +343,60 @@ jobs:
           PACMAN_STAGE_ONLY=1 ./scripts/build-pacman.sh
           APPIMAGE_STAGE_ONLY=1 ./scripts/build-appimage.sh
 
+  community-profile-isolation-feature-alone:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y dpkg-dev gnupg
+      - name: Build Community profile isolation alone from the signed package
+        env:
+          CODEX_LINUX_FEATURES_CONFIG: ${{ github.workspace }}/community-profile-isolation-features.json
+          CODEX_INSTALL_DIR: ${{ github.workspace }}/codex-app-community-profile-isolation
+          CODEX_TARGET_ARCH: amd64
+          EXPECTED_RELEASE_ID: ${{ inputs.release_id }}
+          EXPECTED_VERSION: ${{ inputs.version }}
+          EXPECTED_REPOSITORY_PATH: ${{ inputs.amd64_repository_path }}
+          EXPECTED_SHA256: ${{ inputs.amd64_sha256 }}
+        run: |
+          set -euo pipefail
+          cat > "$CODEX_LINUX_FEATURES_CONFIG" <<'JSON'
+          {
+            "enabled": ["community-profile-isolation"]
+          }
+          JSON
+          mkdir -p upstream
+          package="$(node scripts/lib/upstream-linux-package.js \
+            --output-dir upstream/amd64 \
+            --metadata upstream/amd64.json \
+            --key-base64 assets/openai-codex-linux-repository-key.gpg.base64 \
+            --arch amd64)"
+          node - upstream/amd64.json <<'NODE'
+          const fs = require("node:fs");
+          const metadata = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+          if (process.env.GITHUB_EVENT_NAME === "workflow_dispatch"
+              && (metadata.version !== process.env.EXPECTED_VERSION
+                || metadata.repositoryPath !== process.env.EXPECTED_REPOSITORY_PATH
+                || metadata.sha256 !== process.env.EXPECTED_SHA256
+                || !/^[0-9a-f]{64}$/.test(process.env.EXPECTED_RELEASE_ID))) {
+            throw new Error("Community profile isolation package does not match the dispatched campaign");
+          }
+          NODE
+          ./install.sh "$package"
+          node --test linux-features/community-profile-isolation/test.js
+          wrapper="$CODEX_INSTALL_DIR/.codex-linux/features/community-profile-isolation/codex-cli-wrapper.sh"
+          test -x "$wrapper"
+          grep -R -F 'CODEX_HOME="$HOME/.codex-community"' "$CODEX_INSTALL_DIR/.codex-linux/env.d"
+          grep -R -F 'CODEX_ELECTRON_USER_DATA_PATH' "$CODEX_INSTALL_DIR/.codex-linux/launcher.d"
+
   dock-icon-feature-alone:
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -352,6 +417,10 @@ jobs:
           CODEX_INSTALL_DIR: ${{ github.workspace }}/codex-app-dock-icon
           CODEX_PATCH_REPORT_JSON: ${{ github.workspace }}/dock-icon-report/patch-report.json
           CODEX_TARGET_ARCH: amd64
+          EXPECTED_RELEASE_ID: ${{ inputs.release_id }}
+          EXPECTED_VERSION: ${{ inputs.version }}
+          EXPECTED_REPOSITORY_PATH: ${{ inputs.amd64_repository_path }}
+          EXPECTED_SHA256: ${{ inputs.amd64_sha256 }}
         run: |
           set -euo pipefail
           cat > "$CODEX_LINUX_FEATURES_CONFIG" <<'JSON'
@@ -374,6 +443,17 @@ jobs:
             --metadata upstream/amd64.json \
             --key-base64 assets/openai-codex-linux-repository-key.gpg.base64 \
             --arch amd64)"
+          node - upstream/amd64.json <<'NODE'
+          const fs = require("node:fs");
+          const metadata = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+          if (process.env.GITHUB_EVENT_NAME === "workflow_dispatch"
+              && (metadata.version !== process.env.EXPECTED_VERSION
+                || metadata.repositoryPath !== process.env.EXPECTED_REPOSITORY_PATH
+                || metadata.sha256 !== process.env.EXPECTED_SHA256
+                || !/^[0-9a-f]{64}$/.test(process.env.EXPECTED_RELEASE_ID))) {
+            throw new Error("Dock icon package does not match the dispatched campaign");
+          }
+          NODE
           ./install.sh "$package"
           node scripts/ci/validate-patch-report.js "$CODEX_PATCH_REPORT_JSON" \
             --require-enabled-feature ui-tweaks \
@@ -453,6 +533,7 @@ jobs:
     needs:
       - signed-baseline
       - package-matrix
+      - community-profile-isolation-feature-alone
       - dock-icon-feature-alone
       - watchdog
     runs-on: ubuntu-latest
@@ -462,10 +543,12 @@ jobs:
         env:
           SIGNED_BASELINE_RESULT: ${{ needs.signed-baseline.result }}
           PACKAGE_MATRIX_RESULT: ${{ needs.package-matrix.result }}
+          COMMUNITY_PROFILE_ISOLATION_FEATURE_ALONE_RESULT: ${{ needs.community-profile-isolation-feature-alone.result }}
           DOCK_ICON_FEATURE_ALONE_RESULT: ${{ needs.dock-icon-feature-alone.result }}
           WATCHDOG_RESULT: ${{ needs.watchdog.result }}
         run: |
           test "$SIGNED_BASELINE_RESULT" = success
           test "$PACKAGE_MATRIX_RESULT" = success
+          test "$COMMUNITY_PROFILE_ISOLATION_FEATURE_ALONE_RESULT" = success
           test "$DOCK_ICON_FEATURE_ALONE_RESULT" = success
           test "$WATCHDOG_RESULT" = success

@@ -72,8 +72,10 @@ feature `stage.sh`.
 - The compact wrapper sets desktop identity, loads declarative feature hooks,
   and forwards arguments/URIs. Upstream owns single-instance, deep links, tray,
   windows, and lifecycle.
-- The custom and official packages may coexist, but both use the upstream
-  `Codex` user profile and must not be run concurrently.
+- The custom and official packages may coexist. By default both use the
+  upstream `Codex` user profile and must not run concurrently; the optional
+  `community-profile-isolation` feature owns the explicit separate-profile and
+  Community-CLI exception.
 - Legacy bundled Browser/Chrome cache migration must be narrow and
   fingerprinted: never wipe arbitrary plugin caches or user-authored plugins.
 - AppImage never adds `--no-sandbox` automatically. Native packages adapt the
@@ -88,6 +90,21 @@ Generated/local paths include `codex-app/`, `codex-app-next/`,
 `.codex-app.candidate-*`, `dist/`, `dist-next/`, `target/`,
 `linux-features/features.json`, `linux-features/local/`, updater state under
 XDG config/state/cache, and launcher state under XDG state/cache.
+
+## Scratch space
+
+`/tmp` on the maintainer machine is RAM-backed tmpfs. Multi-gigabyte scratch
+there (Cargo targets, extracted payloads, app copies, validation runs) has
+exhausted memory and triggered OOM kills.
+
+- Never put Cargo targets, extracted packages, app copies, or build/validation
+  output under `/tmp`. Use the repository `target/` for Cargo and
+  `${XDG_CACHE_HOME:-$HOME/.cache}/codex-desktop-dev/` for other scratch.
+- Before running `install.sh`, `make`, or `scripts/build-*.sh`, export
+  `TMPDIR="${XDG_CACHE_HOME:-$HOME/.cache}/codex-desktop-dev/tmp"` (create it
+  first) so their `mktemp -d` work directories land on disk.
+- Delete your scratch directories when the task finishes; do not leave
+  extracted apps, backups, or targets behind.
 
 ## Commands and validation
 

@@ -17,7 +17,8 @@ resolve it through signed stable APT metadata rather than trusting the moving
 4. If no core or feature ASAR descriptor is active, `resources/app.asar` is
    never unpacked and its SHA-256 must equal upstream. Otherwise a temporary
    copy is patched, deterministically repacked, and reported.
-5. Package builders transform the same staged tree into deb, RPM, pacman, or
+5. Package builders transform the same staged tree into deb, RPM, pacman, a
+   local Gentoo ebuild/payload, or
    AppImage output. Nix extracts the architecture-specific official package
    directly and wraps its ELF runtime.
 
@@ -103,10 +104,13 @@ rebuilds cannot silently use a different selection.
 
 Native packages use `codex-desktop` and `/opt/codex-desktop`; the official app
 uses `chatgpt`. The custom desktop entry is **ChatGPT Community**, with a
-community-marked icon; desktop entries and AppArmor paths are distinct. The
-upstream `Codex` profile is intentionally preserved for compatibility, so both
-runtimes must not run simultaneously. The upstream single-instance lock governs
-a second launch.
+community-marked icon; desktop entries and AppArmor paths are distinct. By
+default the upstream `Codex` profile is intentionally preserved for
+compatibility, so both runtimes must not run simultaneously. The optional
+`community-profile-isolation` feature instead pins Community to a separate
+Codex state directory and Electron profile and keeps app-server/child CLI
+resolution on the bundled Community `codex`. It does not change package
+identity or the official URL handler.
 
 The wrapper has one narrowly scoped migration for bundled Browser and Chrome
 cache snapshots created by the former Linux port. It replaces a cache only when
